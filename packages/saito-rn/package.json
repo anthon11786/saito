@@ -1,0 +1,18 @@
+{
+  "name": "saito-rn",
+  "version": "0.1.0",
+  "description": "React Native friendly wrapper around saito-js",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "files": [
+    "dist",
+    "src"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json"
+  },
+  "peerDependencies": {
+    "@react-native-async-storage/async-storage": ">=1.19.0",
+    "saito-js": "^0.2.119"
+  }
+}
