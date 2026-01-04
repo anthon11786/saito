@@ -1,3 +1,4 @@
+import { applyLitePolyfills, createConnectivityHelper } from './wrapper';
 import { Saito } from '../core';
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-ignore
@@ -12,6 +13,9 @@ import Wallet from '../../lib/saito/wallet';
 import Blockchain from '../../lib/saito/blockchain';
 import PeerServiceList from 'saito-js/lib/peer_service_list';
 import { LogLevel } from 'saito-js/saito';
+
+applyLitePolyfills();
+export const connectivityHelper = createConnectivityHelper();
 
 
 

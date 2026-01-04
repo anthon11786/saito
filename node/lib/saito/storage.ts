@@ -3,10 +3,16 @@ import Transaction from './transaction';
 import { Saito } from '../../apps/core';
 import Block from './block';
 const localforage = require('localforage');
-import fs from 'fs';
-import path from 'path';
 const JsStore = require('jsstore');
 import S from 'saito-js/saito';
+
+const safeRequire = (moduleName: string) => {
+  try {
+    return eval('require')(moduleName);
+  } catch (err) {
+    return null;
+  }
+};
 
 class Storage {
   public app: Saito;
@@ -640,8 +646,15 @@ class Storage {
   }
 
   watchBuildFile(): void {
+    const fs = safeRequire('fs');
+    const path = safeRequire('path');
+
+    if (!fs || !path) {
+      console.warn('Skipping build watcher: filesystem APIs not available in this environment');
+      return;
+    }
+
     const checkBuildNumber = async () => {
-      const filePath = path.join(__dirname, '/config/build.json');
       fs.readFile('config/build.json', 'utf8', async (err, data) => {
         if (err) {
           console.error('Error reading options file:', err);
@@ -687,8 +700,6 @@ class Storage {
     fs.watchFile('web/saito/saito.js', { interval: 1000 }, (curr, prev) => {
       checkBuildNumber();
     });
-
-    const filePath = path.join(__dirname, 'config/build.json');
   }
 
   async loadNFTTransactions(nft_id) {
