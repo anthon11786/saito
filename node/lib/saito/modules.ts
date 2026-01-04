@@ -1,8 +1,6 @@
 import { Saito } from '../../apps/core';
 import Peer from './peer';
 import Transaction from './transaction';
-import path from 'path';
-import fs from 'fs';
 import ws from 'ws';
 import { parse } from 'url';
 import { fromBase58 } from 'saito-js/lib/util';
