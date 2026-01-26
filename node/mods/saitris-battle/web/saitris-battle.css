@@ -1,0 +1,108 @@
+.saitris-battle {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  align-items: center;
+  padding: 16px;
+  color: #e6e6e6;
+}
+
+.saitris-header {
+  display: flex;
+  justify-content: space-between;
+  width: min(900px, 95vw);
+  font-size: 18px;
+}
+
+.saitris-status {
+  flex: 1;
+}
+
+.saitris-timer {
+  font-weight: 600;
+}
+
+.saitris-boards {
+  display: flex;
+  gap: 32px;
+  justify-content: center;
+  align-items: flex-start;
+  flex-wrap: wrap;
+}
+
+.saitris-player {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+}
+
+.saitris-side {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  align-items: center;
+}
+
+.saitris-side-stats {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  align-items: center;
+  font-size: 14px;
+  color: #e6e6e6;
+  min-width: 90px;
+  margin-top: 0;
+}
+
+.saitris-stat {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+}
+
+.saitris-stat-label {
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  font-size: 12px;
+  color: #bdbdbd;
+}
+
+.saitris-stat-value {
+  font-size: 20px;
+  font-weight: 700;
+}
+
+.saitris-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  align-items: center;
+  font-size: 12px;
+  color: #c7c7c7;
+}
+
+.saitris-panel-title {
+  text-transform: uppercase;
+  letter-spacing: 1px;
+}
+
+.saitris-controls {
+  display: flex;
+  gap: 16px;
+  flex-wrap: wrap;
+  font-size: 12px;
+  color: #a8a8a8;
+  justify-content: center;
+}
+
+canvas#saitris-board-local,
+canvas#saitris-board-opponent,
+canvas#saitris-hold-local,
+canvas#saitris-hold-opponent,
+canvas#saitris-queue-local,
+canvas#saitris-queue-opponent {
+  background: #0f1114;
+  border: 1px solid #1f2226;
+  border-radius: 6px;
+}

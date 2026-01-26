@@ -747,7 +747,7 @@ class GameMenu {
         key = false;
       }
 
-      if (!this.app.browser.isMobileBrowser()) {
+      if (!this.app.browser.isMobileBrowser() && !this.game_mod?.disable_chat_popup) {
         this.app.connection.on('chat-ready', () => {
           if (this.game_mod.game.players.length > 2 || this.game_mod.opengame) {
             this.app.connection.emit('open-chat-with', {
