@@ -1,0 +1,22 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Saito Mobile Bridge</title>
+</head>
+<body>
+  <script>
+    // This HTML is loaded inside a hidden WebView.
+    // It loads the bundled Saito lite client + modules and exposes
+    // a bridge that the React Native layer communicates with via postMessage.
+
+    // The actual Saito bundle (saito-mobile-bundle.js) is injected by the
+    // SaitoProvider before the WebView loads, or loaded as an asset alongside
+    // this HTML file. For now we use a placeholder that gets replaced during
+    // the build step.
+  </script>
+  <script src="./saito-mobile-bundle.js"></script>
+  <script src="./wasm-bridge-host.js"></script>
+</body>
+</html>

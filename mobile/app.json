@@ -1,0 +1,41 @@
+{
+  "name": "Saito",
+  "displayName": "Saito",
+  "expo": {
+    "name": "Saito",
+    "slug": "saito",
+    "version": "0.0.1",
+    "scheme": "saito",
+    "ios": {
+      "bundleIdentifier": "io.saito.mobile",
+      "infoPlist": {
+        "NSCameraUsageDescription": "Saito needs camera access to scan QR codes for wallet addresses.",
+        "NSFaceIDUsageDescription": "Saito uses Face ID to protect your wallet."
+      }
+    },
+    "android": {
+      "package": "com.saito",
+      "permissions": [
+        "CAMERA",
+        "USE_BIOMETRIC",
+        "USE_FINGERPRINT"
+      ]
+    },
+    "entryPoint": "./index.js",
+    "plugins": [
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "Saito needs camera access to scan QR codes for wallet addresses."
+        }
+      ],
+      [
+        "expo-secure-store",
+        {
+          "faceIDPermission": "Saito uses Face ID to protect your wallet."
+        }
+      ],
+      "expo-sharing"
+    ]
+  }
+}
