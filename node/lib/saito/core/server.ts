@@ -1028,6 +1028,23 @@ class Server {
       return;
     });
 
+    expressApp.get('/version', async (req, res) => {
+      try {
+        let saito_js_version = 'unknown';
+        try {
+          const pkg = require('saito-js/package.json');
+          saito_js_version = pkg.version || 'unknown';
+        } catch (e) {}
+        res.json({
+          saito_js: saito_js_version,
+          build_number: this.app.build_number || 0,
+          wallet_version: this.app.wallet?.version || 0,
+        });
+      } catch (e) {
+        res.status(500).json({ error: 'Failed to retrieve version info' });
+      }
+    });
+
     expressApp.get('/stats', async (req, res) => {
       let stat = await S.getLibInstance().get_stats();
       res.send(stat);

@@ -32,6 +32,9 @@ import { ChatScreen } from '../screens/ChatScreen';
 import { NewChatScreen } from '../screens/NewChatScreen';
 import { ChatSettingsScreen } from '../screens/ChatSettingsScreen';
 
+// Screens — Settings
+import { PeerSettingsScreen } from '../screens/PeerSettingsScreen';
+
 const RootStack = createStackNavigator<RootStackParamList>();
 const OnboardingNav = createStackNavigator<OnboardingStackParamList>();
 const HomeNav = createStackNavigator<HomeStackParamList>();
@@ -90,6 +93,7 @@ function SettingsNavigator() {
     <SettingsNav.Navigator screenOptions={screenOptions}>
       <SettingsNav.Screen name="SettingsMain" component={SettingsScreen} options={{ title: 'Settings' }} />
       <SettingsNav.Screen name="Backup" component={BackupScreen} options={{ title: 'Backup' }} />
+      <SettingsNav.Screen name="PeerSettings" component={PeerSettingsScreen} options={{ title: 'Peer Connection' }} />
     </SettingsNav.Navigator>
   );
 }

@@ -161,11 +161,30 @@ const html = `<!DOCTYPE html>
   var existing = {};
   try { existing = JSON.parse(localStorage.getItem('options')) || {}; } catch(e) {}
   // Merge: ensure required top-level keys exist
-  // Note: defaults MUST win for peers/server so config changes take effect on rebuild.
+  // Note: defaults MUST win for peers/server so config changes take effect on rebuild
+  //        UNLESS the user has explicitly configured a peer via the app UI.
   var merged = Object.assign({}, defaults, existing);
   if (!merged.blockchain || !merged.blockchain.last_block_hash) merged.blockchain = defaults.blockchain;
-  merged.peers = defaults.peers;
-  merged.server = defaults.server;
+
+  // Check for user-configured peer override (set by Settings > Peer Connection)
+  var userPeers = null;
+  try { userPeers = JSON.parse(localStorage.getItem('user_peers')); } catch(e) {}
+  if (Array.isArray(userPeers) && userPeers.length > 0) {
+    merged.peers = userPeers;
+    // Also update server endpoint to match the first user peer
+    var up = userPeers[0];
+    merged.server = {
+      host: up.host || 'localhost',
+      port: up.port || 12101,
+      protocol: up.protocol || 'http',
+      endpoint: { host: up.host || 'localhost', port: up.port || 12101, protocol: up.protocol || 'http' },
+      verification_threads: 1
+    };
+    console.log('[config] Using user-configured peer:', JSON.stringify(up));
+  } else {
+    merged.peers = defaults.peers;
+    merged.server = defaults.server;
+  }
   localStorage.setItem('options', JSON.stringify(merged));
   console.log('[config] options ensured:', JSON.stringify(Object.keys(merged)));
   console.log('[config] wallet.privateKey:', merged.wallet?.privateKey ? 'SET (' + merged.wallet.privateKey.length + ' chars)' : 'NOT SET');

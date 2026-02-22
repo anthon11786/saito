@@ -5,7 +5,7 @@ import React, {
   useRef,
   useState,
 } from 'react';
-import { StyleSheet, View } from 'react-native';
+import { Alert, StyleSheet, View } from 'react-native';
 import WebView, { WebViewMessageEvent } from 'react-native-webview';
 import { WasmBridge } from '../bridge/WasmBridge';
 import * as SecureKeyStore from '../services/SecureKeyStore';
@@ -15,10 +15,17 @@ import type { ConnectionStatus } from '../types';
 // inlined. Built by: node scripts/build-bridge.js
 const WEBVIEW_HTML = require('../bridge/bridge-bundle.html');
 
+export type VersionMismatchInfo = {
+  detected: boolean;
+  requiredVersion: string | null;
+};
+
 export type SaitoContextValue = {
   bridge: WasmBridge | null;
   status: ConnectionStatus;
   error: string | null;
+  /** Info about version mismatch with connected node (if any). */
+  versionMismatch: VersionMismatchInfo;
   /** Clear WebView localStorage + reload so WASM generates a fresh keypair. */
   resetAndReload: () => Promise<void>;
   /** Reload WebView (preserves localStorage) so WASM re-inits with current keys. */
@@ -29,6 +36,7 @@ export const SaitoContext = createContext<SaitoContextValue>({
   bridge: null,
   status: 'loading',
   error: null,
+  versionMismatch: { detected: false, requiredVersion: null },
   resetAndReload: async () => { },
   reloadWebView: () => { },
 });
@@ -68,6 +76,11 @@ export function SaitoProvider({ children }: Props) {
   const [status, setStatus] = useState<ConnectionStatus>('loading');
   const [error, setError] = useState<string | null>(null);
   const [keyInjectionScript, setKeyInjectionScript] = useState<string>('');
+  const [versionMismatch, setVersionMismatch] = useState<VersionMismatchInfo>({
+    detected: false,
+    requiredVersion: null,
+  });
+  const versionAlertShown = useRef(false);
 
   const onMessage = useCallback(
     (event: WebViewMessageEvent) => {
@@ -150,6 +163,40 @@ export function SaitoProvider({ children }: Props) {
     };
   }, [bridge, keyInjectionScript]);
 
+  // Listen for version mismatch events from the WebView bridge
+  useEffect(() => {
+    const unsubscribe = bridge.on('core', 'version-mismatch', (data: any) => {
+      const requiredVersion = data?.requiredVersion || 'unknown';
+      console.warn(
+        `[SaitoProvider] Version mismatch detected. Node requires: ${requiredVersion}`,
+      );
+      setVersionMismatch({ detected: true, requiredVersion });
+
+      if (!versionAlertShown.current) {
+        versionAlertShown.current = true;
+        Alert.alert(
+          'Update Required',
+          `The Saito node you're connected to requires a newer version of this app (v${requiredVersion}). ` +
+          'Some features may not work correctly until you update.',
+          [
+            { text: 'Dismiss', style: 'cancel' },
+            {
+              text: 'Check for Update',
+              onPress: () => {
+                // On iOS this opens the App Store page; on Android, the Play Store.
+                // Replace with your actual app store URL when published.
+                // For now, just dismiss — the alert has informed the user.
+                console.log('[SaitoProvider] User tapped Check for Update');
+              },
+            },
+          ],
+        );
+      }
+    });
+
+    return unsubscribe;
+  }, [bridge]);
+
   const reloadWebView = useCallback(() => {
     // Reset bridge state so it can await a new ready signal, then reload.
     // localStorage is preserved so the imported key is picked up on re-init.
@@ -200,7 +247,7 @@ export function SaitoProvider({ children }: Props) {
   const combinedInjectedScript = keyInjectionScript + '\n' + INJECTED_DEBUG_JS;
 
   return (
-    <SaitoContext.Provider value={{ bridge, status, error, resetAndReload, reloadWebView }}>
+    <SaitoContext.Provider value={{ bridge, status, error, versionMismatch, resetAndReload, reloadWebView }}>
       <View style={styles.webviewContainer}>
         <WebView
           ref={webviewRef}

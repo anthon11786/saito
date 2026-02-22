@@ -78,11 +78,30 @@
   var existing = {};
   try { existing = JSON.parse(localStorage.getItem('options')) || {}; } catch(e) {}
   // Merge: ensure required top-level keys exist
-  // Note: defaults MUST win for peers/server so config changes take effect on rebuild.
+  // Note: defaults MUST win for peers/server so config changes take effect on rebuild
+  //        UNLESS the user has explicitly configured a peer via the app UI.
   var merged = Object.assign({}, defaults, existing);
   if (!merged.blockchain || !merged.blockchain.last_block_hash) merged.blockchain = defaults.blockchain;
-  merged.peers = defaults.peers;
-  merged.server = defaults.server;
+
+  // Check for user-configured peer override (set by Settings > Peer Connection)
+  var userPeers = null;
+  try { userPeers = JSON.parse(localStorage.getItem('user_peers')); } catch(e) {}
+  if (Array.isArray(userPeers) && userPeers.length > 0) {
+    merged.peers = userPeers;
+    // Also update server endpoint to match the first user peer
+    var up = userPeers[0];
+    merged.server = {
+      host: up.host || 'localhost',
+      port: up.port || 12101,
+      protocol: up.protocol || 'http',
+      endpoint: { host: up.host || 'localhost', port: up.port || 12101, protocol: up.protocol || 'http' },
+      verification_threads: 1
+    };
+    console.log('[config] Using user-configured peer:', JSON.stringify(up));
+  } else {
+    merged.peers = defaults.peers;
+    merged.server = defaults.server;
+  }
   localStorage.setItem('options', JSON.stringify(merged));
   console.log('[config] options ensured:', JSON.stringify(Object.keys(merged)));
   console.log('[config] wallet.privateKey:', merged.wallet?.privateKey ? 'SET (' + merged.wallet.privateKey.length + ' chars)' : 'NOT SET');
@@ -321,6 +340,47 @@ if (typeof Storage !== 'undefined') {
           blockId: bc?.last_block_id?.toString() || '0',
           blockHash: bc?.last_block_hash || '',
         };
+      },
+      getPeerConfig: async function (app) {
+        // Return the current peer config: check user override first, then options
+        var userPeers = null;
+        try { userPeers = JSON.parse(localStorage.getItem('user_peers')); } catch (e) {}
+        var isCustom = Array.isArray(userPeers) && userPeers.length > 0;
+        var activePeer = null;
+        if (isCustom) {
+          activePeer = userPeers[0];
+        } else {
+          try {
+            var opts = JSON.parse(localStorage.getItem('options')) || {};
+            activePeer = (opts.peers && opts.peers[0]) || null;
+          } catch (e) {}
+        }
+        return {
+          host: (activePeer && activePeer.host) || 'localhost',
+          port: (activePeer && activePeer.port) || 12101,
+          protocol: (activePeer && activePeer.protocol) || 'http',
+          synctype: (activePeer && activePeer.synctype) || 'lite',
+          isCustom: isCustom,
+        };
+      },
+      setPeerConfig: async function (app, params) {
+        // Save user-configured peer to localStorage (survives WebView reloads)
+        var peer = {
+          host: (params.host || '').trim(),
+          port: parseInt(params.port, 10) || 12101,
+          protocol: params.protocol || 'http',
+          synctype: 'lite',
+        };
+        if (!peer.host) throw new Error('Host is required');
+        localStorage.setItem('user_peers', JSON.stringify([peer]));
+        console.log('[bridge] User peer saved:', JSON.stringify(peer));
+        return { success: true, peer: peer };
+      },
+      resetPeerConfig: async function (app) {
+        // Remove user override so build-time defaults take effect on next reload
+        localStorage.removeItem('user_peers');
+        console.log('[bridge] User peer override cleared, will use defaults on reload');
+        return { success: true };
       },
     },
 
@@ -661,6 +721,48 @@ if (typeof Storage !== 'undefined') {
         });
       }
     });
+
+    // Version mismatch detection (from WASM handshake)
+    app.connection.on('new-version-detected', function (data) {
+      console.log('[bridge] new-version-detected event fired:', JSON.stringify(data));
+      emitEvent('core', 'version-mismatch', {
+        requiredVersion: data.version || 'unknown',
+        peerIndex: data.peerIndex ? data.peerIndex.toString() : '0',
+        source: 'handshake',
+      });
+    });
+
+    // Pre-connect version check via HTTP — gives early warning before handshake
+    (function preConnectVersionCheck() {
+      try {
+        var opts = JSON.parse(localStorage.getItem('options')) || {};
+        var peers = opts.peers || [];
+        if (peers.length === 0) return;
+
+        var peer = peers[0];
+        var protocol = peer.protocol || 'http';
+        var host = peer.host || 'localhost';
+        var port = peer.port || 12101;
+        var versionUrl = protocol + '://' + host + ':' + port + '/version';
+
+        console.log('[bridge] Pre-connect version check:', versionUrl);
+        fetch(versionUrl, { method: 'GET' })
+          .then(function (res) { return res.json(); })
+          .then(function (nodeVersion) {
+            console.log('[bridge] Node version info:', JSON.stringify(nodeVersion));
+            emitEvent('core', 'node-version', {
+              saito_js: nodeVersion.saito_js || 'unknown',
+              build_number: nodeVersion.build_number || 0,
+              wallet_version: nodeVersion.wallet_version || 0,
+            });
+          })
+          .catch(function (err) {
+            console.warn('[bridge] Pre-connect version check failed (node may not support /version):', err.message || err);
+          });
+      } catch (e) {
+        console.warn('[bridge] Pre-connect version check error:', e);
+      }
+    })();
 
     // Signal ready
     postToRN({ type: 'ready' });

@@ -25,6 +25,7 @@ export type ChatStackParamList = {
 export type SettingsStackParamList = {
   SettingsMain: undefined;
   Backup: undefined;
+  PeerSettings: undefined;
 };
 
 export type MainTabParamList = {

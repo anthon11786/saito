@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useState } from 'react';
 import { Alert, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import type { StackNavigationProp } from '@react-navigation/stack';
+import * as Clipboard from 'expo-clipboard';
 import { useSaito } from '../hooks/useSaito';
 import { useWallet } from '../hooks/useWallet';
 import * as SecureKeyStore from '../services/SecureKeyStore';
@@ -9,12 +10,13 @@ import { isBiometricAvailable, getBiometryType } from '../services/BiometricAuth
 
 export function SettingsScreen() {
   const navigation = useNavigation<StackNavigationProp<any>>();
-  const { bridge, status, resetAndReload } = useSaito();
+  const { bridge, status, resetAndReload, reloadWebView } = useSaito();
   const { publicKey } = useWallet();
   const [peerCount, setPeerCount] = useState(0);
   const [blockInfo, setBlockInfo] = useState({ blockId: '0', blockHash: '' });
   const [biometryType, setBiometryType] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
+  const [reconnecting, setReconnecting] = useState(false);
 
   const loadNetworkInfo = useCallback(async () => {
     if (!bridge || status !== 'ready') return;
@@ -54,6 +56,23 @@ export function SettingsScreen() {
     navigation.navigate('Backup');
   };
 
+  const handleCopyPublicKey = async () => {
+    if (!publicKey) return;
+    await Clipboard.setStringAsync(publicKey);
+    Alert.alert('Copied', 'Public key copied to clipboard.');
+  };
+
+  const handleReconnect = useCallback(() => {
+    setReconnecting(true);
+    reloadWebView();
+    // The WebView will reload and the bridge will re-emit 'ready'.
+    // Give it a moment then refresh network info.
+    setTimeout(() => {
+      setReconnecting(false);
+      loadNetworkInfo();
+    }, 5000);
+  }, [reloadWebView, loadNetworkInfo]);
+
   const handleResetWallet = () => {
     Alert.alert(
       'Reset Wallet',
@@ -90,6 +109,14 @@ export function SettingsScreen() {
           <Text style={styles.rowLabel}>Refresh Network Info</Text>
           <Text style={styles.rowChevron}>{refreshing ? '...' : '↻'}</Text>
         </TouchableOpacity>
+        <TouchableOpacity style={styles.row} onPress={handleReconnect} disabled={reconnecting}>
+          <Text style={styles.rowLabel}>Reconnect to Network</Text>
+          <Text style={styles.rowChevron}>{reconnecting ? '...' : '⟳'}</Text>
+        </TouchableOpacity>
+        <TouchableOpacity style={styles.row} onPress={() => navigation.navigate('PeerSettings')}>
+          <Text style={styles.rowLabel}>Peer Connection</Text>
+          <Text style={styles.rowChevron}>{'>'}</Text>
+        </TouchableOpacity>
       </View>
 
       <Text style={styles.sectionTitle}>Security</Text>
@@ -103,7 +130,12 @@ export function SettingsScreen() {
 
       <Text style={styles.sectionTitle}>About</Text>
       <View style={styles.card}>
-        <Row label="Public Key" value={publicKey ? `${publicKey.slice(0, 16)}...` : '—'} />
+        <TouchableOpacity style={styles.row} onPress={handleCopyPublicKey}>
+          <Text style={styles.rowLabel}>Public Key</Text>
+          <Text style={styles.rowValue} numberOfLines={1}>
+            {publicKey ? `${publicKey.slice(0, 16)}...` : '—'}
+          </Text>
+        </TouchableOpacity>
         <Row label="Version" value="1.0.0" />
       </View>
 

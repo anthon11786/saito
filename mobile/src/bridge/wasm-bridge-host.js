@@ -163,6 +163,47 @@
           blockHash: bc?.last_block_hash || '',
         };
       },
+      getPeerConfig: async function (app) {
+        // Return the current peer config: check user override first, then options
+        var userPeers = null;
+        try { userPeers = JSON.parse(localStorage.getItem('user_peers')); } catch (e) {}
+        var isCustom = Array.isArray(userPeers) && userPeers.length > 0;
+        var activePeer = null;
+        if (isCustom) {
+          activePeer = userPeers[0];
+        } else {
+          try {
+            var opts = JSON.parse(localStorage.getItem('options')) || {};
+            activePeer = (opts.peers && opts.peers[0]) || null;
+          } catch (e) {}
+        }
+        return {
+          host: (activePeer && activePeer.host) || 'localhost',
+          port: (activePeer && activePeer.port) || 12101,
+          protocol: (activePeer && activePeer.protocol) || 'http',
+          synctype: (activePeer && activePeer.synctype) || 'lite',
+          isCustom: isCustom,
+        };
+      },
+      setPeerConfig: async function (app, params) {
+        // Save user-configured peer to localStorage (survives WebView reloads)
+        var peer = {
+          host: (params.host || '').trim(),
+          port: parseInt(params.port, 10) || 12101,
+          protocol: params.protocol || 'http',
+          synctype: 'lite',
+        };
+        if (!peer.host) throw new Error('Host is required');
+        localStorage.setItem('user_peers', JSON.stringify([peer]));
+        console.log('[bridge] User peer saved:', JSON.stringify(peer));
+        return { success: true, peer: peer };
+      },
+      resetPeerConfig: async function (app) {
+        // Remove user override so build-time defaults take effect on next reload
+        localStorage.removeItem('user_peers');
+        console.log('[bridge] User peer override cleared, will use defaults on reload');
+        return { success: true };
+      },
     },
 
     wallet: {
@@ -502,6 +543,48 @@
         });
       }
     });
+
+    // Version mismatch detection (from WASM handshake)
+    app.connection.on('new-version-detected', function (data) {
+      console.log('[bridge] new-version-detected event fired:', JSON.stringify(data));
+      emitEvent('core', 'version-mismatch', {
+        requiredVersion: data.version || 'unknown',
+        peerIndex: data.peerIndex ? data.peerIndex.toString() : '0',
+        source: 'handshake',
+      });
+    });
+
+    // Pre-connect version check via HTTP — gives early warning before handshake
+    (function preConnectVersionCheck() {
+      try {
+        var opts = JSON.parse(localStorage.getItem('options')) || {};
+        var peers = opts.peers || [];
+        if (peers.length === 0) return;
+
+        var peer = peers[0];
+        var protocol = peer.protocol || 'http';
+        var host = peer.host || 'localhost';
+        var port = peer.port || 12101;
+        var versionUrl = protocol + '://' + host + ':' + port + '/version';
+
+        console.log('[bridge] Pre-connect version check:', versionUrl);
+        fetch(versionUrl, { method: 'GET' })
+          .then(function (res) { return res.json(); })
+          .then(function (nodeVersion) {
+            console.log('[bridge] Node version info:', JSON.stringify(nodeVersion));
+            emitEvent('core', 'node-version', {
+              saito_js: nodeVersion.saito_js || 'unknown',
+              build_number: nodeVersion.build_number || 0,
+              wallet_version: nodeVersion.wallet_version || 0,
+            });
+          })
+          .catch(function (err) {
+            console.warn('[bridge] Pre-connect version check failed (node may not support /version):', err.message || err);
+          });
+      } catch (e) {
+        console.warn('[bridge] Pre-connect version check error:', e);
+      }
+    })();
 
     // Signal ready
     postToRN({ type: 'ready' });

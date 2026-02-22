@@ -44,6 +44,12 @@ export type BridgeMessage = BridgeResponse | BridgeEvent;
 // chat.getOlderMessages    -> { groupId: string, beforeTimestamp: number } -> ChatMessage[]
 // chat.markRead            -> { groupId: string }
 
+// === Core events ===
+// core.block-added         -> { hash: string, blockId: string }
+// core.peer-connected      -> { count: number }
+// core.version-mismatch    -> { requiredVersion: string, peerIndex: string, source: 'handshake' }
+// core.node-version        -> { saito_js: string, build_number: number, wallet_version: number }
+
 // === Wallet events ===
 // wallet.balance-updated   -> { balance: string }
 
