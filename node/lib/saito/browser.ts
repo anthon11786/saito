@@ -535,7 +535,7 @@ class Browser {
           return pair[1] || pair[0];
         }
       }
-    } catch (err) {}
+    } catch (err) { }
     return '';
   }
 
@@ -546,7 +546,7 @@ class Browser {
         return x.substring(0, 2);
       }
       return x;
-    } catch (err) {}
+    } catch (err) { }
     return 'en';
   }
 
@@ -1613,8 +1613,8 @@ class Browser {
             if (
               Math.abs(
                 element_to_move.getBoundingClientRect().x +
-                  element_to_move.getBoundingClientRect().width -
-                  window.innerWidth
+                element_to_move.getBoundingClientRect().width -
+                window.innerWidth
               ) < threshold
             ) {
               element_to_move.classList.add('dockedRight');
@@ -1625,8 +1625,8 @@ class Browser {
             if (
               Math.abs(
                 element_to_move.getBoundingClientRect().y +
-                  element_to_move.getBoundingClientRect().height -
-                  window.innerHeight
+                element_to_move.getBoundingClientRect().height -
+                window.innerHeight
               ) < threshold
             ) {
               element_to_move.classList.add('dockedBottom');
@@ -2087,13 +2087,11 @@ class Browser {
             }
           }
 
-          return `<a ${
-            url.includes(window.location.host)
+          return `<a ${url.includes(window.location.host)
               ? "data-link='local_link' "
               : "target='_blank' rel='noopener noreferrer' "
-          } class="saito-link" href="${
-            !url.includes('http') ? `http://${url1}` : url1
-          }">${url2}</a>`;
+            } class="saito-link" href="${!url.includes('http') ? `http://${url1}` : url1
+            }">${url2}</a>`;
         });
 
         //
@@ -2624,14 +2622,13 @@ class Browser {
       } else {
         return true;
       }
-    } catch (err) {}
+    } catch (err) { }
     return false;
   }
 
   updateSoftwareVersion(receivedBuildNumber: number) {
     console.info(
-      `Received build number: ${Number(receivedBuildNumber)}, Current build number: ${
-        this.app.build_number
+      `Received build number: ${Number(receivedBuildNumber)}, Current build number: ${this.app.build_number
       }`
     );
     if (receivedBuildNumber > this.app.build_number) {

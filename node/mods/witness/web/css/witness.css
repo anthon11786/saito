@@ -1,0 +1,473 @@
+/* ─── LAYOUT ────────────────────────────────────────── */
+
+.witness-container {
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  min-height: 100vh;
+  padding: 2rem 1rem;
+  padding-top: 80px;
+  box-sizing: border-box;
+}
+
+.witness-card {
+  background: var(--saito-card-bg, #23232b);
+  border-radius: 16px;
+  padding: 2.5rem;
+  max-width: 600px;
+  width: 100%;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.35);
+}
+
+/* ─── HEADER ────────────────────────────────────────── */
+
+.witness-header {
+  text-align: center;
+  margin-bottom: 2rem;
+}
+
+.witness-icon {
+  font-size: 2.5rem;
+  color: #6c8dfa;
+  margin-bottom: 0.5rem;
+}
+
+.witness-header h1 {
+  margin: 0.5rem 0 0.25rem;
+  font-size: 1.8rem;
+  color: var(--saito-text, #ebebf0);
+  font-weight: 700;
+}
+
+.witness-subtitle {
+  color: var(--saito-text-faded, #9999a8);
+  font-size: 0.95rem;
+  margin: 0;
+  line-height: 1.4;
+}
+
+/* ─── TABS ──────────────────────────────────────────── */
+
+.witness-tabs {
+  display: flex;
+  gap: 0;
+  margin-bottom: 1.5rem;
+  border-bottom: 2px solid rgba(255, 255, 255, 0.08);
+}
+
+.witness-tab {
+  flex: 1;
+  background: none;
+  border: none;
+  padding: 0.75rem 1rem;
+  color: var(--saito-text-faded, #9999a8);
+  font-size: 0.95rem;
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -2px;
+  transition: color 0.2s, border-color 0.2s;
+}
+
+.witness-tab:hover {
+  color: var(--saito-text, #ebebf0);
+}
+
+.witness-tab.active {
+  color: #6c8dfa;
+  border-bottom-color: #6c8dfa;
+}
+
+.witness-tab i {
+  margin-right: 0.4rem;
+}
+
+.witness-tab-content {
+  display: none;
+}
+
+.witness-tab-content.active {
+  display: block;
+}
+
+/* ─── DROP ZONE ─────────────────────────────────────── */
+
+.witness-drop-zone {
+  border: 2px dashed rgba(108, 141, 250, 0.35);
+  border-radius: 12px;
+  padding: 3rem 2rem;
+  text-align: center;
+  cursor: pointer;
+  transition: border-color 0.2s, background 0.2s;
+  margin-bottom: 1.5rem;
+}
+
+.witness-drop-zone:hover,
+.witness-drop-active {
+  border-color: #6c8dfa;
+  background: rgba(108, 141, 250, 0.06);
+}
+
+.witness-drop-zone i {
+  font-size: 2.5rem;
+  color: #6c8dfa;
+  margin-bottom: 0.75rem;
+  display: block;
+}
+
+.witness-drop-zone p {
+  color: var(--saito-text, #ebebf0);
+  margin: 0;
+  font-size: 1rem;
+  line-height: 1.5;
+}
+
+.witness-drop-hint {
+  color: var(--saito-text-faded, #9999a8);
+  font-size: 0.85rem;
+}
+
+.witness-drop-zone-small {
+  padding: 2rem 1.5rem;
+}
+
+.witness-drop-zone-small i {
+  font-size: 1.5rem;
+}
+
+.witness-drop-zone-small p {
+  font-size: 0.9rem;
+}
+
+.witness-file-input {
+  display: none;
+}
+
+/* ─── STATUS ────────────────────────────────────────── */
+
+.witness-status {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  padding: 1.25rem;
+  background: rgba(108, 141, 250, 0.08);
+  border-radius: 10px;
+  margin-bottom: 1.5rem;
+}
+
+.witness-status .spinner {
+  width: 28px;
+  height: 28px;
+}
+
+.witness-status-text {
+  color: var(--saito-text, #ebebf0);
+  font-size: 0.95rem;
+}
+
+.witness-error-icon {
+  font-size: 1.5rem;
+  color: #f87171;
+}
+
+/* ─── RECEIPT ───────────────────────────────────────── */
+
+.witness-receipt {
+  background: rgba(108, 141, 250, 0.06);
+  border: 1px solid rgba(108, 141, 250, 0.2);
+  border-radius: 12px;
+  padding: 1.5rem;
+  margin-bottom: 1.5rem;
+}
+
+.witness-receipt h3 {
+  color: #34d399;
+  margin: 0 0 1rem;
+  font-size: 1.1rem;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.witness-receipt-details,
+.witness-proof-card {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  margin-bottom: 1rem;
+}
+
+.witness-receipt-row {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+
+.witness-label {
+  font-size: 0.75rem;
+  color: var(--saito-text-faded, #9999a8);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.witness-value {
+  color: var(--saito-text, #ebebf0);
+  font-size: 0.9rem;
+  word-break: break-all;
+}
+
+.witness-mono {
+  font-family: 'SF Mono', 'Fira Code', 'Fira Mono', monospace;
+  font-size: 0.82rem;
+}
+
+.witness-receipt-actions {
+  display: flex;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
+/* ─── BUTTONS ───────────────────────────────────────── */
+
+.witness-btn {
+  padding: 0.65rem 1.25rem;
+  border-radius: 8px;
+  border: none;
+  cursor: pointer;
+  font-size: 0.9rem;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  transition: background 0.2s, transform 0.1s;
+}
+
+.witness-btn:active {
+  transform: scale(0.97);
+}
+
+.witness-btn-primary {
+  background: #6c8dfa;
+  color: #fff;
+}
+
+.witness-btn-primary:hover {
+  background: #5a7be8;
+}
+
+.witness-btn-secondary {
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--saito-text, #ebebf0);
+}
+
+.witness-btn-secondary:hover {
+  background: rgba(255, 255, 255, 0.14);
+}
+
+/* ─── INFO BAR ──────────────────────────────────────── */
+
+.witness-info {
+  text-align: center;
+  padding: 0.75rem;
+}
+
+.witness-info p {
+  color: var(--saito-text-faded, #9999a8);
+  font-size: 0.82rem;
+  margin: 0;
+}
+
+.witness-info i {
+  margin-right: 0.3rem;
+  color: #34d399;
+}
+
+/* ─── DIVIDER ───────────────────────────────────────── */
+
+.witness-divider {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  margin: 1.5rem 0;
+}
+
+.witness-divider::before,
+.witness-divider::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.witness-divider span {
+  color: var(--saito-text-faded, #9999a8);
+  font-size: 0.85rem;
+}
+
+/* ─── SIG LOOKUP ────────────────────────────────────── */
+
+.witness-sig-lookup {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.witness-text-input {
+  flex: 1;
+  padding: 0.65rem 1rem;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--saito-text, #ebebf0);
+  font-size: 0.9rem;
+  font-family: 'SF Mono', 'Fira Code', 'Fira Mono', monospace;
+  outline: none;
+  transition: border-color 0.2s;
+}
+
+.witness-text-input:focus {
+  border-color: #6c8dfa;
+}
+
+.witness-text-input::placeholder {
+  color: var(--saito-text-faded, #9999a8);
+  font-family: inherit;
+}
+
+/* ─── VERIFY RESULTS ────────────────────────────────── */
+
+.witness-verify-found,
+.witness-verify-not-found {
+  text-align: center;
+  padding: 1.5rem;
+  border-radius: 12px;
+  margin-bottom: 1rem;
+}
+
+.witness-verify-found {
+  background: rgba(52, 211, 153, 0.06);
+  border: 1px solid rgba(52, 211, 153, 0.2);
+}
+
+.witness-verify-found > i {
+  font-size: 2rem;
+  color: #34d399;
+  display: block;
+  margin-bottom: 0.5rem;
+}
+
+.witness-verify-found > h3 {
+  color: #34d399;
+  margin: 0 0 1rem;
+}
+
+.witness-verify-not-found {
+  background: rgba(248, 113, 113, 0.06);
+  border: 1px solid rgba(248, 113, 113, 0.2);
+}
+
+.witness-verify-not-found > i {
+  font-size: 2rem;
+  color: #f87171;
+  display: block;
+  margin-bottom: 0.5rem;
+}
+
+.witness-verify-not-found > h3 {
+  color: #f87171;
+  margin: 0 0 0.5rem;
+}
+
+.witness-verify-not-found > p {
+  color: var(--saito-text-faded, #9999a8);
+  margin: 0;
+  font-size: 0.9rem;
+}
+
+.witness-proof-card {
+  background: rgba(255, 255, 255, 0.03);
+  border-radius: 10px;
+  padding: 1rem;
+  margin-top: 1rem;
+  text-align: left;
+}
+
+/* ─── MATCH BADGES ──────────────────────────────────── */
+
+.witness-match-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.5rem 1rem;
+  border-radius: 8px;
+  font-size: 0.9rem;
+  margin-top: 0.75rem;
+}
+
+.witness-match-yes {
+  background: rgba(52, 211, 153, 0.12);
+  color: #34d399;
+}
+
+.witness-match-no {
+  background: rgba(248, 113, 113, 0.12);
+  color: #f87171;
+}
+
+/* ─── FOOTER ────────────────────────────────────────── */
+
+.witness-footer {
+  text-align: center;
+  margin-top: 1.5rem;
+}
+
+.witness-link {
+  color: #6c8dfa;
+  text-decoration: none;
+  font-size: 0.9rem;
+}
+
+.witness-link:hover {
+  text-decoration: underline;
+}
+
+/* ─── LOADING ───────────────────────────────────────── */
+
+.witness-loading {
+  text-align: center;
+  padding: 2rem;
+}
+
+.witness-loading .spinner {
+  width: 36px;
+  height: 36px;
+  margin-bottom: 1rem;
+}
+
+.witness-loading p {
+  color: var(--saito-text-faded, #9999a8);
+  margin: 0;
+}
+
+/* ─── RESPONSIVE ────────────────────────────────────── */
+
+@media (max-width: 640px) {
+  .witness-card {
+    padding: 1.5rem;
+    border-radius: 12px;
+  }
+
+  .witness-drop-zone {
+    padding: 2rem 1rem;
+  }
+
+  .witness-sig-lookup {
+    flex-direction: column;
+  }
+
+  .witness-receipt-actions {
+    flex-direction: column;
+  }
+
+  .witness-btn {
+    justify-content: center;
+  }
+}
+
