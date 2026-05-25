@@ -26,7 +26,7 @@ config/options.*
 config/modules.config.js
 config/runtime.config.js
 config/mixin-credentials.js
-config/build.json
+config/build/build.json
 config/.temp.*
 
 scripts/mods
@@ -57,16 +57,15 @@ data/issuance/issuance
 data/issuance/*.issuance
 data/issuance/archive
 data/state
+data/*.tar.gz
 
-bundler
-bundler/*
-built
-built/*
+dist
+dist/*
 
-nettest/nettest.log
-nettest/nodes
-nettest/nodes/*
-nettest/nodes/nettest.log
+scripts/nettest/nettest.log
+scripts/nettest/nodes
+scripts/nettest/nodes/*
+scripts/nettest/nodes/nettest.log
 
 saito-issuance
 saito-issuance/*
@@ -146,3 +145,8 @@ zk/*/*.ptau
 *.swp
 *.swo
 saito.log
+
+built/
+bundler/
+
+config/build/build.json

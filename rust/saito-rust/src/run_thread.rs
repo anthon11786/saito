@@ -8,8 +8,8 @@ use tokio::select;
 use tokio::sync::mpsc::Receiver;
 use tokio::task::JoinHandle;
 
-use saito_core::core::io::network_event::NetworkEvent;
-use saito_core::core::process::keep_time::{KeepTime, Timer};
+use saito_core::core::network::events::NetworkEvent;
+use saito_core::core::process::keep_time::Timer;
 use saito_core::core::process::process_event::ProcessEvent;
 
 pub async fn receive_event<T>(receiver: &mut Option<Receiver<T>>) -> Option<T> {

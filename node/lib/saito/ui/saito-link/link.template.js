@@ -22,7 +22,7 @@ module.exports = (link) => {
       slug = slug.split('?')[0];
     }
 
-    let filters = link.app.modules.returnFirstRespondTo('filter-saito-link', {
+    let filters = link.app.modules.returnFirstRespondTo('saito-filter-link', {
       modname: link.mod.returnName(),
       slug,
       url: link.url
@@ -35,8 +35,6 @@ module.exports = (link) => {
     if (filters?.no_photo) {
       include_graphics = false;
     }
-
-    console.log(slug, info);
 
     // ---> Use a respondTo to further customize which info to include and add a class...
   }

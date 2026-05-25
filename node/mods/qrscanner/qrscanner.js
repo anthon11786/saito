@@ -29,6 +29,7 @@ class QRScanner extends ModTemplate {
 		this.styles = ['/qrscanner/style.css'];
 		this.scanner_callback = null;
 
+		this.dependencies = ['Encrypt']; // For scan to add encrypted contact
 		this.description = 'Helper module with QR code scanning functionality.';
 		this.categories = 'Dev Data Utilities';
 		this.class = 'utility';
@@ -294,7 +295,7 @@ class QRScanner extends ModTemplate {
 		//
 		// or this is a publickey
 		//
-		if (this.app.wallet.isValidPublicKey(msg)) {
+		if (this.app.crypto.isPublicKey(msg)) {
 			this.stop();
 			let userMenu = new UserMenu(this.app, msg);
 			userMenu.render(this.app);

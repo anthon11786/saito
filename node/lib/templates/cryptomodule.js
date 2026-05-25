@@ -3,19 +3,20 @@
  WEB3 CRYPTO MODULE v.2
 
  This is a general parent class for modules that wish to define a cryptocurrency 
- that can interact with the Saito ecosystem. It introduces generic  functions that 
+ that can interact with the Saito ecosystem. It introduces generic functions that 
  should be implemented by these modules to handle web3 cryptos interaction with 
- their external blockchains or  networks. 
+ their external blockchains or networks. 
 
  To understand how your module can integrate cryptocurrencies, the API is handled
  in lib/saito/wallet.ts
 
   Minimum extension functionality: 
+
   -- checkBalance
+  -- fetchBalance
   -- returnPrivateKey
   -- sendPayment
   -- receivePayment
-  -- checkHistory
   -- checkWithdrawalFeeForAddress
 
 **********************************************************************************/
@@ -52,7 +53,14 @@ class CryptoModule extends ModTemplate {
     //
     // quick sanity check -- cache the balance
     //
+    // for Saito and NFT wallets, we can check the balance of the wallet directly by
+    // querying Rust, but in other modules, we may have a remote API serving wallet
+    // information, in which case we want checkBalance() to return a cached version
+    // and not constantly his the remote API.
+    //
     this.balance = '0.0';
+    this.pending_balance = '0.0';
+    this.pending_deposits = [];
     this.address = '';
 
     //
@@ -66,6 +74,44 @@ class CryptoModule extends ModTemplate {
     //
     this.options = {};
     this.options.isActivated = false;
+  }
+
+  async getAvailableBalance() {
+    return this.checkBalance();
+  }
+
+  async getPendingBalance() {
+    return this.checkBalance();
+  }
+
+  async checkBalance() {
+    return this.balance;
+  }
+
+  async fetchBalance() {
+    return await this.checkBalance();
+  }
+
+  async checkPendingBalance() {
+    return await this.checkBalance();
+  }
+
+  async checkPendingDeposits() {
+    return [];
+  }
+
+  async fetchPendingBalance() {
+    return await checkPendingBalance();
+  }
+
+  async fetchPendingDeposits() {
+    return [];
+  }
+
+  async fetchHistory() {}
+
+  async startPolling() {
+    return;
   }
 
   /**
@@ -113,29 +159,71 @@ class CryptoModule extends ModTemplate {
   async onConfirmation(blk, tx, conf) {
     if (Number(conf) == 0) {
       if (!tx.isTo(this.publicKey) && !tx.isFrom(this.publicKey)) {
-        return;
+        return 0;
       }
 
+      await tx.decryptMessage(this.app);
       let txmsg = tx.returnMessage();
 
       if (txmsg.module !== this.name) {
-        return;
+        return 0;
       }
 
       if (this.hasSeenTransaction(tx, Number(blk.id))) {
         console.error('We are double processing a payment transaction!!!!');
-        return;
+        return 1;
       }
 
       if (txmsg.request === 'crypto payment') {
-        if (this.app.BROWSER) {
-          this.receivePaymentTransaction(tx);
+        let direction = '';
+        if (tx.isFrom(this.publicKey) && (!tx.isTo(this.publicKey) || tx.to.length > 1)) {
+          direction = 'send';
+        } else if (tx.isTo(this.publicKey)) {
+          direction = 'receive';
+        } else {
+          direction = 'unknown';
         }
+
+        let obj = {
+          direction,
+          amount: txmsg.amount != null && txmsg.amount !== '' ? txmsg.amount : '',
+          sender: txmsg.from != null && txmsg.from !== '' ? txmsg.from : '',
+          receiver: txmsg.to != null && txmsg.to !== '' ? txmsg.to : '',
+          timestamp: blk.timestamp != null ? blk.timestamp : '',
+          block_id: blk.id != null ? blk.id : '',
+          ticker: txmsg.ticker != null && txmsg.ticker !== '' ? txmsg.ticker : this.ticker || '',
+          transaction_signature:
+            tx.signature != null && tx.signature !== '' ? String(tx.signature) : '',
+          signature: tx.signature != null && tx.signature !== '' ? String(tx.signature) : '',
+          memo: txmsg.memo != null && txmsg.memo !== '' ? txmsg.memo : '',
+          message: txmsg.message != null && txmsg.message !== '' ? txmsg.message : '',
+          confirmation: conf,
+          module: txmsg.module != null && txmsg.module !== '' ? txmsg.module : '',
+          request: txmsg.request != null && txmsg.request !== '' ? txmsg.request : '',
+          hash: txmsg.hash != null && txmsg.hash !== '' ? txmsg.hash : ''
+        };
+
+        if (!obj.sender && tx.from && tx.from[0] && tx.from[0].publicKey) {
+          obj.sender = tx.from[0].publicKey;
+        }
+        if (!obj.receiver && tx.to && tx.to[0] && tx.to[0].publicKey) {
+          obj.receiver = tx.to[0].publicKey;
+        }
+
+        console.log('>>>>>>>>>> crypto payment', obj);
+
+        if (this.app.BROWSER) {
+          this.onPaymentReceived(obj);
+        }
+
+        return 1;
       }
     }
+
+    return 0;
   }
 
-  async sendPaymentTransaction(publicKey, from_address, to_address, amount, hash) {
+  async sendPaymentTransaction(publicKey, from_address, to_address, amount, hash, memo = '') {
     let newtx = await this.app.wallet.createUnsignedTransactionWithDefaultFee(publicKey);
 
     newtx.msg = {
@@ -147,80 +235,28 @@ class CryptoModule extends ModTemplate {
       hash
     };
 
+    if (memo) {
+      newtx.msg.memo = memo;
+    }
+
     await newtx.sign();
     await this.app.network.propagateTransaction(newtx);
 
     console.info(`Crypto: sendPaymentTransaction sent to ${publicKey}!`, newtx.msg);
   }
 
-  //
-  // Only implemented for $SAITO
-  //
-  savePaymentTransaction(tx) {}
+  onPaymentReceived(obj) {
+    this.app.connection.emit('on-payment-received', obj);
 
-  //////////////////////////
-  // BROWSER ONLY!!!
-  //////////////////////////
-  receivePaymentTransaction(tx) {
-    let txmsg = tx.returnMessage();
-
-    let role = 'Unknown';
-    if (tx.isTo(this.publicKey)) {
-      role = 'Recipient';
-    }
-    if (tx.isFrom(this.publicKey)) {
-      role = 'Sender';
-    }
-
-    console.info(`Crypto: receivePaymentTransaction as ${role}`, txmsg);
-
-    if (!tx.isFrom(this.publicKey)) {
-      if (!this.ticker.toLowerCase().includes('saito')) {
-        this.app.keychain.addCryptoAddress(tx.from[0].publicKey, this.ticker, txmsg.from);
-      }
-
-      let expected_payment = false;
-
-      if (this.options?.transfers_inbound) {
-        for (let i = 0; i < this.options.transfers_inbound.length; i++) {
-          if (this.options.transfers_inbound[i] == txmsg.hash) {
-            expected_payment = true;
-            this.options.transfers_inbound.splice(i, 1);
-            this.save();
-            break;
-          }
-        }
-      }
-
-      //
-      // updates the in-game receive payment overlay or just display a siteMessage
-      //
-      if (expected_payment) {
-        this.app.connection.emit('saito-crypto-receive-confirm', txmsg);
-      } else {
-        siteMessage(
-          `${txmsg.amount} ${this.ticker} inbound from ${this.app.keychain.returnUsername(
-            tx.from[0].publicKey
-          )}`,
-          3000
-        );
-      }
-    } else {
-      //
-      // I sent the payment!
-      // If web3 crypto, make sure I save my friend's address
-      //
-      if (!this.ticker.toLowerCase().includes('saito')) {
-        this.app.keychain.addCryptoAddress(tx.to[0].publicKey, this.ticker, txmsg.to);
-      }
-    }
-
-    this.savePaymentTransaction(tx);
-
-    setTimeout(this.checkBalanceUpdate.bind(this), 2000);
+    try {
+      siteMessage(
+        `${obj.amount} ${obj.ticker} inbound from ${this.app.keychain.returnUsername(obj.sender)}`,
+        3000
+      );
+    } catch (err) {}
   }
 
-  saveInboundPayment(hash) {
+  pollForInboundPayment(hash) {
     if (!this.options?.transfers_inbound) {
       this.options.transfers_inbound = [];
     }
@@ -233,13 +269,16 @@ class CryptoModule extends ModTemplate {
       console.warn('Crypto: Already saved expected payment');
       return { err: 'Already saved expected payment' };
     }
+
+    this.startPolling();
   }
 
-  //
-  // Please include a small image at this location
-  //
-  returnLogo() {
-    return `/${this.ticker.toLowerCase()}/img/logo.png`;
+  returnLogos() {
+    return (
+      this.app.modules.getRespondTos('crypto-logo', { ticker: this.ticker }).shift() || {
+        img: this.icon_url || `/${this.ticker.toLowerCase()}/img/logo.png`
+      }
+    );
   }
 
   /**
@@ -269,15 +308,7 @@ class CryptoModule extends ModTemplate {
    */
   async activate() {
     await this.checkBalance();
-    await this.checkHistory();
-
-    if (!this.options.isActivated) {
-      let info = await this.returnNetworkInfo();
-      this.confirmations = info.confirmations;
-      console.log(`Activated ${this.ticker}: `, info);
-      this.options.isActivated = true;
-    }
-
+    this.options.isActivated = true;
     this.app.connection.emit('saito-crypto-activated', this.ticker);
     this.save();
   }
@@ -311,32 +342,6 @@ class CryptoModule extends ModTemplate {
     return this.balance;
   }
 
-  async checkBalanceUpdate() {
-    console.log('$$$$ checkBalanceUpdate');
-
-    let original_balance = Number(this.balance);
-
-    await this.checkBalance();
-
-    let new_balance = Number(this.returnBalance());
-
-    let diff = new_balance - original_balance;
-
-    if (diff == 0) {
-      return;
-    }
-
-    if (diff > 0) {
-      let msg = `New ${this.app.browser.formatDecimals(diff)} ${this.ticker} deposit`;
-      siteMessage(msg, 3000);
-    } else {
-      let msg = `New ${this.app.browser.formatDecimals(-diff)} ${this.ticker} payment`;
-      siteMessage(msg, 3000);
-    }
-
-    this.app.connection.emit('saito-header-update-crypto');
-  }
-
   /**
    * Abstract method which should get pubkey/address
    * @abstract
@@ -365,7 +370,6 @@ class CryptoModule extends ModTemplate {
     //
     // info stored in options file
     //
-
     if (this.app?.options?.crypto) {
       if (this.app.options.crypto[this.ticker]) {
         this.options = this.app.options.crypto[this.ticker];
@@ -404,7 +408,7 @@ class CryptoModule extends ModTemplate {
     }
   }
 
-  // To correct any cached history records with duplicated values...
+  // removes duplicate values...
   async validateHistory() {
     for (let i = 0; i < this.history.length; i++) {
       for (let j = i + 1; j < this.history.length; j++) {
@@ -467,7 +471,7 @@ class CryptoModule extends ModTemplate {
       return publicKey;
     }
 
-    if (!this.app.wallet.isValidPublicKey(publicKey)) {
+    if (!this.app.crypto.isPublicKey(publicKey)) {
       throw new Error(`Error 237509: ${publicKey} is not a Saito public key`);
     }
 
@@ -534,16 +538,6 @@ CryptoModule.prototype.receivePayment = function (
   throw new Error('receivePayment must be implemented by subclass!');
 };
 
-/**
- * Abstract method
- * @abstract
- * @param {function} callback - function to call when the data is being fetched/sorted
- * @return {object} payment history data
- */
-CryptoModule.prototype.checkHistory = function (callback = null) {
-  throw new Error('checkHistory must be implemented by subclass!');
-};
-
 CryptoModule.prototype.checkWithdrawalFeeForAddress = function (recipient = '', mycallback = null) {
   if (mycallback != null) {
     mycallback(0);
@@ -556,7 +550,6 @@ CryptoModule.prototype.checkWithdrawalFeeForAddress = function (recipient = '', 
  * @param {function} callback function
  * @return {array} list of pending deposits
  */
-
 CryptoModule.prototype.fetchPendingDeposits = async function (callback) {
   if (callback != null) {
     callback([]);
@@ -587,14 +580,6 @@ CryptoModule.prototype.returnUtxo = async function (
   order = 'DESC'
 ) {
   return true;
-};
-
-CryptoModule.prototype.returnNetworkInfo = async function (ticker) {
-  return { confirmations: 0 };
-};
-
-CryptoModule.prototype.getReservedPaymentAddress = async function (obj) {
-  throw new Error('getReservedPaymentAddress must be implemented by subclass!');
 };
 
 module.exports = CryptoModule;

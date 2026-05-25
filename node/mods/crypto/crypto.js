@@ -41,6 +41,11 @@ class Crypto extends ModTemplate {
 			}
 		}
 
+		//
+		// set max balance
+		//
+
+
 		app.connection.on('accept-game-stake', async (sobj) => {
 			console.log('accept-game-stake sobj: ', sobj);
 
@@ -55,6 +60,8 @@ class Crypto extends ModTemplate {
 	}
 
 	respondTo(type = '') {
+
+/*****
 		if (type == 'game-menu') {
 			//
 			// This should be a game module
@@ -116,7 +123,6 @@ try {
 
 									game_mod.menu.hideSubMenus();
 									game_mod.proposeGameStake(ticker, amount);
-									app.browser.logMatomoEvent('StakeCrypto', 'viaGameMenu', ticker);
 								});
 							}
 						});
@@ -165,6 +171,7 @@ try {
 			return menu;
 		}
 
+****/
 		return super.respondTo(type);
 	}
 

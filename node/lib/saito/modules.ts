@@ -1,8 +1,6 @@
-import { Saito } from '../../apps/core';
+import { Saito } from './app';
 import Peer from './peer';
 import Transaction from './transaction';
-import path from 'path';
-import fs from 'fs';
 import ws from 'ws';
 import { parse } from 'url';
 import { fromBase58 } from 'saito-js/lib/util';
@@ -33,7 +31,7 @@ class Mods {
     this.lowest_sync_bid = -1;
 
     if (typeof window !== 'undefined') {
-      // window.saitoJs = require('saito-js');
+      // window.saitoJs = require('saito-js/saito');
     }
   }
 
@@ -97,7 +95,7 @@ class Mods {
     }
 
     // A bit of a hack to connect the ghost SaitoCrypto (from Wallet) into processing TXs on chain (for info!)
-    if (message?.module == 'Saito' && this.app.wallet?.saitoCrypto) {
+    if (this.app.wallet.saitoCrypto?.shouldAffixCallbackToModule(message?.module || '', tx) == 1) {
       callbackArray.push(
         this.app.wallet.saitoCrypto.onConfirmation.bind(this.app.wallet.saitoCrypto)
       );
@@ -107,6 +105,29 @@ class Mods {
     if (this.app.BROWSER) {
       console.debug(`Affix callbacks for ${message?.module} : ${message?.request}`);
     }
+  }
+
+  async handlePeerTransactionBuffer(
+    buffer: Uint8Array,
+    peer: Peer,
+    mycallback: (any) => Promise<void> = null
+  ) {
+    let tx = new Transaction();
+
+    try {
+      tx.deserialize(buffer);
+      tx.unpackData();
+      // console.debug("processing peer tx : ", tx.msg);
+    } catch (error) {
+      console.error(error);
+
+      //
+      // preserve previous fallback behavior for opaque payloads
+      //
+      tx.msg = buffer;
+    }
+
+    return this.handlePeerTransaction(tx, peer, mycallback);
   }
 
   async handlePeerTransaction(
@@ -148,16 +169,16 @@ class Mods {
           }
         }
       } catch (err) {
-        console.error(`handlePeerTransaction Unknown Error in ${this.mods[iii].name}: `, err);
+        // console.error(`handlePeerTransaction Unknown Error in ${this.mods[iii].name}: `, err);
       }
     }
     if (have_responded == false) {
       if (mycallback) {
         //
-        // callback is defined in apps/lite/index.ts
+        // callback is defined in apps/browser/index.ts
         // it runs sendApiSuccess() with the response object
         //
-        mycallback({});
+        mycallback({ err: 'no response' });
       }
     }
   }
@@ -168,7 +189,7 @@ class Mods {
         let dyn_mods = await this.app.storage.loadLocalApplications();
 
         if (dyn_mods.length > 0) {
-          self['saito-js'] = require('saito-js').default;
+          self['saito-js'] = require('saito-js/saito').default;
           self['saito-js/lib/slip'] = require('saito-js/lib/slip').default;
           self['saito-js/lib/transaction'] = require('saito-js/lib/transaction').default;
           self['saito-js/lib/block'] = require('saito-js/lib/block').default;
@@ -219,7 +240,7 @@ class Mods {
       }
     } catch (error) {
       console.error('failed loading dynamic mod');
-      console.error(error);
+      // console.error(error);
     }
 
     let module_removed = 0;
@@ -388,50 +409,70 @@ class Mods {
 
     const onPeerHandshakeComplete = this.onPeerHandshakeComplete.bind(this);
     const onStunPeerDisconnected = this.onStunPeerDisconnected.bind(this);
-    // include events here
-    this.app.connection.on('handshake_complete', async (peerIndex: bigint) => {
-      if (this.app.BROWSER) {
-        // broadcasts my keylist to other peers
-        await this.app.wallet.setKeyList(this.app.keychain.returnWatchedPublicKeys());
+
+    this.app.connection.on(
+      'on_peer_handshake_complete',
+      async (peer_id: bigint, publicKey: string) => {
+        console.log('###');
+        console.log('### OPHC');
+        console.log('###');
+        if (this.app.BROWSER) {
+          await this.app.wallet.setKeyList(this.app.keychain.returnWatchedPublicKeys());
+        }
+        let peer = await this.app.network.getPeerByPeerId(peer_id);
+        if (this.app.BROWSER == 0) {
+          let data = `{"build_number": "${this.app.build_number}"}`;
+          console.info(data);
+          this.app.network.sendRequest('software-update', data, null, peer);
+        }
+        console.log('handshake complete : ', publicKey);
+        await this.onPeerHandshakeComplete(peer, peer_id);
       }
-      // await this.app.network.propagateServices(peerIndex);
-      let peer = await this.app.network.getPeer(BigInt(peerIndex));
-      if (this.app.BROWSER == 0) {
-        let data = `{"build_number": "${this.app.build_number}"}`;
-        console.info(data);
-        this.app.network.sendRequest('software-update', data, null, peer);
-      }
-      console.log('handshake complete');
-      await onPeerHandshakeComplete(peer);
+    );
+    this.app.connection.on('on_peer_services_up', async (peer_id: bigint, publicKey: string) => {
+      console.log('###');
+      console.log('### OPSU');
+      console.log('###');
+      let peer = await this.app.network.getPeerByPeerId(peer_id);
+      await this.onPeerServicesUp(peer);
+    });
+    this.app.connection.on('stun peer connect', async (peer_id: bigint, publicKey: string) => {
+      let peer = await this.app.network.getPeerByPeerId(peer_id);
+      await onPeerHandshakeComplete(peer, peer_id);
     });
 
-    this.app.connection.on('stun peer connect', async (peerIndex) => {
-      let peer = await this.app.network.getPeer(BigInt(peerIndex));
-      await onPeerHandshakeComplete(peer);
-    });
-
-    this.app.connection.on('stun peer disconnect', async (peerIndex, publicKey) => {
-      await onStunPeerDisconnected(peerIndex, publicKey);
-      console.log('peer handshake completed for peer', peerIndex);
+    this.app.connection.on('stun peer disconnect', async (peer_id, publicKey) => {
+      await onStunPeerDisconnected(publicKey);
+      console.log('peer handshake completed for peer', publicKey);
     });
 
     const onConnectionUnstable = this.onConnectionUnstable.bind(this);
-    this.app.connection.on('peer_disconnect', async (peerIndex: bigint, public_key: string) => {
-      console.log(
-        'connection dropped -- triggering on connection unstable : ' + peerIndex,
-        ' key : ',
-        public_key
-      );
+    this.app.connection.on('peer_disconnect', async (peer_id: bigint, public_key: string) => {
+      console.log('connection dropped -- triggering on connection unstable. key : ', public_key);
       this.onConnectionUnstable(public_key);
     });
 
-    this.app.connection.on('peer_connect', async (peerIndex: bigint) => {
-      console.log('peer_connect received for : ' + peerIndex);
-      let peer = await this.app.network.getPeer(peerIndex);
+    this.app.connection.on('peer_connect', async (peer_id: bigint, publicKey: string) => {
+      console.log('peer_connect received for : ' + publicKey);
+      let peer = await this.app.network.getPeerByPeerId(peer_id);
       this.onConnectionStable(peer);
     });
 
     this.is_initialized = true;
+
+    //
+    // any peers that connected / handshoke / serviced us before the above
+    // events were attached would not have run their handshake or services
+    // code, so we manually double-check here.
+    //
+    for (const peer of await this.app.network.getPeers()) {
+      if (peer?.publicKey) {
+        await this.onPeerHandshakeComplete(peer, peer.id);
+      }
+      if (peer?.services?.length) {
+        await this.onPeerServicesUp(peer);
+      }
+    }
 
     //
     // we load the NFTs from the wallet now, since they have modules to
@@ -670,26 +711,50 @@ class Mods {
     return null;
   }
 
-  async onPeerHandshakeComplete(peer: Peer) {
+  async onPeerHandshakeComplete(peer: Peer, peer_id?: bigint) {
+    const publicKey = peer?.publicKey;
+    if (publicKey) {
+      try {
+        const SaitoRuntime = require('saito-js/saito').default;
+        const runtime = SaitoRuntime?.getInstance?.();
+        if (runtime?.peers && runtime?.peersByPeerId) {
+          let networkPeer = null;
+          if (peer_id !== undefined && peer_id !== null) {
+            networkPeer = runtime.peersByPeerId.get(peer_id);
+          }
+          if (!networkPeer && runtime.peers.has(publicKey)) {
+            networkPeer = runtime.peers.get(publicKey);
+          }
+          if (!networkPeer) {
+            for (const candidate of runtime.peersByPeerId.values()) {
+              if (candidate?.publicKey === publicKey) {
+                networkPeer = candidate;
+                break;
+              }
+            }
+          }
+          if (networkPeer) {
+            networkPeer._publicKey = publicKey;
+            runtime.peers.set(publicKey, networkPeer);
+          }
+        }
+      } catch (err) {}
+    }
     //
     // all modules learn about the peer connecting
     //
     for (let i = 0; i < this.mods.length; i++) {
       await this.mods[i].onPeerHandshakeComplete(this.app, peer);
     }
-    //
-    // then they learn about any services now-available
-    //
-    if (peer.services) {
-      for (let i = 0; i < peer.services.length; i++) {
-        await this.onPeerServiceUp(peer, peer.services[i]);
-      }
-    }
   }
 
-  async onPeerServiceUp(peer, service) {
-    for (let i = 0; i < this.mods.length; i++) {
-      await this.mods[i].onPeerServiceUp(this.app, peer, service);
+  async onPeerServicesUp(peer: Peer) {
+    if (peer.services) {
+      for (let i = 0; i < peer.services.length; i++) {
+        for (let j = 0; j < this.mods.length; j++) {
+          await this.mods[j].onPeerServiceUp(this.app, peer, peer.services[i]);
+        }
+      }
     }
   }
 
@@ -780,7 +845,6 @@ class Mods {
     let base_module = this.app.options?.defaultModule || 'website';
     for (let i = 0; i < this.mods.length; i++) {
       this.mods[i].webServer(this.app, expressapp, express);
-
       if (this.mods[i].returnSlug() == base_module) {
         this.mods[i].webServer(this.app, expressapp, express, '/');
       }

@@ -1,8 +1,13 @@
 module.exports = (app, mod, nft_overlay) => {
-  let can_merge = nft_overlay.can_merge;
-  let can_split = nft_overlay.can_split;
-  let all_slips = nft_overlay.all_slips || [];
+  let can_merge = false;
+  let all_slips = nft_overlay.nft.returnAllSlips() || [];
   let nft = nft_overlay.nft;
+
+  nft_overlay.all_slips = all_slips;
+
+  if (nft.getSlipCount() > 1 && mod.publicKey == nft.slip2.public_key) {
+    can_merge = true;
+  }
 
   // Extract NFT information
   let nft_id = nft?.id || 'N/A';
@@ -66,19 +71,33 @@ module.exports = (app, mod, nft_overlay) => {
         <div class="nft-info-label">created in:</div>
         <div class="nft-info-value">${createdInDisplay}</div>
       </div>
+      <div class="nft-info-row">
+        <div class="nft-info-label">description:</div>
+        <div class="nft-info-value">${nft.description || 'N/A'}</div>
+      </div>
       ${metadataRow}
     </div>
   `;
 
-  let mergeButtonHtml = '';
-  if (can_merge) {
-    mergeButtonHtml = `<button class="saito-nft-footer-btn merge">Merge</button>`;
+  let mergeButtonHtml = can_merge
+    ? `<button class="saito-nft-footer-btn merge">Merge</button>`
+    : '';
+
+  if (!all_slips.length) {
+    all_slips.push(nft_overlay.nft);
   }
+
+  let canDeleteFooter = all_slips.some((slip) => mod.publicKey == slip.slip2?.public_key);
+  let deleteFooterHtml = canDeleteFooter
+    ? `<button type="button" class="saito-nft-footer-btn nft-info-delete-nft">Delete</button>`
+    : '';
+  let footerSpacerHtml = canDeleteFooter || mergeButtonHtml ? `<span style="flex:1"></span>` : '';
 
   let splitUtxosHtml = '';
   let splitSlidersHtml = '';
-  // Generate slip boxes for all slips, not just when can_split
+
   if (all_slips.length > 0) {
+    // Generate slip boxes for all slips, not just when can_split
     for (let z = 0; z < all_slips.length; z++) {
       let utxoIdx = z + 1;
       let slip = all_slips[z];
@@ -88,14 +107,27 @@ module.exports = (app, mod, nft_overlay) => {
       if (slip.slip1) {
         let blockId = slip.slip1.block_id || 'N/A';
         let txOrdinal = slip.slip1.tx_ordinal || 'N/A';
-        let slipIndex = slip.slip1.slip_index || 'N/A';
+        let slipIndex = slip.slip1.slip_index !== undefined ? slip.slip1.slip_index : 'N/A';
         uuid = `${blockId}-${txOrdinal}-${slipIndex}`;
       }
 
       let amount = Number(slip.slip1.amount) || 0;
-      let splitButtonHtml = '';
-      if (amount > 1) {
+      let splitButtonHtml = '',
+        depositButtonHtml = '',
+        deleteButtonHtml = '';
+
+      //can delete
+      if (mod.publicKey == slip.slip2.public_key) {
+        deleteButtonHtml = `<div class="utxo-delete-btn" data-utxo-idx="${utxoIdx}">[ delete ]</div>`;
+      }
+
+      //can split!
+      if (amount > 1 && mod.publicKey == slip.slip2.public_key) {
         splitButtonHtml = `<div class="utxo-split-btn" data-utxo-idx="${utxoIdx}">[ split ]</div>`;
+      }
+
+      if (false && slip.slip2.public_key) {
+        depositButtonHtml = `<div class="utxo-deposit-btn" data-utxo-idx="${utxoIdx}">[ deposit ]</div>`;
       }
 
       splitUtxosHtml += `
@@ -105,31 +137,29 @@ module.exports = (app, mod, nft_overlay) => {
             <div class="nft-slip-box-value">${uuid}</div>
           </div>
           <div class="nft-slip-box-row">
-            <div class="nft-slip-box-label">amount:</div>
+            <div class="nft-slip-box-label">units:</div>
             <div class="nft-slip-box-value">${slip.slip1.amount}</div>
           </div>
           <div class="nft-slip-box-row">
             <div class="nft-slip-box-label">deposit:</div>
-            <div class="nft-slip-box-value">${slip.slip2.amount}</div>
+            <div class="nft-slip-box-value">${app.wallet.convertNolanToSaito(slip.slip2.amount)} SAITO</div>
           </div>
           <div class="nft-slip-box-actions">
-            <div class="utxo-deposit-btn" data-utxo-idx="${utxoIdx}">[ deposit ]</div>
+            ${deleteButtonHtml}
+            ${depositButtonHtml}
             ${splitButtonHtml}
           </div>
         </div>
       `;
 
       // Create a hidden slider for each UTXO
-      let canAtomize = all_slips[z].slip1.amount <= 25;
-      let atomizeButtonHtml = '';
-      if (canAtomize) {
-        atomizeButtonHtml = `<button class="split-button atomize-button atomize-button-utxo-${utxoIdx}">atomize</button>`;
-      }
+      let canAtomize = all_slips[z].slip1.amount <= 100;
+      let atomizeButtonHtml = `<button class="split-button atomize-button atomize-button-utxo-${utxoIdx}" ${canAtomize ? '' : "disabled title='atomize only supported for quantities of 100 or less' "}>atomize</button>`;
 
       splitSlidersHtml += `
         <div class="saito-nft-split-overlay split-container-utxo-${utxoIdx}" data-utxo-idx="${utxoIdx}">
           <div class="split-instructions">
-            Adjust this slider to manually split your NFT into two parts. When you are happy with the new allocation, click the "split" button to make the transaction that divides it.${canAtomize ? ' If your unit has less than 25 items, you can also "atomize" it -- dividing it up into single units that cannot be further divided.' : ''}
+            Adjust this slider to manually split your NFT into two parts. When you are happy with the new allocation, click the "split" button to make the transaction that divides it.${canAtomize ? ' If your unit has 100 items or less, you can also "atomize" it -- dividing it up into single units that cannot be further divided.' : ''}
           </div>
           <div class="split-slider-wrapper">
             <div class="split-number-box split-number-left-utxo-${utxoIdx}" id="split-number-left-utxo-${utxoIdx}">0</div>
@@ -170,12 +200,13 @@ module.exports = (app, mod, nft_overlay) => {
       <div class="saito-nft-panel-body">
         ${infoTableHtml}
         ${slipsContainerHtml}
-        ${mergeButtonHtml ? `<div class="nft-merge-button-container">${mergeButtonHtml}</div>` : ''}
         ${splitSlidersHtml}
       </div>
       <div class="saito-nft-split-utxo"></div>
       <div class="saito-nft-panel-footer">
-        <button class="saito-nft-footer-btn saito-nft-delete-btn">Delete</button>
+        ${deleteFooterHtml}
+        ${footerSpacerHtml}
+        ${mergeButtonHtml}
       </div>
     </div>
   `;

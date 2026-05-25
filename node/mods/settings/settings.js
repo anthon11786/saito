@@ -115,9 +115,8 @@ class Settings extends ModTemplate {
 						rank: 130,
 						type: 'utilities',
 						callback: async function (app, id) {
-							let c = await sconfirm('This will wipe out your wallet and delete your data....');
+							let c = await app.wallet.onUpgrade('nuke');
 							if (c) {
-								await app.wallet.onUpgrade('nuke');
 								reloadWindow(150);
 							}
 						}
@@ -130,6 +129,28 @@ class Settings extends ModTemplate {
 
 	hasSettings() {
 		return true;
+	}
+
+	/**
+	 * Lite clients request the connected node's build number to compare with the browser bundle.
+	 */
+	async handlePeerTransaction(app, tx = null, peer, mycallback = null) {
+		if (tx == null) {
+			return 0;
+		}
+		let txmsg;
+		try {
+			txmsg = tx.returnMessage();
+		} catch (err) {
+			return 0;
+		}
+		if (txmsg?.request === 'settings server build') {
+			if (mycallback) {
+				mycallback({ build_number: String(this.app.build_number) });
+				return 1;
+			}
+		}
+		return super.handlePeerTransaction(app, tx, peer, mycallback);
 	}
 
 	loadSettings(container) {

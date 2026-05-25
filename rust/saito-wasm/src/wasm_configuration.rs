@@ -3,13 +3,12 @@ use std::io::{Error, ErrorKind};
 use figment::providers::{Format, Json};
 use figment::Figment;
 use log::error;
-use saito_core::core::consensus::peers::congestion_controller::CongestionStatsDisplay;
 use serde::Deserialize;
 use wasm_bindgen::prelude::*;
 
 use saito_core::core::util::configuration::{
     get_default_issuance_writing_block_interval, BlockchainConfig, Configuration, ConsensusConfig,
-    Endpoint, PeerConfig, Server, WalletConfig,
+    Endpoint, InitialLoadingStatus, PeerConfig, Server, WalletConfig,
 };
 fn get_default_consensus() -> Option<ConsensusConfig> {
     Some(ConsensusConfig::default())
@@ -26,7 +25,6 @@ pub struct WasmConfiguration {
     #[serde(default = "get_default_consensus")]
     consensus: Option<ConsensusConfig>,
     #[serde(skip)]
-    congestion: Option<CongestionStatsDisplay>,
     wallet: Option<WalletConfig>,
 }
 
@@ -65,14 +63,13 @@ impl WasmConfiguration {
                 lowest_acceptable_block_id: 0,
                 fork_id: "0000000000000000000000000000000000000000000000000000000000000000"
                     .to_string(),
-                initial_loading_completed: false,
+                initial_loading_status: InitialLoadingStatus::NotStarted,
                 issuance_writing_block_interval: get_default_issuance_writing_block_interval(),
                 confirmations: vec![],
             },
             spv_mode: false,
             browser_mode: false,
             consensus: Some(ConsensusConfig::default()),
-            congestion: None,
             wallet: Default::default(),
         }
     }
@@ -139,7 +136,6 @@ impl Configuration for WasmConfiguration {
         self.browser_mode = config.is_browser();
         self.blockchain = config.get_blockchain_configs().clone();
         self.consensus = config.get_consensus_config().cloned();
-        self.congestion = config.get_congestion_data().cloned();
     }
 
     fn get_consensus_config(&self) -> Option<&ConsensusConfig> {
@@ -150,23 +146,11 @@ impl Configuration for WasmConfiguration {
         self.consensus.as_mut()
     }
 
-    fn get_congestion_data(&self) -> Option<&CongestionStatsDisplay> {
-        self.congestion.as_ref()
-    }
-
-    fn set_congestion_data(&mut self, congestion_data: Option<CongestionStatsDisplay>) {
-        self.congestion = congestion_data;
-    }
-
-    // fn set_blockchain_configs(&mut self, config: Option<BlockchainConfig>) {
-    //     self.blockchain = config;
-    // }
-
     fn get_config_path(&self) -> String {
         String::new()
     }
 
-    fn set_config_path(&mut self, path: String) {}
+    fn set_config_path(&mut self, _path: String) {}
 
     fn save(&self) -> Result<(), std::io::Error> {
         Ok(())

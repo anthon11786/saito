@@ -1,6 +1,7 @@
 const LoadNFTsTemplate = require('./load-nfts.template');
 const SaitoNFT = require('./../../../../../lib/saito/ui/saito-nft/saito-nft');
 const SaitoOverlay = require('./../../../../../lib/saito/ui/saito-overlay/saito-overlay');
+const FileUploadOverlay = require('./file-upload.js');
 const WitnessOverlay = require('./witness');
 
 class LoadNFTs {
@@ -9,9 +10,23 @@ class LoadNFTs {
     this.mod = mod;
     this.overlay = new SaitoOverlay(this.app, this.mod);
     this.witness_overlay = new WitnessOverlay(this.app, this.mod);
+    this.file_upload_overlay = new FileUploadOverlay(this.app, this.mod);
 
     this.nft_list = [];
     this.vault_nfts = [];
+
+    app.connection.on('vault-file-access-render', () => {
+      this.render();
+    });
+
+    app.connection.on('wallet-updated', async () => {
+      // re-render send-nft overlay if its open
+      if (this.overlay.visible) {
+        //  this doesn't seem to trigger when NFT is just newly created by wallet
+        //  if (this.overlay.visible && (updated.length > 0 || persisted)) {
+        this.render();
+      }
+    });
   }
 
   async render() {
@@ -21,6 +36,8 @@ class LoadNFTs {
     // load nfts from wallet
     //
     this.nft_list = await this.fetchNFTList();
+
+    await this.filterNFTList();
 
     //
     // render into #nft-list
@@ -38,6 +55,65 @@ class LoadNFTs {
     return data;
   }
 
+  async filterNFTList() {
+    //
+    // reset vault_nfts list for fresh render
+    //
+    this.vault_nfts = [];
+
+    this.count = this.nft_list.length;
+
+    for (let rec of this.nft_list) {
+      //
+      // create saito-nft object
+      //
+      let nft = new SaitoNFT(this.app, this.mod, null, rec);
+
+      //
+      // determine nft type
+      //
+      if (nft.returnType() == 'vault') {
+        // Put everything in the callback to make sure we can fetch the orig transaction if user transfered ownership!
+        await nft.fetchTransaction(() => {
+          console.log('fetched the nft...');
+
+          let nfttxmsg = nft.tx.returnMessage();
+          let data = nfttxmsg?.data;
+          let file_id = data?.file_id;
+          let file_name = data?.filename;
+          let file_access_script = data?.file_access_script;
+
+          console.log(data);
+
+          // collect utxokeys from nft object
+          //
+          let slip1_utxokey = nft.slip1?.utxo_key || '';
+          let slip2_utxokey = nft.slip2?.utxo_key || '';
+          let slip3_utxokey = nft.slip3?.utxo_key || '';
+
+          //
+          // push into vault_nfts array
+          //
+          this.vault_nfts.push({
+            nft_id: nft.id,
+            file_id,
+            file_access_script: file_access_script || null,
+            file_name,
+            slip1_utxokey,
+            slip2_utxokey,
+            slip3_utxokey
+          });
+
+          this.count--;
+        });
+
+        this.renderNFTList();
+      } else {
+        this.count--;
+      }
+    }
+  }
+
   async renderNFTList() {
     let container = document.querySelector('#nft-list');
 
@@ -46,7 +122,10 @@ class LoadNFTs {
       return;
     }
 
-    if (!this.nft_list || this.nft_list.length === 0) {
+    if (this.count > 0) {
+      let html = `<div class="loader"></div>`;
+      container.innerHTML = html;
+    } else if (!this.vault_nfts || this.vault_nfts.length === 0) {
       let html = `
         <div class="instructions">
           You do not have any NFT keys in your wallet. 
@@ -55,89 +134,23 @@ class LoadNFTs {
         </div>
       `;
       container.innerHTML = html;
-      return;
-    }
-
-    //
-    // reset vault_nfts list for fresh render
-    //
-    this.vault_nfts = [];
-
-    //
-    // wrapper for cards
-    //
-    container.innerHTML = `<div class="send-nft-list"></div>`;
-    let wrapper = container.querySelector('.send-nft-list');
-
-    for (let rec of this.nft_list) {
+    } else {
       //
-      // create saito-nft object
+      // wrapper for cards
       //
-      let nft = new SaitoNFT(this.app, this.mod, null, rec, null);
+      container.innerHTML = `<div class="send-nft-list"></div>`;
+      let wrapper = container.querySelector('.send-nft-list');
 
-      //
-      // determine nft type
-      //
-      let nft_type = this.app.wallet.extractNFTType(rec.slip3.utxo_key);
-
-      if (nft_type == 'vault') {
-
-        await nft.fetchTransaction();
-
-console.log("fetched the nft...");
-
-        let nfttxmsg = nft.tx.returnMessage();
-console.log("NFT TXMSG: " + JSON.stringify(nfttxmsg));
-        let data = nfttxmsg?.data; 
-        let file_id = data?.file_id;
-        let filename = data?.filename;
-        let file_access_script = data?.file_access_script;
-
-console.log("file_id: " + file_id);
-console.log("filename: " + filename);
-console.log("file_as: " + file_access_script);
-
+      for (let i = 0; i < this.vault_nfts.length; i++) {
         //
         // determine which key image to display
         // crystal key = custom/advanced (has file_access_script)
         // jade key = public/standard (no file_access_script)
         //
-        let keyImage = file_access_script ? 'crystal_key.png' : 'jade_key.png';
+        let keyImage = this.vault_nfts[i].file_access_script ? 'crystal_key.png' : 'jade_key.png';
 
-        //
-        // collect utxokeys from nft object
-        //
-        let slip1_utxokey = nft.slip1?.utxo_key || '';
-        let slip2_utxokey = nft.slip2?.utxo_key || '';
-        let slip3_utxokey = nft.slip3?.utxo_key || '';
-
-console.log("EXTRACTED FILE_ID: " + file_id);
-
-        //
-        // push into vault_nfts array
-        //
-        this.vault_nfts.push({
-          nft_id: nft.id,
-          file_id,
-          slip1_utxokey,
-          slip2_utxokey,
-          slip3_utxokey,
-          file_access_script: file_access_script || null
-        });
-
-        //
-        // index in array for DOM mapping
-        //
-        let index = this.vault_nfts.length - 1;
-
-console.log("file_id: " + file_id);
-try {
-        let identicon = this.app.keychain.returnIdenticon(file_id);
-} catch (err) {
-  console.log("ERROR: " + err);
-}
         let html = `
-          <div class="vault-nft-item" data-vault-index="${index}">
+          <div class="vault-nft-item" data-vault-index="${i}">
             <img
               class="vault-nft-img"
               src="/vault/img/${keyImage}"
@@ -145,7 +158,7 @@ try {
 
             <div class="vault-nft-footer">
               <div class="vault-nft-hash">
-                ${filename}
+                ${this.vault_nfts[i].file_name}
               </div>
               <button class="vault-nft-download-btn">Download</button>
             </div>
@@ -158,7 +171,6 @@ try {
         wrapper.insertAdjacentHTML('beforeend', html);
       }
     }
-
     //
     // bind click events after DOM is ready
     //
@@ -166,6 +178,13 @@ try {
   }
 
   attachEvents() {
+    const upload_btn = document.querySelector('#create-access-nft');
+    if (upload_btn) {
+      upload_btn.onclick = (e) => {
+        this.file_upload_overlay.render();
+      };
+    }
+
     let items = document.querySelectorAll('.vault-nft-item');
     if (!items || items.length === 0) {
       return;
@@ -188,7 +207,7 @@ try {
 
         let vault_entry = this.vault_nfts[idx];
 
-console.log("CLICKED: " + JSON.stringify(vault_entry));
+        console.log('CLICKED: ' + JSON.stringify(vault_entry));
 
         //
         // Check if this is a custom/advanced key (has file_access_script)
@@ -200,7 +219,7 @@ console.log("CLICKED: " + JSON.stringify(vault_entry));
           this.overlay.hide();
           this.witness_overlay.access_script = vault_entry.file_access_script;
           this.witness_overlay.render();
-          
+
           this.witness_overlay.callback = (result) => {
             //
             // User provided witness data, now make the file request
@@ -212,9 +231,8 @@ console.log("CLICKED: " + JSON.stringify(vault_entry));
           //
           // Public key - direct file request (no witness needed)
           //
-        this.mod.sendAccessFileRequest(vault_entry);
+          this.mod.sendAccessFileRequest(vault_entry);
         }
-
       };
     });
   }

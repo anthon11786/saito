@@ -2,7 +2,7 @@ use ahash::{AHashMap, AHashSet};
 use log::{debug, error, info, trace, warn};
 use num_derive::FromPrimitive;
 use num_traits::Zero;
-use rayon::prelude::*;
+use rayon::iter::{IndexedParallelIterator, IntoParallelRefIterator, ParallelIterator};
 use serde::{Deserialize, Serialize};
 use std::convert::TryInto;
 use std::fmt::{Display, Formatter};
@@ -18,11 +18,11 @@ use crate::core::consensus::merkle::MerkleTree;
 use crate::core::consensus::slip::{Slip, SlipType, SLIP_SIZE};
 use crate::core::consensus::transaction::{Transaction, TransactionType, TRANSACTION_SIZE};
 use crate::core::defs::{
-    BlockId, Currency, PeerIndex, PrintForLog, SaitoHash, SaitoPrivateKey, SaitoPublicKey,
-    SaitoSignature, SaitoUTXOSetKey, Timestamp, UtxoSet, BLOCK_FILE_EXTENSION,
+    BlockId, Currency, PrintForLog, SaitoHash, SaitoPrivateKey, SaitoPublicKey, SaitoSignature,
+    SaitoUTXOSetKey, Timestamp, UtxoSet, BLOCK_FILE_EXTENSION,
 };
-use crate::core::io::storage::Storage;
-use crate::core::util::configuration::Configuration;
+use crate::core::storage::storage::Storage;
+use crate::core::util::configuration::{Configuration, InitialLoadingStatus};
 use crate::core::util::crypto::{hash, sign, verify_signature};
 use crate::iterate;
 
@@ -422,9 +422,9 @@ pub struct Block {
     #[serde(skip)]
     pub created_hashmap_of_slips_spent_this_block: bool,
     #[serde(skip)]
-    pub routed_from_peer: Option<PeerIndex>,
+    pub routed_from_peer_id: u64,
     #[serde(skip)]
-    pub keys_invloved: AHashSet<SaitoPublicKey>,
+    pub publickeys_referenced_in_block_transactions: AHashSet<SaitoPublicKey>,
     #[serde(skip)]
     pub force_loaded: bool,
     // used for checking, before pruning txs from block on downgrade
@@ -443,7 +443,7 @@ impl Display for Block {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         writeln!(
             f,
-            "Block {{ id: {}, timestamp: {}, previous_block_hash: {:?}, creator: {:?}, merkle_root: {:?}, signature: {:?}, graveyard: {}, treasury: {}, total_fees: {}, total_fees_new: {}, total_fees_atr: {}, avg_total_fees: {}, avg_total_fees_new: {}, avg_total_fees_atr: {}, total_payout_routing: {}, total_payout_mining: {}, total_payout_treasury: {}, total_payout_graveyard: {}, total_payout_atr: {}, avg_payout_routing: {}, avg_payout_mining: {}, avg_payout_treasury: {}, avg_payout_graveyard: {}, avg_payout_atr: {}, avg_fee_per_byte: {}, fee_per_byte: {}, avg_nolan_rebroadcast_per_block: {}, burnfee: {}, difficulty: {}, previous_block_unpaid: {}, hash: {:?}, total_work: {}, in_longest_chain: {}, has_golden_ticket: {}, has_issuance_transaction: {}, issuance_transaction_index: {}, has_fee_transaction: {}, has_staking_transaction: {}, golden_ticket_index: {}, fee_transaction_index: {}, total_rebroadcast_slips: {}, total_rebroadcast_nolan: {}, rebroadcast_hash: {}, block_type: {:?}, cv: {}, routed_from_peer: {:?} confirmations: {:?}",
+            "Block {{ id: {}, timestamp: {}, previous_block_hash: {:?}, creator: {:?}, merkle_root: {:?}, signature: {:?}, graveyard: {}, treasury: {}, total_fees: {}, total_fees_new: {}, total_fees_atr: {}, avg_total_fees: {}, avg_total_fees_new: {}, avg_total_fees_atr: {}, total_payout_routing: {}, total_payout_mining: {}, total_payout_treasury: {}, total_payout_graveyard: {}, total_payout_atr: {}, avg_payout_routing: {}, avg_payout_mining: {}, avg_payout_treasury: {}, avg_payout_graveyard: {}, avg_payout_atr: {}, avg_fee_per_byte: {}, fee_per_byte: {}, avg_nolan_rebroadcast_per_block: {}, burnfee: {}, difficulty: {}, previous_block_unpaid: {}, hash: {:?}, total_work: {}, in_longest_chain: {}, has_golden_ticket: {}, has_issuance_transaction: {}, issuance_transaction_index: {}, has_fee_transaction: {}, has_staking_transaction: {}, golden_ticket_index: {}, fee_transaction_index: {}, total_rebroadcast_slips: {}, total_rebroadcast_nolan: {}, rebroadcast_hash: {}, block_type: {:?}, cv: {}, routed_from_peer_id: {:?} confirmations: {:?}",
             self.id,
             self.timestamp,
             self.previous_block_hash.to_hex(),
@@ -489,7 +489,7 @@ impl Display for Block {
             self.rebroadcast_hash.to_hex(),
             self.block_type,
             self.cv,
-            self.routed_from_peer,
+            self.routed_from_peer_id,
             self.confirmations,
         ).unwrap();
         // writeln!(f, " transactions : ").unwrap();
@@ -557,8 +557,8 @@ impl Block {
             // hashmap of all SaitoUTXOSetKeys of the slips in the block
             slips_spent_this_block: AHashMap::new(),
             created_hashmap_of_slips_spent_this_block: false,
-            routed_from_peer: None,
-            keys_invloved: Default::default(),
+            routed_from_peer_id: 0,
+            publickeys_referenced_in_block_transactions: Default::default(),
             cv: ConsensusValues::default(),
             force_loaded: false,
             safe_to_prune_transactions: false,
@@ -933,10 +933,19 @@ impl Block {
 
     /// [transaction][transaction][transaction]...
     pub fn deserialize_from_net(bytes: &[u8]) -> Result<Block, Error> {
+        debug!(
+            "[TRACE_SYNC][SERDE] block_deserialize_start bytes={}",
+            bytes.len()
+        );
         if bytes.len() < BLOCK_HEADER_SIZE {
             warn!(
                 "block buffer is smaller than header length. length : {:?}",
                 bytes.len()
+            );
+            warn!(
+                "[TRACE_SYNC][SERDE] block_deserialize_fail reason=short_header bytes={} header_size={}",
+                bytes.len(),
+                BLOCK_HEADER_SIZE
             );
             return Err(Error::from(ErrorKind::InvalidData));
         }
@@ -968,56 +977,151 @@ impl Block {
             .try_into()
             .or(Err(Error::from(ErrorKind::InvalidData)))?;
 
-        let graveyard: Currency = Currency::from_be_bytes(bytes[181..189].try_into().unwrap());
-        let treasury: Currency = Currency::from_be_bytes(bytes[189..197].try_into().unwrap());
-        let burnfee: Currency = Currency::from_be_bytes(bytes[197..205].try_into().unwrap());
-        let difficulty: u64 = u64::from_be_bytes(bytes[205..213].try_into().unwrap());
-        let avg_total_fees: Currency = Currency::from_be_bytes(bytes[213..221].try_into().unwrap()); // dupe below
-        let avg_fee_per_byte: Currency =
-            Currency::from_be_bytes(bytes[221..229].try_into().unwrap());
-        let avg_nolan_rebroadcast_per_block: Currency =
-            Currency::from_be_bytes(bytes[229..237].try_into().unwrap());
-        let previous_block_unpaid: Currency =
-            Currency::from_be_bytes(bytes[237..245].try_into().unwrap());
-        let avg_total_fees: Currency = Currency::from_be_bytes(bytes[245..253].try_into().unwrap());
-        let avg_total_fees_new: Currency =
-            Currency::from_be_bytes(bytes[253..261].try_into().unwrap());
-        let avg_total_fees_atr: Currency =
-            Currency::from_be_bytes(bytes[261..269].try_into().unwrap());
-        let avg_payout_routing: Currency =
-            Currency::from_be_bytes(bytes[269..277].try_into().unwrap());
-        let avg_payout_mining: Currency =
-            Currency::from_be_bytes(bytes[277..285].try_into().unwrap());
-        let avg_payout_treasury: Currency =
-            Currency::from_be_bytes(bytes[285..293].try_into().unwrap());
-        let avg_payout_graveyard: Currency =
-            Currency::from_be_bytes(bytes[293..301].try_into().unwrap());
-        let avg_payout_atr: Currency = Currency::from_be_bytes(bytes[301..309].try_into().unwrap());
-        let total_payout_routing: Currency =
-            Currency::from_be_bytes(bytes[309..317].try_into().unwrap());
-        let total_payout_mining: Currency =
-            Currency::from_be_bytes(bytes[317..325].try_into().unwrap());
-        let total_payout_treasury: Currency =
-            Currency::from_be_bytes(bytes[325..333].try_into().unwrap());
-        let total_payout_graveyard: Currency =
-            Currency::from_be_bytes(bytes[333..341].try_into().unwrap());
-        let total_payout_atr: Currency =
-            Currency::from_be_bytes(bytes[341..349].try_into().unwrap());
-        let total_fees: Currency = Currency::from_be_bytes(bytes[349..357].try_into().unwrap());
-        let total_fees_new: Currency = Currency::from_be_bytes(bytes[357..365].try_into().unwrap());
-        let total_fees_atr: Currency = Currency::from_be_bytes(bytes[365..373].try_into().unwrap());
-        let fee_per_byte: Currency = Currency::from_be_bytes(bytes[373..381].try_into().unwrap());
-        let total_fees_cumulative: Currency =
-            Currency::from_be_bytes(bytes[381..389].try_into().unwrap());
+        let graveyard: Currency = Currency::from_be_bytes(
+            bytes[181..189]
+                .try_into()
+                .or(Err(Error::from(ErrorKind::InvalidData)))?,
+        );
+        let treasury: Currency = Currency::from_be_bytes(
+            bytes[189..197]
+                .try_into()
+                .or(Err(Error::from(ErrorKind::InvalidData)))?,
+        );
+        let burnfee: Currency = Currency::from_be_bytes(
+            bytes[197..205]
+                .try_into()
+                .or(Err(Error::from(ErrorKind::InvalidData)))?,
+        );
+        let difficulty: u64 = u64::from_be_bytes(
+            bytes[205..213]
+                .try_into()
+                .or(Err(Error::from(ErrorKind::InvalidData)))?,
+        );
+        let _avg_total_fees: Currency = Currency::from_be_bytes(
+            bytes[213..221]
+                .try_into()
+                .or(Err(Error::from(ErrorKind::InvalidData)))?,
+        ); // dupe below
+        let avg_fee_per_byte: Currency = Currency::from_be_bytes(
+            bytes[221..229]
+                .try_into()
+                .or(Err(Error::from(ErrorKind::InvalidData)))?,
+        );
+        let avg_nolan_rebroadcast_per_block: Currency = Currency::from_be_bytes(
+            bytes[229..237]
+                .try_into()
+                .or(Err(Error::from(ErrorKind::InvalidData)))?,
+        );
+        let previous_block_unpaid: Currency = Currency::from_be_bytes(
+            bytes[237..245]
+                .try_into()
+                .or(Err(Error::from(ErrorKind::InvalidData)))?,
+        );
+        let avg_total_fees: Currency = Currency::from_be_bytes(
+            bytes[245..253]
+                .try_into()
+                .or(Err(Error::from(ErrorKind::InvalidData)))?,
+        );
+        let avg_total_fees_new: Currency = Currency::from_be_bytes(
+            bytes[253..261]
+                .try_into()
+                .or(Err(Error::from(ErrorKind::InvalidData)))?,
+        );
+        let avg_total_fees_atr: Currency = Currency::from_be_bytes(
+            bytes[261..269]
+                .try_into()
+                .or(Err(Error::from(ErrorKind::InvalidData)))?,
+        );
+        let avg_payout_routing: Currency = Currency::from_be_bytes(
+            bytes[269..277]
+                .try_into()
+                .or(Err(Error::from(ErrorKind::InvalidData)))?,
+        );
+        let avg_payout_mining: Currency = Currency::from_be_bytes(
+            bytes[277..285]
+                .try_into()
+                .or(Err(Error::from(ErrorKind::InvalidData)))?,
+        );
+        let avg_payout_treasury: Currency = Currency::from_be_bytes(
+            bytes[285..293]
+                .try_into()
+                .or(Err(Error::from(ErrorKind::InvalidData)))?,
+        );
+        let avg_payout_graveyard: Currency = Currency::from_be_bytes(
+            bytes[293..301]
+                .try_into()
+                .or(Err(Error::from(ErrorKind::InvalidData)))?,
+        );
+        let avg_payout_atr: Currency = Currency::from_be_bytes(
+            bytes[301..309]
+                .try_into()
+                .or(Err(Error::from(ErrorKind::InvalidData)))?,
+        );
+        let total_payout_routing: Currency = Currency::from_be_bytes(
+            bytes[309..317]
+                .try_into()
+                .or(Err(Error::from(ErrorKind::InvalidData)))?,
+        );
+        let total_payout_mining: Currency = Currency::from_be_bytes(
+            bytes[317..325]
+                .try_into()
+                .or(Err(Error::from(ErrorKind::InvalidData)))?,
+        );
+        let total_payout_treasury: Currency = Currency::from_be_bytes(
+            bytes[325..333]
+                .try_into()
+                .or(Err(Error::from(ErrorKind::InvalidData)))?,
+        );
+        let total_payout_graveyard: Currency = Currency::from_be_bytes(
+            bytes[333..341]
+                .try_into()
+                .or(Err(Error::from(ErrorKind::InvalidData)))?,
+        );
+        let total_payout_atr: Currency = Currency::from_be_bytes(
+            bytes[341..349]
+                .try_into()
+                .or(Err(Error::from(ErrorKind::InvalidData)))?,
+        );
+        let total_fees: Currency = Currency::from_be_bytes(
+            bytes[349..357]
+                .try_into()
+                .or(Err(Error::from(ErrorKind::InvalidData)))?,
+        );
+        let total_fees_new: Currency = Currency::from_be_bytes(
+            bytes[357..365]
+                .try_into()
+                .or(Err(Error::from(ErrorKind::InvalidData)))?,
+        );
+        let total_fees_atr: Currency = Currency::from_be_bytes(
+            bytes[365..373]
+                .try_into()
+                .or(Err(Error::from(ErrorKind::InvalidData)))?,
+        );
+        let fee_per_byte: Currency = Currency::from_be_bytes(
+            bytes[373..381]
+                .try_into()
+                .or(Err(Error::from(ErrorKind::InvalidData)))?,
+        );
+        let total_fees_cumulative: Currency = Currency::from_be_bytes(
+            bytes[381..389]
+                .try_into()
+                .or(Err(Error::from(ErrorKind::InvalidData)))?,
+        );
 
         let mut transactions = vec![];
         let mut start_of_transaction_data = BLOCK_HEADER_SIZE;
-        for _n in 0..transactions_len {
+        for tx_index in 0..transactions_len {
             if bytes.len() < start_of_transaction_data + 16 {
                 warn!(
                     "block buffer is invalid to read transaction metadata. length : {:?}, end_of_tx_data : {:?}",
                     bytes.len(),
                     start_of_transaction_data+16
+                );
+                warn!(
+                    "[TRACE_SYNC][SERDE] block_deserialize_fail reason=short_tx_metadata tx_index={} bytes={} tx_metadata_end={}",
+                    tx_index,
+                    bytes.len(),
+                    start_of_transaction_data + 16
                 );
                 return Err(Error::from(ErrorKind::InvalidData));
             }
@@ -1044,16 +1148,63 @@ impl Block {
             let total_len = inputs_len
                 .checked_add(outputs_len)
                 .ok_or(Error::from(ErrorKind::InvalidData))?;
-            let end_of_transaction_data = start_of_transaction_data
-                + TRANSACTION_SIZE
-                + (total_len as usize * SLIP_SIZE)
-                + message_len
-                + path_len * HOP_SIZE;
+            let Some(slips_size) = (total_len as usize).checked_mul(SLIP_SIZE) else {
+                error!(
+                    "[TRACE_SYNC][SERDE] block_deserialize_fail reason=slip_size_overflow tx_index={} inputs_len={} outputs_len={} total_slips={} slip_size={} bytes={}",
+                    tx_index,
+                    inputs_len,
+                    outputs_len,
+                    total_len,
+                    SLIP_SIZE,
+                    bytes.len()
+                );
+                return Err(Error::from(ErrorKind::InvalidData));
+            };
+            let Some(path_size) = path_len.checked_mul(HOP_SIZE) else {
+                error!(
+                    "[TRACE_SYNC][SERDE] block_deserialize_fail reason=path_size_overflow tx_index={} path_len={} hop_size={} bytes={}",
+                    tx_index,
+                    path_len,
+                    HOP_SIZE,
+                    bytes.len()
+                );
+                return Err(Error::from(ErrorKind::InvalidData));
+            };
+            let Some(end_of_transaction_data) = start_of_transaction_data
+                .checked_add(TRANSACTION_SIZE)
+                .and_then(|n| n.checked_add(slips_size))
+                .and_then(|n| n.checked_add(message_len))
+                .and_then(|n| n.checked_add(path_size))
+            else {
+                error!(
+                    "[TRACE_SYNC][SERDE] block_deserialize_fail reason=tx_bounds_overflow tx_index={} start={} tx_size={} slips_size={} message_len={} path_size={} bytes={}",
+                    tx_index,
+                    start_of_transaction_data,
+                    TRANSACTION_SIZE,
+                    slips_size,
+                    message_len,
+                    path_size,
+                    bytes.len()
+                );
+                return Err(Error::from(ErrorKind::InvalidData));
+            };
 
             if bytes.len() < end_of_transaction_data {
                 warn!(
                     "block buffer is invalid to read transaction data. length : {:?}, end of tx data : {:?}, tx_count : {:?}",
                     bytes.len(), end_of_transaction_data, transactions_len
+                );
+                warn!(
+                    "[TRACE_SYNC][SERDE] block_deserialize_fail reason=short_tx_data tx_index={} tx_count={} start={} end={} inputs_len={} outputs_len={} message_len={} path_len={} bytes={}",
+                    tx_index,
+                    transactions_len,
+                    start_of_transaction_data,
+                    end_of_transaction_data,
+                    inputs_len,
+                    outputs_len,
+                    message_len,
+                    path_len,
+                    bytes.len()
                 );
                 return Err(Error::from(ErrorKind::InvalidData));
             }
@@ -1108,6 +1259,12 @@ impl Block {
             block.block_type = BlockType::Header;
         }
 
+        debug!(
+            "[TRACE_SYNC][SERDE] block_deserialize_ok block_id={} tx_count={} bytes={}",
+            block.id,
+            transactions_len,
+            bytes.len()
+        );
         Ok(block)
     }
 
@@ -1447,7 +1604,9 @@ impl Block {
                 total_number_of_non_fee_transactions += 1;
             }
 
-            if (transaction.is_golden_ticket() || transaction.is_normal_transaction())
+            if (transaction.is_golden_ticket()
+                || transaction.is_normal_transaction()
+                || transaction.transaction_type == TransactionType::Bound)
                 && !transaction.is_atr_transaction()
             {
                 cv.total_bytes_new += transaction.get_serialized_size() as u64;
@@ -1589,7 +1748,8 @@ impl Block {
                                 // - `regular_slips` will hold any standalone valid slips
                                 let mut nft_groups: Vec<(Slip, Slip, Slip)> = Vec::new();
                                 let mut regular_slips: Vec<Slip> = Vec::new();
-                                let mut total_nolan_eligible_for_atr_payout: Currency = 0;
+                                // currently un-used
+                                //let mut total_nolan_eligible_for_atr_payout: Currency = 0;
 
                                 // Loop output slip in the transaction
                                 // recognized NFT groups once they are collected.
@@ -1642,7 +1802,7 @@ impl Block {
                                                 //
                                                 // Only the payload slip2 amount counts toward the ATR payout
                                                 //
-                                                total_nolan_eligible_for_atr_payout += slip2.amount;
+                                                //total_nolan_eligible_for_atr_payout += slip2.amount;
                                             }
 
                                             //
@@ -1677,7 +1837,7 @@ impl Block {
                                         }
 
                                         regular_slips.push(slip.clone());
-                                        total_nolan_eligible_for_atr_payout += slip.amount;
+                                        //total_nolan_eligible_for_atr_payout += slip.amount;
                                     }
                                     i += 1;
                                 }
@@ -2072,7 +2232,13 @@ impl Block {
             // golden ticket needed to process payout
             //
             let golden_ticket: GoldenTicket =
-                GoldenTicket::deserialize_from_net(&self.transactions[gt_index].data);
+                match GoldenTicket::deserialize_from_net(&self.transactions[gt_index].data) {
+                    Ok(gt) => gt,
+                    Err(_) => {
+                        warn!("failed to deserialize golden ticket for payout; skipping payout");
+                        return cv;
+                    }
+                };
             let mut next_random_number = hash(golden_ticket.random.as_ref());
 
             //
@@ -2130,8 +2296,8 @@ impl Block {
                 //
                 // finding a router consumes 2 hashes
                 //
-                next_random_number = hash(next_random_number.as_ref());
-                next_random_number = hash(next_random_number.as_ref());
+                let h1 = hash(next_random_number.as_ref());
+                next_random_number = hash(h1.as_ref());
 
                 //
                 // if the previous block ALSO HAD a golden ticket there is no need for further
@@ -2190,8 +2356,12 @@ impl Block {
                         //
                         // finding a router consumes 2 hashes
                         //
-                        next_random_number = hash(next_random_number.as_slice());
-                        next_random_number = hash(next_random_number.as_slice());
+                        // this should be uncommented if we make the router payouts MAX_RECURSION
+                        // greater than 2 blocks, as then we need to hash again before continuing
+                        // our loop.
+                        //
+                        //let h1 = hash(next_random_number.as_slice());
+                        //next_random_number = hash(h1.as_slice());
                     }
                 }
             } else {
@@ -2257,7 +2427,8 @@ impl Block {
                     output.tx_ordinal = total_number_of_non_fee_transactions + 1;
                     output.block_id = self.id;
                     transaction.add_to_slip(output.clone());
-                    slip_index += 1;
+                // uncomment if we add another payout
+                // slip_index += 1;
                 } else {
                     graveyard_contribution += router2_payout;
                 }
@@ -2281,7 +2452,7 @@ impl Block {
                 } else {
                     // our previous_previous_block is about to disappear, which means
                     // we should make note that these funds are slipping into our graveyard
-                    if let Some(previous_previous_block) =
+                    if let Some(_previous_previous_block) =
                         blockchain.blocks.get(&previous_block.previous_block_hash)
                     {
                         graveyard_contribution += previous_block.previous_block_unpaid;
@@ -2437,6 +2608,13 @@ impl Block {
 
     /// [transaction][transaction][transaction]...
     pub fn serialize_for_net(&self, block_type: BlockType) -> Vec<u8> {
+        debug!(
+            "[TRACE_SYNC][SERDE] block_serialize_start block_id={} block_hash={} tx_count={} block_type={:?}",
+            self.id,
+            self.hash.to_hex(),
+            self.transactions.len(),
+            block_type
+        );
         let mut tx_len_buffer: Vec<u8> = vec![];
 
         // block headers do not get tx data
@@ -2494,6 +2672,13 @@ impl Block {
         ]
         .concat();
 
+        debug!(
+            "[TRACE_SYNC][SERDE] block_serialize_ok block_id={} block_hash={} bytes={} block_type={:?}",
+            self.id,
+            self.hash.to_hex(),
+            buffer.len(),
+            block_type
+        );
         buffer
     }
 
@@ -2627,7 +2812,7 @@ impl Block {
                         total_fees: 0,
                         total_work_for_me: 0,
                         cumulative_fees: 0,
-                        routed_from_peer: tx.routed_from_peer.clone(),
+                        routed_from_peer_id: tx.routed_from_peer_id,
                     }
                 }
             })
@@ -2728,7 +2913,9 @@ impl Block {
             trace!("SPV mode, skipping block validation");
             self.generate_consensus_values(blockchain, storage, configs)
                 .await;
-            if configs.get_blockchain_configs().initial_loading_completed {
+            if let InitialLoadingStatus::Completed =
+                configs.get_blockchain_configs().initial_loading_status
+            {
                 self.is_valid = true;
             }
             return true;
@@ -3039,7 +3226,9 @@ impl Block {
             // ghost blocks
             //
             if let BlockType::Ghost = previous_block.block_type {
-                if configs.get_blockchain_configs().initial_loading_completed {
+                if let InitialLoadingStatus::Completed =
+                    configs.get_blockchain_configs().initial_loading_status
+                {
                     self.is_valid = true;
                 }
                 return true;
@@ -3103,7 +3292,13 @@ impl Block {
             //
             if let Some(gt_index) = cv.gt_index {
                 let golden_ticket: GoldenTicket =
-                    GoldenTicket::deserialize_from_net(&self.transactions[gt_index].data);
+                    match GoldenTicket::deserialize_from_net(&self.transactions[gt_index].data) {
+                        Ok(gt) => gt,
+                        Err(_) => {
+                            warn!("failed to deserialize golden ticket during validation");
+                            return false;
+                        }
+                    };
 
                 //
                 // we already have a golden ticket, but create a new one pulling the
@@ -3248,9 +3443,11 @@ impl Block {
                         &fee_transaction_in_block.serialize_for_signature()
                     );
                     if let Some(gt_index) = cv.gt_index {
-                        let golden_ticket: GoldenTicket =
-                            GoldenTicket::deserialize_from_net(&self.transactions[gt_index].data);
-                        error!("gt.publickey = {:?}", golden_ticket.public_key.to_hex());
+                        if let Ok(golden_ticket) =
+                            GoldenTicket::deserialize_from_net(&self.transactions[gt_index].data)
+                        {
+                            error!("gt.publickey = {:?}", golden_ticket.public_key.to_hex());
+                        }
                     }
 
                     return false;
@@ -3278,7 +3475,9 @@ impl Block {
         // class. Note that we are passing in a read-only copy of our UTXOSet so
         // as to determine spendability.
 
-        if configs.get_blockchain_configs().initial_loading_completed {
+        if let InitialLoadingStatus::Completed =
+            configs.get_blockchain_configs().initial_loading_status
+        {
             // we don't validate transactions if we load blocks from disk
             trace!(
                 "validating transactions ... count : {:?}",
@@ -3329,7 +3528,9 @@ impl Block {
             trace!("transactions validation complete");
         }
 
-        if configs.get_blockchain_configs().initial_loading_completed {
+        if let InitialLoadingStatus::Completed =
+            configs.get_blockchain_configs().initial_loading_status
+        {
             self.is_valid = true;
         }
 
@@ -3337,21 +3538,26 @@ impl Block {
     }
 
     pub fn generate_transaction_hashmap(&mut self) {
-        if !self.keys_invloved.is_empty() {
+        if !self.publickeys_referenced_in_block_transactions.is_empty() {
             return;
         }
         for tx in self.transactions.iter() {
             for slip in tx.from.iter() {
-                self.keys_invloved.insert(slip.public_key);
+                self.publickeys_referenced_in_block_transactions
+                    .insert(slip.public_key);
             }
             for slip in tx.to.iter() {
-                self.keys_invloved.insert(slip.public_key);
+                self.publickeys_referenced_in_block_transactions
+                    .insert(slip.public_key);
             }
         }
     }
     pub fn has_keylist_txs(&self, keylist: &Vec<SaitoPublicKey>) -> bool {
         for key in keylist {
-            if self.keys_invloved.contains(key) {
+            if self
+                .publickeys_referenced_in_block_transactions
+                .contains(key)
+            {
                 return true;
             }
         }
@@ -3366,7 +3572,7 @@ impl Block {
     }
     pub fn print_all(&self) {
         info!(
-            "Block {{ id: {}, timestamp: {}, previous_block_hash: {:?}, creator: {:?}, merkle_root: {:?}, signature: {:?}, graveyard: {}, treasury: {}, total_fees: {}, total_fees_new: {}, total_fees_atr: {}, avg_total_fees: {}, avg_total_fees_new: {}, avg_total_fees_atr: {}, total_payout_routing: {}, total_payout_mining: {}, total_payout_treasury: {}, total_payout_graveyard: {}, total_payout_atr: {}, avg_payout_routing: {}, avg_payout_mining: {}, avg_payout_treasury: {}, avg_payout_graveyard: {}, avg_payout_atr: {}, avg_fee_per_byte: {}, fee_per_byte: {}, avg_nolan_rebroadcast_per_block: {}, burnfee: {}, difficulty: {}, previous_block_unpaid: {}, hash: {:?}, total_work: {}, in_longest_chain: {}, has_golden_ticket: {}, has_issuance_transaction: {}, issuance_transaction_index: {}, has_fee_transaction: {}, has_staking_transaction: {}, golden_ticket_index: {}, fee_transaction_index: {}, total_rebroadcast_slips: {}, total_rebroadcast_nolan: {}, rebroadcast_hash: {}, block_type: {:?}, cv: {}, routed_from_peer: {:?} ",
+            "Block {{ id: {}, timestamp: {}, previous_block_hash: {:?}, creator: {:?}, merkle_root: {:?}, signature: {:?}, graveyard: {}, treasury: {}, total_fees: {}, total_fees_new: {}, total_fees_atr: {}, avg_total_fees: {}, avg_total_fees_new: {}, avg_total_fees_atr: {}, total_payout_routing: {}, total_payout_mining: {}, total_payout_treasury: {}, total_payout_graveyard: {}, total_payout_atr: {}, avg_payout_routing: {}, avg_payout_mining: {}, avg_payout_treasury: {}, avg_payout_graveyard: {}, avg_payout_atr: {}, avg_fee_per_byte: {}, fee_per_byte: {}, avg_nolan_rebroadcast_per_block: {}, burnfee: {}, difficulty: {}, previous_block_unpaid: {}, hash: {:?}, total_work: {}, in_longest_chain: {}, has_golden_ticket: {}, has_issuance_transaction: {}, issuance_transaction_index: {}, has_fee_transaction: {}, has_staking_transaction: {}, golden_ticket_index: {}, fee_transaction_index: {}, total_rebroadcast_slips: {}, total_rebroadcast_nolan: {}, rebroadcast_hash: {}, block_type: {:?}, cv: {}, routed_from_peer_id: {:?} ",
             self.id,
             self.timestamp,
             self.previous_block_hash.to_hex(),
@@ -3412,7 +3618,7 @@ impl Block {
             self.rebroadcast_hash.to_hex(),
             self.block_type,
             self.cv,
-            self.routed_from_peer,
+            self.routed_from_peer_id,
         );
         info!(" transactions : ");
         for (index, tx) in self.transactions.iter().enumerate() {
@@ -3427,7 +3633,7 @@ mod tests {
     use futures::future::join_all;
     use log::info;
 
-    use crate::core::consensus::block::{Block, BlockType};
+    use crate::core::consensus::block::{Block, BlockType, BLOCK_HEADER_SIZE};
 
     use crate::core::consensus::merkle::MerkleTree;
     use crate::core::consensus::slip::{Slip, SlipType};
@@ -3436,7 +3642,7 @@ mod tests {
     use crate::core::defs::{
         Currency, PrintForLog, SaitoHash, SaitoPrivateKey, SaitoPublicKey, NOLAN_PER_SAITO,
     };
-    use crate::core::io::storage::Storage;
+    use crate::core::storage::storage::Storage;
     use crate::core::util::crypto::{generate_keys, verify_signature};
     use crate::core::util::test::node_tester::test::NodeTester;
     use crate::core::util::test::test_manager::test::TestManager;
@@ -3471,7 +3677,7 @@ mod tests {
         assert_eq!(block.block_type, BlockType::Full);
         assert_eq!(block.slips_spent_this_block, AHashMap::new());
         assert_eq!(block.created_hashmap_of_slips_spent_this_block, false);
-        assert_eq!(block.routed_from_peer, None);
+        assert_eq!(block.routed_from_peer_id, 0);
     }
 
     #[test]
@@ -3859,7 +4065,6 @@ mod tests {
     }
 
     #[tokio::test]
-    #[ignore]
     #[serial_test::serial]
     async fn avg_fee_per_byte_test() {
         // pretty_env_logger::init();
@@ -3900,7 +4105,7 @@ mod tests {
             tx_size,
             block.transactions.len()
         );
-        assert_eq!(block.avg_fee_per_byte, total_fees / tx_size as Currency);
+        assert_eq!(block.fee_per_byte, total_fees / tx_size as Currency);
 
         let mut block = t
             .create_block(
@@ -3931,7 +4136,7 @@ mod tests {
             tx_size,
             block.transactions.len()
         );
-        assert_eq!(block.avg_fee_per_byte, total_fees / tx_size as Currency);
+        assert_eq!(block.fee_per_byte, total_fees / tx_size as Currency);
     }
 
     #[ignore]
@@ -4130,5 +4335,15 @@ mod tests {
             }
             assert!(have_atr_tx);
         }
+    }
+
+    #[test]
+    fn deserialize_from_net_rejects_empty_buffer() {
+        assert!(Block::deserialize_from_net(&[]).is_err());
+    }
+
+    #[test]
+    fn deserialize_from_net_rejects_short_header() {
+        assert!(Block::deserialize_from_net(&vec![0u8; BLOCK_HEADER_SIZE - 1]).is_err());
     }
 }

@@ -130,6 +130,49 @@ class GameMoves {
   }
 
   //
+  // Query the archives of your peers for the most recent game moves
+  // Fixes out-of-sync game states
+  // Code copied from game-menu.js so it can live as a more general function
+  // in the game engine, also called automatically when players are refreshing
+  // to try to fix the game...
+
+  async fetchRecentGameMoves() {
+    let newtx = await this.app.wallet.createUnsignedTransactionWithDefaultFee();
+    let recipients = [];
+    this.game.accepted.forEach((player) => {
+      if (player != this.publicKey) {
+        newtx.addTo(player);
+        recipients.push(player);
+      }
+    });
+    newtx.msg = {
+      request: 'game relay recent moves',
+      module: this.name,
+      game_id: this.game.id,
+      timestamp: new Date().getTime()
+    };
+
+    this.app.connection.emit('relay-send-message', {
+      request: 'game relay recent moves',
+      recipient: recipients,
+      data: newtx.toJson()
+    });
+
+    this.app.storage.loadTransactions(
+      {
+        field4: this.game.id
+      },
+      async (txs) => {
+        siteMessage(`Analyzing ${txs.length} recent moves...`, 2500);
+        for (let i = txs.length - 1; i >= 0; i--) {
+          await this.onConfirmation(-1, txs[i], 0);
+        }
+      },
+      null
+    );
+  }
+
+  //
   // we accept this as the next move if it is either one more than the current
   // in the MASTER step (i.e. legacy for two player games) or if it is one more
   // than the last move made by the specific player (i.e. 3P simultaneous moves)
@@ -250,8 +293,16 @@ class GameMoves {
 
   async addNextMove(gametx) {
     let gametxmsg = gametx.returnMessage();
+    const guard = this.halted == 1 || this.gaming_active == 1 || this.game.initialize_game_run == 0;
+    console.log('[OBS_TRACE] addNextMove()', {
+      step: gametxmsg?.step?.game,
+      gaming_active: this.gaming_active,
+      halted: this.halted,
+      initialize_game_run: this.game.initialize_game_run,
+      guardTriggered: guard
+    });
 
-    if (this.halted == 1 || this.gaming_active == 1 || this.game.initialize_game_run == 0) {
+    if (guard) {
       console.info(
         `GT [addNextMove] -- save as future move because halted (${this.halted}) or active (${
           this.gaming_active
@@ -292,26 +343,6 @@ class GameMoves {
       await this.initializeGameQueue(this.game.id);
     }
 
-    //
-    // OBSERVER MODE -
-    //
-    if (this.game.player == 0) {
-      if (this.gameBrowserActive()) {
-        this.observerControls.showLastMoveButton();
-        this.observerControls.updateStep(this.game.step.game);
-      }
-
-      this.observerControls.game_states.push(this.game_state_pre_move);
-      this.observerControls.game_moves.push(gametx);
-      //To avoid memory overflow for long games
-      if (this.observerControls.game_states.length > 100) {
-        this.observerControls.game_states.shift();
-      }
-      if (this.observerControls.game_moves.length > 100) {
-        this.observerControls.game_moves.shift();
-      }
-    }
-
     if (this.game.queue) {
       for (let i = 0; i < gametxmsg.turn.length; i++) {
         this.game.queue.push(gametxmsg.turn[i]);
@@ -326,6 +357,7 @@ class GameMoves {
 
       this.saveFutureMoves(this.game.id);
       this.saveGame(this.game.id);
+      console.log('[OBS_TRACE] addNextMove() accepted; calling startQueue()');
       await this.startQueue();
     } else {
       console.error('No queue in game engine');
@@ -371,21 +403,11 @@ class GameMoves {
       this.game.future.push(ftx);
       this.saveFutureMoves(this.game.id);
 
-      if (this.game.player == 0 && this.gameBrowserActive()) {
-        try {
-          if (this.observerControls.is_paused || this.halted) {
-            this.observerControls.showNextMoveButton();
-            this.observerControls.updateStatus('New future move');
-          } else if (!this.gaming_active && this.archive_exhausted > 0) {
-            console.warn(
-              'GT: [addFutureMove] game seems stuck..., moving into processing future moves'
-            );
-            await this.processFutureMoves();
-          }
-        } catch (err) {
-          console.error('Observer error adding future move');
-          console.error(err);
-        }
+      if (this.game.player == 0 && this.gameBrowserActive() && !this.gaming_active) {
+        console.warn(
+          'GT: [addFutureMove] game seems stuck..., moving into processing future moves'
+        );
+        await this.processFutureMoves();
       }
     }
   }
@@ -398,6 +420,10 @@ class GameMoves {
     // this is always called after runQueue which locks the queue for newMoves while processing
     // but there are multiple paths out of the queue, so we unlock it here
     this.gaming_active = 0;
+    console.log('[OBS_TRACE] processFutureMoves(): set gaming_active = 0', {
+      futureLength: this.game.future?.length,
+      halted: this.halted
+    });
 
     if (this.game.futurePlus && this.game.futurePlus[this.game.step.game]) {
       //>>>>>>>>>>>>>>>>>>>
@@ -431,7 +457,6 @@ class GameMoves {
 
         //This move (future[i]) is the next one, move it to the queue
         this.game.future.splice(i, 1);
-        this.observerControls.updateStatus('Advanced one move');
         await this.addNextMove(ftx);
         return 1;
       } else if (this.isFutureMove(ftx.from[0].publicKey, ftxmsg)) {
@@ -449,17 +474,6 @@ class GameMoves {
       console.warn(
         `GT [processFutureMoves] We have ${this.game.future.length} future moves, but NOT the next one!`
       );
-      this.archive_exhausted = -1;
-    }
-
-    if (this.game.player == 0 && this.archive_exhausted <= 0) {
-      //param prevents endless looping
-      console.info(
-        'GT [processFutureMoves] Observer.... check for additional moves... after processing future moves'
-      );
-      this.observerDownloadNextMoves(() => {
-        this.processFutureMoves();
-      });
     }
 
     return 0; //No processable moves in future
@@ -661,15 +675,10 @@ class GameMoves {
     // comes back online. refreshing the browser will also try to auto-resend the tx this way.
     //
     game_self.app.wallet.addTransactionToPending(newtx);
-    //
-    // await here seems to sometimes trigger game engine to continue
-    // which can result in moves = [] becoming empty and we lose
-    // our resolve...
-    //
-    //await game_self.app.wallet.addTransactionToPending(newtx);
+
     game_self.saveGame(game_self.game.id);
 
-    console.debug('GT: Sending Move: ', JSON.parse(JSON.stringify(mymsg)));
+    // console.debug('GT: Sending Move: ', JSON.parse(JSON.stringify(mymsg)));
 
     //
     // send off-chain if possible - step 2 onchain to avoid relay issues with options
@@ -698,123 +707,6 @@ class GameMoves {
     }
 
     game_self.app.network.propagateTransaction(newtx);
-  }
-
-  async observerDownloadNextMoves(mycallback = null) {
-    // purge old transactions
-    for (let i = this.game.future.length - 1; i >= 0; i--) {
-      let queued_tx = new Transaction();
-      queued_tx.deserialize_from_web(this.app, this.game.future[i]);
-      let queued_txmsg = queued_tx.returnMessage();
-
-      if (
-        queued_txmsg.step.game <= this.game.step.game &&
-        queued_txmsg.step.game <= this.game.step.players[queued_tx.from[0].publicKey]
-      ) {
-        console.info(
-          'GT [observer] Trimming future move to download new ones:',
-          JSON.parse(JSON.stringify(queued_txmsg))
-        );
-        this.game.future.splice(i, 1);
-      }
-    }
-
-    if (!this.archive_connected) {
-      console.warn("GT [observer] Haven't established peer yet, try again after 3s");
-      setTimeout(() => {
-        this.observerDownloadNextMoves(mycallback);
-      }, 3000);
-      return null;
-    }
-
-    if (this.archive_exhausted < 0) {
-      console.info('GT [observer] Try archives after 10s delay');
-      setTimeout(() => {
-        this.archive_exhausted = 0;
-        this.observerDownloadNextMoves(mycallback);
-      }, 10000);
-      return null;
-    }
-
-    let currentStep = String(this.game.step.game).padStart(5, '0');
-
-    console.info(
-      `GT [observer] Load game moves from archive (${this.archive_exhausted}): ${this.name}_${this.game.id} from ${this.game.originator} after ${currentStep}`
-    );
-
-    return this.app.storage.loadTransactions(
-      {
-        field1: this.name,
-        field4: this.game.id,
-        field5: currentStep,
-        ascending: 1,
-        limit: 20,
-        field5_sort: 1
-      },
-      async (txs) => {
-        let new_moves = 0;
-
-        for (let tx of txs) {
-          let game_move = tx.returnMessage();
-
-          if (game_move?.step && game_move.request == 'game') {
-            let loaded_step = game_move.step.game;
-
-            if (
-              loaded_step > this.game.step.game ||
-              loaded_step > this.game.step.players[tx.from[0].publicKey]
-            ) {
-              let ftx = tx.serialize_to_web(this.app);
-
-              if (!this.game.future.includes(ftx)) {
-                this.game.future.push(ftx);
-                new_moves++;
-                console.debug('GT [observer] Archived move: ' + JSON.stringify(game_move));
-              }
-            }
-          } else {
-            console.warn('GT [observer] Non game move: ', game_move);
-
-            let rtx = new Transaction();
-            rtx.msg.module = 'Relay';
-            rtx.msg.request = 'game relay update';
-            rtx.msg.data = tx.toJson();
-
-            if (!this.game.futurePlus) {
-              this.game.futurePlus = {};
-            }
-
-            this.game.futurePlus[game_move.step] = rtx;
-          }
-        }
-
-        console.info(
-          `GT [observer] Found ${new_moves} future moves in archives. Initializing? `,
-          this.game.initializing
-        );
-
-        this.saveFutureMoves(this.game.id);
-        this.saveGame(this.game.id);
-
-        if (new_moves == 0) {
-          if (this.game.initializing) {
-            // Allow delayed looping when getting initial moves...
-            this.archive_exhausted = -1;
-          } else {
-            this.archive_exhausted = 1;
-          }
-
-          if (this.game.player == 0 && this.gameBrowserActive()) {
-            this.observerControls.render();
-          }
-        }
-
-        if (mycallback) {
-          console.debug('GT [observer] Run callback after fetching archives...');
-          mycallback();
-        }
-      }
-    );
   }
 }
 

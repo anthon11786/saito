@@ -94,7 +94,7 @@ class Faucet extends ModTemplate {
         		<h2>SAITO Faucet</h2>
         	        <p>click on the button to receive 100 SAITO from the testnet faucet</p>
 		        <button class="saito-primary faucet-button" id="faucet-button" >Request Testnet SAITO</button>
-      			<div class="faucet-spinner"><img class="spinner" src="/saito/img/spinner.svg"></div>
+      			<div class="faucet-spinner"><div class="saito_spinner spinner"></div></div>
       		</div>`;
 	}
 
@@ -109,6 +109,8 @@ class Faucet extends ModTemplate {
 					let spinner = document.querySelector('.faucet-spinner');
 					btn.style.display = 'none';
 					spinner.style.display = 'block';
+					let msg_holder = document.querySelector('.faucet p');
+					msg_holder.innerHTML = 'Please wait a moment';
 				} catch (err) {}
 
 				let tx = await this.createFaucetTransaction();
@@ -134,9 +136,6 @@ class Faucet extends ModTemplate {
 			return;
 		}
 
-		//
-		// Bound Transactions (monitor NFT transfers)
-		//
 		let txmsg = tx.returnMessage();
 
 		if (txmsg.request === 'faucet request') {
@@ -151,13 +150,13 @@ class Faucet extends ModTemplate {
 		}
 
 		if (txmsg.request === 'faucet issuance') {
-			if (tx.isTo(this.publicKey)) {
+			if (tx.isTo(this.publicKey) && this.app.BROWSER) {
 				siteMessage('Faucet Payment Received...', 3000);
 				try {
-					let msg = document.querySelector('.saito-container p');
+					let msg_holder = document.querySelector('.faucet p');
 					let spinner = document.querySelector('.faucet-spinner');
 					spinner.style.display = 'none';
-					msg.innerHTML = 'please check your wallet...';
+					msg_holder.innerHTML = 'please check your wallet...';
 				} catch (err) {}
 			}
 			return;
@@ -173,8 +172,6 @@ class Faucet extends ModTemplate {
 			module: 'Faucet',
 			request: 'faucet request'
 		};
-		newtx.type = 0;
-		newtx.packData();
 		await newtx.sign();
 		return newtx;
 	}
@@ -206,7 +203,6 @@ class Faucet extends ModTemplate {
 			module: 'Faucet',
 			request: 'faucet issuance'
 		};
-		newtx.packData();
 		await newtx.sign();
 		this.app.network.propagateTransaction(newtx);
 	}

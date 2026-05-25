@@ -15,7 +15,7 @@ button,
   cursor: pointer;
   border: var(--border-thickness-thin) solid var(--saito-primary);
   text-transform: capitalize;
-  padding: 0 1rem;
+  padding: /*0 */ 1rem;
   margin: 0.5rem;
   white-space: nowrap;
   min-width: 18rem;
@@ -124,8 +124,10 @@ button i {
 .saito-button-row.auto-size .saito-button-secondary,
 .saito-button-row.auto-size .saito-button-primary {
   min-width: unset;
-  flex: 1;
-  width: 100%;
+  flex-grow: 1;
+  width: 35%;
+  height: 100%;
+  white-space: break-spaces;
 }
 
 /*******************************
@@ -191,11 +193,36 @@ span.saito-anchor {
     min-width: 12rem;
   }
 
+  /* This allows row to become column */
   .saito-button-row {
+    flex-wrap: wrap;
+    gap: 1rem;
+  }
+
+  .saito-button-row button,
+  .saito-button-row .saito-button-secondary,
+  .saito-button-row .saito-button-primary {
+    min-width: unset;
+    flex-grow: 1;
+    width: 35%; /* Set this to > 49% to force buttons to stack vertically */
+  }
+
+  .saito-button-row.mobile-column,
+  .saito-button-row.auto-size {
     flex-direction: column;
   }
+
   .saito-overlay-form > button[type='button'],
   .saito-button-row > button[type='button'] {
     width: 100%;
   }
+
+  .saito-button-row.force-row {
+    flex-direction: row;
+  }
+}
+
+/* for dynamically added faucent button */
+.get-saito-tokens {
+  display: flex;
 }

@@ -27,9 +27,9 @@ pub mod test {
     use std::error::Error;
     use std::fmt::{Debug, Formatter};
     use std::fs;
-    use std::io::{BufReader, Read, Write};
     use std::ops::{Deref, DerefMut};
     use std::path::Path;
+    use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::Arc;
     use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -44,7 +44,6 @@ pub mod test {
     use crate::core::consensus::blockchain::{AddBlockResult, Blockchain};
     use crate::core::consensus::golden_ticket::GoldenTicket;
     use crate::core::consensus::mempool::Mempool;
-    use crate::core::consensus::peers::peer_collection::PeerCollection;
     use crate::core::consensus::slip::Slip;
     use crate::core::consensus::transaction::{Transaction, TransactionType};
     use crate::core::consensus::wallet::Wallet;
@@ -53,10 +52,11 @@ pub mod test {
         Timestamp, UtxoSet, NOLAN_PER_SAITO, PROJECT_PUBLIC_KEY, RECOLLECT_EVERY_TX,
         RECOLLECT_NOTHING,
     };
-    use crate::core::io::network::Network;
-    use crate::core::io::storage::Storage;
     use crate::core::mining_thread::MiningEvent;
+    use crate::core::network::network::Network;
+    use crate::core::network::peers::Peers;
     use crate::core::process::keep_time::{KeepTime, Timer};
+    use crate::core::storage::storage::Storage;
     use crate::core::util::configuration::{
         get_default_recollect_mode, BlockchainConfig, Configuration, ConsensusConfig, PeerConfig,
         Server, WalletConfig,
@@ -72,6 +72,7 @@ pub mod test {
     }
 
     pub const TEST_ISSUANCE_FILEPATH: &'static str = "../saito-rust/data/issuance/test/issuance";
+    static TEST_ISSUANCE_DIR_COUNTER: AtomicUsize = AtomicUsize::new(0);
 
     struct TestTimeKeeper {}
 
@@ -88,7 +89,7 @@ pub mod test {
         pub latest_block_hash: SaitoHash,
         pub network: Network,
         pub storage: Storage,
-        pub peer_lock: Arc<RwLock<PeerCollection>>,
+        pub peer_lock: Arc<RwLock<Peers>>,
         pub sender_to_miner: Sender<MiningEvent>,
         pub receiver_in_miner: Receiver<MiningEvent>,
         pub config_lock: Arc<RwLock<dyn Configuration + Send + Sync>>,
@@ -98,7 +99,7 @@ pub mod test {
         fn default() -> Self {
             let keys = generate_keys();
             let wallet = Wallet::new(keys.1, keys.0);
-            let peers = Arc::new(RwLock::new(PeerCollection::default()));
+            let peers = Arc::new(RwLock::new(Peers::default()));
             let wallet_lock = Arc::new(RwLock::new(wallet));
             let blockchain_lock = Arc::new(RwLock::new(Blockchain::new(
                 wallet_lock.clone(),
@@ -136,7 +137,6 @@ pub mod test {
                     Box::new(TestIOHandler::new()),
                     peers.clone(),
                     wallet_lock.clone(),
-                    configs.clone(),
                     Timer {
                         time_reader: Arc::new(TestTimeKeeper {}),
                         hasten_multiplier: 1,
@@ -155,37 +155,17 @@ pub mod test {
 
     impl TestManager {
         pub fn get_test_issuance_file() -> Result<&'static str, std::io::Error> {
-            let temp_dir = Path::new("./temp_test_directory").to_path_buf();
+            let dir_id = TEST_ISSUANCE_DIR_COUNTER.fetch_add(1, Ordering::Relaxed);
+            let temp_dir = Path::new("./temp_test_directory").join(format!(
+                "issuance-{}-{}",
+                std::process::id(),
+                dir_id
+            ));
             fs::create_dir_all(&temp_dir).unwrap();
             let source_path = Path::new(TEST_ISSUANCE_FILEPATH);
-            // Read the existing counter from the file or initialize it to 1 if the file doesn't exist
-            let issuance_counter_path = temp_dir.join("issuance_counter.txt");
-            let counter = if issuance_counter_path.exists() {
-                let mut file = BufReader::new(fs::File::open(&issuance_counter_path).unwrap());
-                let mut buffer = String::new();
-                file.read_to_string(&mut buffer).unwrap();
-                buffer.trim().parse::<usize>().unwrap_or(1)
-            } else {
-                1
-            };
-            let target_filename = format!("issuance-{}.txt", counter);
+            let target_filename = "issuance.txt";
             let target_path = temp_dir.join(target_filename);
-            let cwd = std::env::current_dir().unwrap();
-            // error!(
-            //     "cwd : {:?} copying file from {:?} to {:?}",
-            //     cwd, source_path, target_path
-            // );
-            // if !target_path.exists() {
-            //     error!("target_path does not exist.");
-            // }
-            // if !source_path.exists() {
-            //     error!("source_path does not exist.");
-            // }
             fs::copy(source_path, &target_path).unwrap();
-            // Update the counter in the file for the next instance
-            let mut file = fs::File::create(&issuance_counter_path).unwrap();
-            writeln!(file, "{}", counter + 1).unwrap();
-
             let target_path_str = target_path
                 .to_str()
                 .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::Other, "Invalid path"))
@@ -684,17 +664,9 @@ pub mod test {
                 {
                     let mut wallet = self.wallet_lock.write().await;
 
-                    transaction = Transaction::create(
-                        &mut wallet,
-                        public_key,
-                        txs_amount,
-                        txs_fee,
-                        false,
-                        None,
-                        latest_block_id,
-                        genesis_period,
-                    )
-                    .unwrap();
+                    transaction = wallet
+                        .create_transaction(vec![public_key], vec![txs_amount], txs_fee)
+                        .unwrap();
                 }
 
                 transaction.sign(&private_key);
@@ -1095,18 +1067,9 @@ pub mod test {
             let private_key;
 
             {
-                let wallet = self.wallet_lock.read().await;
+                let mut wallet = self.wallet_lock.write().await;
                 private_key = wallet.private_key;
-                let mut tx = Transaction::create(
-                    &mut wallet.clone(),
-                    to_public_key,
-                    amount,
-                    0,
-                    false,
-                    None,
-                    latest_block_id,
-                    genesis_period,
-                )?;
+                let mut tx = wallet.create_transaction(vec![to_public_key], vec![amount], 0)?;
                 tx.sign(&private_key);
                 block.add_transaction(tx);
             }
@@ -1141,9 +1104,10 @@ pub mod test {
 
     impl Drop for TestManager {
         fn drop(&mut self) {
-            // Cleanup: Remove the temporary directory and its contents
-            if let Err(err) = fs::remove_dir_all("./temp_test_directory") {
-                eprintln!("Error cleaning up: {}", err);
+            if let Some(temp_dir) = Path::new(self.issuance_path).parent() {
+                if let Err(err) = fs::remove_dir_all(temp_dir) {
+                    eprintln!("Error cleaning up: {}", err);
+                }
             }
         }
     }
@@ -1198,31 +1162,11 @@ pub mod test {
             Some(&mut self.consensus)
         }
 
-        fn get_congestion_data(
-            &self,
-        ) -> Option<&crate::core::consensus::peers::congestion_controller::CongestionStatsDisplay>
-        {
-            todo!()
-        }
-
-        fn set_congestion_data(
-            &mut self,
-            congestion_data: Option<
-                crate::core::consensus::peers::congestion_controller::CongestionStatsDisplay,
-            >,
-        ) {
-            todo!()
-        }
-
-        // fn set_blockchain_configs(&mut self, config: Option<BlockchainConfig>) {
-        //     self.blockchain = config;
-        // }
-
         fn get_config_path(&self) -> String {
             String::new()
         }
 
-        fn set_config_path(&mut self, path: String) {}
+        fn set_config_path(&mut self, _path: String) {}
 
         fn save(&self) -> Result<(), std::io::Error> {
             Ok(())

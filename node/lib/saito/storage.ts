@@ -1,12 +1,18 @@
 import * as JSON from 'json-bigint';
 import Transaction from './transaction';
-import { Saito } from '../../apps/core';
+import { Saito } from './app';
 import Block from './block';
 const localforage = require('localforage');
-import fs from 'fs';
-import path from 'path';
 const JsStore = require('jsstore');
 import S from 'saito-js/saito';
+
+const safeRequire = (moduleName: string) => {
+  try {
+    return eval('require')(moduleName);
+  } catch (err) {
+    return null;
+  }
+};
 
 class Storage {
   public app: Saito;
@@ -53,17 +59,55 @@ class Storage {
         return;
       }
     }
-    const response = await fetch(`/options`);
+    const response = await fetch('/options');
     let receivedOptions = await response.json();
+    const logPeers = (source: string) => {
+      const peers = this.app.options?.peers;
+      const n = Array.isArray(peers) ? peers.length : 0;
+      const first = n > 0 ? peers[0] : null;
+      const wsHint =
+        first && first.host != null && first.port != null && first.protocol != null
+          ? `${first.protocol === 'https' ? 'wss' : 'ws'}://${first.host}:${first.port}/wsopen`
+          : null;
+      const hasUrl = !!wsHint;
+      const willConnect = n > 0 && hasUrl;
+      console.log('[SAITO OPTIONS] peer list after loadOptions', {
+        source,
+        peerCount: n,
+        derivedWebSocketUrl: wsHint,
+        hasWebSocketUrl: hasUrl,
+        wasmWillAttemptConnect: willConnect,
+        firstPeer: first ? { ...first } : null
+      });
+      if (!willConnect) {
+        console.log(
+          '[SAITO OPTIONS] WASM will not open outbound sockets (no peers or incomplete host/port/protocol).'
+        );
+      }
+    };
     if (typeof Storage !== 'undefined') {
       const data = localStorage.getItem('options');
       if (data != 'null' && data != null) {
         this.app.options = JSON.parse(data);
         this.app.options.consensus = receivedOptions.consensus;
+        // Cached wallet previously only refreshed consensus from the server; peers stayed
+        // whatever was in localStorage (often []). Core builds ws://…/wsopen from peers[].
+        const cachedPeers = this.app.options.peers;
+        const cachedEmpty = !Array.isArray(cachedPeers) || cachedPeers.length === 0;
+        const serverPeers = receivedOptions.peers;
+        const serverHasPeers = Array.isArray(serverPeers) && serverPeers.length > 0;
+        if (cachedEmpty && serverHasPeers) {
+          console.log(
+            '[SAITO OPTIONS] localStorage had no peers; merging peers[] from GET /options'
+          );
+          this.app.options.peers = serverPeers;
+        }
+        logPeers('localStorage+merge');
         return;
       }
     }
     this.app.options = receivedOptions;
+    logPeers('GET_/options_only');
   }
 
   returnClientOptions(): string {
@@ -139,7 +183,7 @@ class Storage {
         }
       }
       if (peer != null) {
-        return await this.app.network.sendRequestAsTransaction(message, data, null, peer.peerIndex);
+        return await this.app.network.sendRequestAsTransaction(message, data, null, peer.publicKey);
       } else {
         // This await doesn't seem to ever resolve sometimes...
         return await this.app.network.sendRequestAsTransaction(message, data);
@@ -185,7 +229,7 @@ class Storage {
       }
     } else {
       if (peer != null) {
-        return await this.app.network.sendRequestAsTransaction(message, data, null, peer.peerIndex);
+        return await this.app.network.sendRequestAsTransaction(message, data, null, peer.publicKey);
       } else {
         return await this.app.network.sendRequestAsTransaction(message, data);
       }
@@ -252,7 +296,7 @@ class Storage {
         (res) => {
           return internal_callback(res);
         },
-        peer.peerIndex
+        peer.publicKey
       );
     } else {
       this.app.network.sendRequestAsTransaction(message, data, function (res) {
@@ -424,11 +468,8 @@ class Storage {
 
       //Update hash
       this.wallet_options_hash = new_wallet_hash;
-
-      //update indexedDB (which is needed for privateKey wallet recovery)
-      this.saveOptionsToForage();
     } catch (err) {
-      console.trace(err);
+      // console.error('localStorage error: ', err); // full err can be large/circular
       for (let i = 0; i < localStorage.length; i++) {
         let item = localStorage.getItem(localStorage.key(i));
         let parsed_item = '';
@@ -437,8 +478,19 @@ class Storage {
         } catch (err) {
           // Not everything is json... we don't care
         }
-        console.log(localStorage.key(i), item.length, item, parsed_item);
+        // console.debug(localStorage.key(i), item.length, item, parsed_item);
       }
+      // console.debug(`Trying to save: (${new_wallet_json.length})`, JSON.parse(new_wallet_json));
+      for (let key in this.app.options) {
+        // console.log(key, JSON.stringify(this.app.options[key]).length);
+      }
+    }
+
+    try {
+      //update indexedDB (which is needed for privateKey wallet recovery)
+      this.saveOptionsToForage();
+    } catch (err) {
+      // console.error('LocalForage error: ', err);
     }
   }
 
@@ -455,7 +507,7 @@ class Storage {
         updated_at: new Date().getTime()
       };
 
-      console.log('obj: ', obj);
+      // console.log('obj: ', obj);
 
       let numRows = await this.localDB.insert({
         into: 'dyn_mods',
@@ -463,7 +515,7 @@ class Storage {
       });
 
       let v = await this.loadLocalApplications();
-      console.log('POST INSERT: ' + JSON.stringify(v));
+      // console.log('POST INSERT: ' + JSON.stringify(v));
     }
   }
 
@@ -632,9 +684,17 @@ class Storage {
   }
 
   watchBuildFile(): void {
+    const fs = safeRequire('fs');
+    const path = safeRequire('path');
+
+    if (!fs || !path) {
+      console.warn('Skipping build watcher: filesystem APIs not available in this environment');
+      return;
+    }
+
     const checkBuildNumber = async () => {
-      const filePath = path.join(__dirname, '/config/build.json');
-      fs.readFile('config/build.json', 'utf8', async (err, data) => {
+      const buildJsonPath = path.join(__dirname, 'dist/build.json');
+      fs.readFile(buildJsonPath, 'utf8', async (err, data) => {
         if (err) {
           console.error('Error reading options file:', err);
           return;
@@ -659,7 +719,7 @@ class Storage {
             }
             this.app.build_number = Number(buildNumber);
             let peers = await this.app.network.getPeers();
-            console.log('peers', peers);
+            // console.log('peers', peers);
             peers.forEach((peer) => {
               this.app.network.sendRequest('software-update', data, null, peer);
             });
@@ -671,7 +731,7 @@ class Storage {
             // console.log("Current build number is up-to-date or higher");
           }
         } catch (e) {
-          console.error('Error parsing JSON from options file:', e);
+          // console.error('Error parsing JSON from options file:', e);
         }
       });
     };
@@ -679,8 +739,6 @@ class Storage {
     fs.watchFile('web/saito/saito.js', { interval: 1000 }, (curr, prev) => {
       checkBuildNumber();
     });
-
-    const filePath = path.join(__dirname, 'config/build.json');
   }
 
   async loadNFTTransactions(nft_id) {

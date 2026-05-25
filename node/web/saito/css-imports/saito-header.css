@@ -42,6 +42,13 @@
   display: none;
 }
 
+#saito-header.game .hamburger-container {
+  padding: 0.5rem;
+  background: #0003;
+  border-radius: 0.5rem;
+  margin-top: 1rem;
+}
+
 .saito-header-logo {
   width: 15rem;
   cursor: pointer;
@@ -116,7 +123,7 @@
     width 0.33s;
   z-index: 21;
   width: 40rem;
-  height: calc(100 * var(--saito-vh) - var(--saito-header-height) + 3px);
+  height: calc(100svh - var(--saito-header-height) + 3px);
   overflow: hidden auto;
   color: var(--saito-font-color);
 }
@@ -175,8 +182,11 @@
 .qrcode img {
   height: 18rem;
   width: 18rem;
-  border: var(--border-thickness-medium) solid var(--saito-primary);
-  padding: var(--border-padding-normal);
+  border: var(--border-thickness-fat) solid var(--saito-primary);
+  /* 
+  We need a thick border and no padding for the qrcode to be scannable
+  Do not add a padding
+  */
   border-radius: var(--saito-border-radius);
   background: var(--saito-background-color);
   visibility: inherit;
@@ -333,11 +343,12 @@
 }
 
 .hamburger-container {
-  display: grid;
+  /*display: grid;
+  grid-template-columns: 1fr min-content;*/
+  display: flex;
   align-items: center;
   gap: 1rem;
   margin-left: auto;
-  grid-template-columns: 1fr min-content;
 }
 
 #header-msg {
@@ -577,6 +588,8 @@
   position: relative;
   max-width: 5rem;
   max-height: 5rem;
+  overflow: hidden;
+  border-radius: 50%;
 }
 
 .saito-crypto-details .crypto-logo-container {
@@ -588,6 +601,14 @@
 .crypto-logo {
   height: 100%;
   width: 100%;
+}
+
+.chain-logo {
+  position: absolute;
+  width: auto;
+  height: 36%;
+  bottom: 8%;
+  right: 8%;
 }
 
 .header-crypto-balance {
@@ -606,6 +627,7 @@
     width: 100vw;
     right: -100vw;
     border-radius: unset;
+    border-left: unset;
   }
 
   #saito-header {
@@ -635,7 +657,7 @@
 
   .show-qr .wallet-infoo {
     margin-top: 1.5rem;
-    height: 260px;
+    height: 265px;
     gap: 1rem;
   }
 

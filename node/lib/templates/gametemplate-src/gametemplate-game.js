@@ -159,6 +159,15 @@ class GameGame {
     pom.remove();
   }
 
+  /**
+   * Ensures game has .future and .queue as arrays. Does not clear or overwrite existing values.
+   */
+  normalizeGameShape(game) {
+    if (!game) return;
+    if (!Array.isArray(game.future)) game.future = [];
+    if (!Array.isArray(game.queue)) game.queue = [];
+  }
+
   saveGame(game_id) {
     if (!this.app.BROWSER) {
       return;
@@ -199,6 +208,9 @@ class GameGame {
         for (let i = 0; i < this.app.options.games.length; i++) {
           if (this.app.options.games[i].id === game_id) {
             this.game.timestamp = new Date().getTime();
+
+            this.normalizeGameShape(this.game);
+            this.normalizeGameShape(this.app.options.games[i]);
 
             //
             // sept 25 - do not overwrite any future moves saved separately
@@ -244,15 +256,20 @@ class GameGame {
     // try to URL specified game
     //
     if (game_id == null) {
-      let hash = this.app.browser.parseHash(window.location.hash);
-      if (hash?.gid) {
+      let vars_in_url = this.app.browser.parseHash(window.location.hash);
+      if (vars_in_url?.gid) {
+        game_id = vars_in_url.gid;
+        try {
+          game_id = decodeURIComponent(vars_in_url.gid);
+        } catch (_) {}
         if (this.app.options?.games?.length > 0) {
           for (let i = 0; i < this.app.options.games.length; i++) {
-            if (this.name == this.app.options.games[i].module) {
-              if (this.app.crypto.hash(this.app.options.games[i].id).slice(-6) == hash.gid) {
-                game_id = this.app.options.games[i].id;
-                break;
-              }
+            if (
+              this.name == this.app.options.games[i].module &&
+              this.app.options.games[i].id === game_id
+            ) {
+              game_id = this.app.options.games[i].id;
+              break;
             }
           }
         }
@@ -291,7 +308,9 @@ class GameGame {
       for (let i = 0; i < this.app.options?.games?.length; i++) {
         if (this.app.options.games[i].id === game_id) {
           this.game = JSON.parse(JSON.stringify(this.app.options.games[i]));
+          this.normalizeGameShape(this.game);
           console.info('GT loading game: ' + game_id);
+
           return this.game;
         }
       }
@@ -461,13 +480,6 @@ class GameGame {
         // defaults to SAITO keys
         // I guess this is useful for something...
         this.game.keys.push(this.game.players[i]);
-
-        //
-        //This should automatically add all game opponents to my "contacts"
-        //
-        if (this.app.BROWSER) {
-          this.app.keychain.addWatchedPublicKey(this.game.players[i]);
-        }
       }
       //
       // game step
@@ -647,9 +659,11 @@ class GameGame {
       newtx.addTo(player);
     });
 
+    const game_id = this.game.id;
+    const slug = typeof this.returnSlug === 'function' ? this.returnSlug() : this.name;
     let link =
       window.location.origin +
-      `/arcade/?game=${this.name}&game_id=${this.app.crypto.hash(this.game.id).slice(-6)}`;
+      `/arcade/?game=${encodeURIComponent(slug)}&game_id=${encodeURIComponent(game_id)}`;
 
     newtx.msg = {
       request: 'gameover',

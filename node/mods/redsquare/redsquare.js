@@ -55,6 +55,7 @@ class RedSquare extends ModTemplate {
     this.description = 'Open Source Twitter-clone for the Saito Network';
     this.categories = 'Social Entertainment';
     this.icon_fa = 'fas fa-square-full';
+    this.dependencies = ['Archive', 'Registry'];
 
     this.debug = false;
 
@@ -453,7 +454,7 @@ class RedSquare extends ModTemplate {
         }
       }
     } catch (err) {
-      console.error('RS.initialize: Error while checking pending txs: ', err);
+      // console.error('RS.initialize: Error while checking pending txs: ', err);
     }
   }
 
@@ -554,14 +555,14 @@ class RedSquare extends ModTemplate {
     } else {
       this.peers[peer_idx].peer = peer;
       peer_obj = this.peers[peer_idx];
-      console.log('RS.addPeer: peer refreshed -- ', peer_obj);
+      // console.log('RS.addPeer: peer refreshed -- ', peer_obj);
       return peer_obj;
     }
 
     // Only set interval on new peers, (so we aren't setting multiple on network instability)
     if (this.browser_active) {
       this.loadTweets(
-        'earlier',
+        'later',
         (tx_count) => {
           this.app.connection.emit('redsquare-home-postcache-render-request', tx_count);
         },
@@ -611,8 +612,8 @@ class RedSquare extends ModTemplate {
       this.archive_connected = true;
 
       if (this.browser_active) {
-        siteMessage('Syncing Redsquare...', 2000);
-        this.main.render();
+        //siteMessage('Syncing Redsquare...', 2000);
+        this.main?.render();
       }
     }
   }
@@ -833,8 +834,6 @@ class RedSquare extends ModTemplate {
     //
     let peer_count = 0;
 
-    console.log(peer);
-
     for (let i = 0; i < this.peers.length; i++) {
       if (!peer || peer.publicKey == this.peers[i].publicKey) {
         if (
@@ -890,7 +889,7 @@ class RedSquare extends ModTemplate {
                 }
                 this.peers[i].busy[created_at] = null;
               },
-              this.peers[i].peer.peerIndex
+              this.peers[i].peer.publicKey
             );
           } else {
             console.debug(`RS.loadTweets requesting ${created_at} tweets from archive...`);
@@ -1170,7 +1169,7 @@ class RedSquare extends ModTemplate {
               mycallback(txs);
             }
           },
-          this.peers[j].peer.peerIndex
+          this.peers[j].peer.publicKey
         );
       } else {
         peer_count--;
@@ -1308,6 +1307,7 @@ class RedSquare extends ModTemplate {
 
       if (!t) {
         console.warn('RS.addTweet: tweet in hmap by not returned...');
+        console.debug(txmsg);
         return 0;
       }
 
@@ -1423,7 +1423,10 @@ class RedSquare extends ModTemplate {
         if (this.debug) {
           console.debug('RS.addTweet -- ignore marked tweet');
         }
-        this.tweets_sigs_hmap[tweet.tx.signature] = 2;
+
+        // I am not sure we need to mark this as such...
+        // it does lead to a bunch more warnings in the logs down the way
+        //this.tweets_sigs_hmap[tweet.tx.signature] = 2;
         return 0;
       }
 
@@ -2196,8 +2199,8 @@ class RedSquare extends ModTemplate {
         'localhost'
       );
     } catch (err) {
-      console.error('RedSquare: error editing tweet', err);
-      console.log(tx);
+      // console.error('RedSquare: error editing tweet', err);
+      // console.log(tx);
     }
   }
 
@@ -2366,7 +2369,7 @@ class RedSquare extends ModTemplate {
         }
       }
     } catch (err) {
-      console.error('RS.receiveTweetsTransaction ERROR: ', err);
+      // console.error('RS.receiveTweetsTransaction ERROR: ', err);
     }
   }
 
@@ -2682,7 +2685,11 @@ class RedSquare extends ModTemplate {
 
       if (tweet.curated == 1) {
         tweet.tx.optional.curated = 1;
-        this.cached_tweets.push(tweet.tx.serialize_to_web(this.app));
+
+        if (!tweet.game){
+          this.cached_tweets.push(tweet.tx.serialize_to_web(this.app));  
+        }
+        
       }
     }
 
@@ -2894,7 +2901,7 @@ class RedSquare extends ModTemplate {
           }
         }
       } catch (err) {
-        console.error('RS.webServer: Loading OG data failed with error: ', err);
+        // console.error('RS.webServer: Loading OG data failed with error: ', err);
       }
 
       redsquare_self.cacheRecentTweets();

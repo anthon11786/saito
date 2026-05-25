@@ -1,143 +1,175 @@
 class SaitoNFT {
-  constructor(app, mod, tx = null, data = null, card = null) {
+  constructor(app, mod, tx = null, data = null) {
     this.app = app;
     this.mod = mod;
 
     //
-    // nft details
+    // nft details from app.options.wallet
     //
     this.id = data?.id;
-    this.tx_sig = data?.tx_sig;
+    if (data?.nft_id) {
+      this.id = data?.nft_id;
+    }
     this.slip1 = data?.slip1;
     this.slip2 = data?.slip2;
     this.slip3 = data?.slip3;
 
-    this.title = '';
-    this.description = '';
+    //
+    // Information encoded in the slips
+    //
+    this.uuid = null;
     this.creator = '';
-    if (this.slip1?.public_key) {
-      this.creator = this.slip1.public_key;
-    }
+    this.amount = BigInt(0); // How many nfts of this id of this slip
+    this.deposit = BigInt(0); // nolans
+    this.nft_type = '';
+
+    //
+    // and/or general meta data
+    //
+    this.metadata = data;
+    this.title = data?.title || '';
+    this.description = data?.description || '';
 
     //
     // tx details
     //
     this.tx = tx;
-    this.txmsg = null;
 
-    this.card = null; // nft card, if created by one
+    // Prioritize the tx_sig from the wallet_nft_list rather than the provided tx...
+    this.tx_sig = data?.nfttx_sig || data?.tx_sig || tx.signature || '';
 
-    this.amount = BigInt(0); // nolans
-    this.deposit = BigInt(0); // nolans
+    //
+    // NFT content
+    //
     this.image = '';
     this.text = '';
     this.json = '';
     this.js = '';
     this.css = '';
-    this.nft_type = '';
-
-    this.load_failed = false;
 
     //
     // UI helpers
     //
-    this.uuid = null;
     this.tx_fetched = false;
-
-    //
-    // potentially useful
-    //
-    this.seller = '';
-    this.price = BigInt(0);
-
-    if (this.slip1?.amount) {
-      this.amount = BigInt(this.slip1.amount);
-      this.uuid = this.slip1?.utxo_key;
-    }
-
-    if (this.slip2?.amount) {
-      this.deposit = BigInt(this.slip2.amount);
-    }
-
-    if (this.slip3?.utxo_key) {
-      this.nft_type = this.app.wallet.extractNFTType(this.slip3.utxo_key);
-    }
+    this.load_failed = false;
 
     if (tx != null) {
-      this.buildNFTData();
+      // Analyze TX for slips and extra information
+      this.buildNFTData(tx);
+    } else {
+      // Assuming we had slips in data from our wallet, just extract them
+      this.parseSlips();
     }
   }
 
-  async fetchTransaction(callback = null, localhost_only = false) {
-    if (!this.id) {
-      console.error('0.5 Unable to fetch NFT transaction (no nft id found)');
-      if (callback) {
-        this.tx_fetched = false;
-        return callback();
+  /**
+   * Let modules respond to `saito-nft-transfer` mutate the outbound tx before sign/propagate.
+   * @param {*} newtx unsigned transaction
+   * @param {string} receiver recipient public key
+   * @returns {Promise<*>} updated tx, or null if a handler blocked the send (after salert)
+   */
+  async modifyBeforeSend(newtx, receiver) {
+    const nft_type =
+      this.nft_type || (typeof this.returnType === 'function' ? this.returnType() : null);
+    const handlers = this.app.modules.getRespondTos('saito-nft-transfer', this);
+
+    for (const modobj of handlers) {
+      if (!modobj?.class || !modobj.class.includes(nft_type) || !nft_type) {
+        continue;
+      }
+      if (typeof modobj.onTransfer === 'function') {
+        try {
+          newtx = await modobj.onTransfer(this, newtx, receiver);
+        } catch (err) {
+          console.error('onTransfer() failed in module...', err);
+          salert(`NFT transfer blocked by module...`);
+          return null;
+        }
       }
     }
 
-    // If we already have the transaction AND the image/data, we're done
-    if (this.tx && this.txmsg && (this.image || this.text || this.js || this.css || this.json)) {
+    return newtx;
+  }
+
+  async fetchTransaction(callback = null, localhost_only = false) {
+    const my_callback = () => {
+      this.load_failed = false;
       if (callback) {
-        this.tx_fetched = false;
-        return callback();
+        callback();
       }
+    };
+
+    if (!this.id) {
+      console.error('0.5 Unable to fetch NFT transaction (no nft id found)');
+      my_callback();
+      return;
+    }
+
+    this.tx_fetched = true;
+
+    // If we already have the transaction AND the image/data, we're done
+    if (this.tx && (this.image || this.text || this.js || this.css || this.json)) {
+      console.debug('NFT already has all data');
+      my_callback();
+      return;
     }
 
     // If we have the transaction but no image/data, try to extract it
     if (this.tx != null) {
-      this.buildNFTData();
-      if (callback) {
-        this.tx_fetched = true;
-        return callback();
-      }
+      console.debug('Building nft data from transaction');
+      this.buildNFTData(this.tx);
+      my_callback();
       return;
     }
 
-    await this.app.storage.loadTransactions(
-      { field4: this.id },
+    const search_cond = this.tx_sig ? { sig: this.tx_sig } : { field4: this.id };
 
+    console.debug('Fetching nft transaction from archive using: ', search_cond);
+    await this.app.storage.loadTransactions(
+      search_cond,
       async (txs) => {
         if (txs?.length > 0) {
-          this.tx = txs[0];
-          this.buildNFTData();
-          if (callback) {
-            this.tx_fetched = true;
-            return callback();
-          }
+          console.debug('local archive returned nft');
+          this.buildNFTData(txs[0]);
+          my_callback();
         } else {
+          // Try again locally with the other search condition...
+          if (this.tx_sig) {
+            await this.app.storage.loadTransactions({ field4: this.id }, async (txs) => {
+              if (txs?.length > 0) {
+                console.debug('local archive returned nft');
+                this.buildNFTData(txs[0]);
+                my_callback();
+              }
+            });
+          }
+
           if (localhost_only) {
             return null;
           }
 
+          const remote_callback = () => {};
+
+          console.debug('trying remote archive for nft');
           //
-          // try remote host (ours IS **NOT** CURRENTLY INDEXING NFT TXS)
+          // try remote host (ours IS **NOW**  INDEXING NFT TXS)
           //
           let peer = await this.app.network.getPeers();
 
           this.app.storage.loadTransactions(
-            { field4: this.id },
+            search_cond,
             (txs) => {
               if (txs?.length > 0) {
-                this.tx = txs[0];
-                this.buildNFTData();
+                console.debug('remote archive returned nft');
+                this.buildNFTData(txs[0]);
 
-                //
-                // save remotely fetched nft tx to local
-                ////////////////////////////////////////////////
-                ////////  See note in wallet.ts ////////////////
-                ////////////////////////////////////////////////
                 this.app.storage.saveTransaction(
-                  this.tx,
+                  txs[0],
                   { field4: this.id, preserve: 1 },
                   'localhost'
                 );
 
-                if (callback) {
-                  this.tx_fetched = true;
-                  return callback();
-                }
+                my_callback();
               } else {
                 this.load_failed = true;
               }
@@ -149,55 +181,58 @@ class SaitoNFT {
       'localhost'
     );
 
-    this.tx_fetched = false;
     return null;
   }
 
-  buildNFTData() {
+  buildNFTData(tx) {
     let this_self = this;
 
-    if (!this.tx) {
-      console.log('SaitoNFT has not yet loaded this.tx... skipping analysis for now');
+    if (!tx) {
       return;
     }
 
-    if (this.tx) {
-      //
-      // tx is available we can extract slips & txmsg data (img/text)
-      //
-      this.extractNFTData();
+    //
+    // tx is available we can extract slips & txmsg data (img/text)
+    //
+    this.extractNFTData(tx);
 
-      //
-      // ovveride only if value already not set
-      //
-      this.slip1 ??= this.extractSlipObject(this.tx?.to?.[0] ?? null);
-      this.slip2 ??= this.extractSlipObject(this.tx?.to[1] ?? null);
-      this.slip3 ??= this.extractSlipObject(this.tx?.to[2] ?? null);
-
-      if (this.slip1?.public_key) {
-        this.creator = this.slip1.public_key;
-      }
+    // If we created the NFT with a specific TX_signature but not the TX
+    // we only want to save the proper transaction
+    if (!this.tx && this.tx_sig == tx.signature) {
+      this.tx = tx;
     }
 
-    if (this.slip1?.amount) {
-      this.amount = BigInt(this.slip1.amount);
-      this.uuid = this.slip1?.utxo_key;
-    }
+    //
+    // ovveride only if value already not set
+    //
+    this.slip1 ??= this.extractSlipObject(this.tx?.to?.[0] ?? null);
+    this.slip2 ??= this.extractSlipObject(this.tx?.to[1] ?? null);
+    this.slip3 ??= this.extractSlipObject(this.tx?.to[2] ?? null);
 
-    if (this.slip2?.amount) {
-      this.deposit = BigInt(this.slip2.amount);
-    }
+    this.parseSlips();
+  }
 
-    if (!this.id) {
-      this.id = this.computeNFTIdFromTx(this.tx);
-    }
+  resetNFT(data) {
+    this.slip1 = data?.slip1;
+    this.slip2 = data?.slip2;
+    this.slip3 = data?.slip3;
+    this.tx_sig = data?.tx_sig || this.tx_sig;
+    this.parseSlips();
+  }
+
+  parseSlips() {
+    this.amount = BigInt(this.slip1?.amount || 0);
+    this.creator = this.slip1?.public_key || '';
+    this.uuid = this.slip3?.public_key || '';
+    this.deposit = BigInt(this.slip2?.amount || 0);
+    this.nft_type = this.returnType();
   }
 
   //
   // Extracts NFT image/text, tx_sig, txmsg data from a transaction
   //
-  extractNFTData() {
-    if (!this.tx) {
+  extractNFTData(tx) {
+    if (!tx) {
       return;
     }
 
@@ -207,26 +242,12 @@ class SaitoNFT {
     let has_js = false;
     let has_text = false;
 
-    // Store the old tx_sig before updating
-    let old_tx_sig = this.tx_sig;
-
-    // Update to new signature
-    this.tx_sig = this.tx?.signature;
-
-    //
-    // If signature changed and we're in a browser, update the DOM element's class
-    //
-    if (this.app.BROWSER && old_tx_sig && this.tx_sig && old_tx_sig !== this.tx_sig) {
-      let oldElement = document.querySelector(`.nfttxsig${old_tx_sig}`);
-      if (oldElement && !document.querySelector(`.nfttxsig${this.tx_sig}`)) {
-        // Old element exists but new one doesn't - swap the class
-        oldElement.classList.remove(`nfttxsig${old_tx_sig}`);
-        oldElement.classList.add(`nfttxsig${this.tx_sig}`);
-      }
+    if (!this.id) {
+      this.id = this.app.wallet.computeNFTIdFromTx(tx);
     }
 
-    this.txmsg = this.tx.returnMessage();
-    this.id = this.computeNFTIdFromTx(this.tx);
+    this.txmsg = tx.returnMessage();
+
     this.data = this.txmsg?.data ?? {};
 
     if (typeof this.data.image !== 'undefined') {
@@ -235,11 +256,11 @@ class SaitoNFT {
       processed = true;
     }
 
-    if (typeof this.txmsg.description !== 'undefined') {
+    if (this.txmsg?.description && !this.description) {
       this.description = this.txmsg.description;
     }
 
-    if (typeof this.txmsg.title !== 'undefined') {
+    if (this.txmsg?.title && !this.title) {
       this.title = this.txmsg.title;
     }
 
@@ -285,7 +306,7 @@ class SaitoNFT {
     let toNum = (v) => (typeof v === 'number' ? v : Number(v ?? 0));
 
     return {
-      amount: toStr(slip.amount),
+      amount: slip.amount, // Keep as BigInt
       block_id: toStr(slip.blockId),
       public_key: slip.publicKey,
       slip_index: toNum(slip.index),
@@ -293,134 +314,6 @@ class SaitoNFT {
       tx_ordinal: toStr(slip.txOrdinal),
       utxo_key: slip.utxoKey
     };
-  }
-
-  //
-  // We need a way to get nft_id from NFT tx.
-  //
-  // If the NFT belongs to us we can simply get nft_id
-  // from storage (app.options.wallet.nfts[i].id). But in cases
-  // where NFT doesnt belong to us (e.g listed on assetstore) we
-  // need to compute nft_id based on the NFT tx we have.
-  //
-  // This situation isnt unqiue to assetstore, other mods will be
-  // creating NFT objects based on NFT tx so doesnt makes sense for this
-  // method below to be placed in assetstore.
-  //
-
-  //
-  // Ideal way would be to let rust comoute this by sending NFT tx
-  // to rust. For now temporarily JS is handling this.
-  //
-
-  // Derive an NFT id from a tx
-  computeNFTIdFromTx(tx) {
-    if (!tx) {
-      return null;
-    }
-
-    // Prefer outputs; fall back to inputs
-    let s3 = (tx?.to && tx.to[2]) || (tx?.from && tx.from[2]);
-    if (!s3 || !s3.publicKey) {
-      return null;
-    }
-
-    let pk = s3.publicKey;
-    let bytes = null;
-
-    // Normalize to Uint8Array
-    if (pk instanceof Uint8Array || (typeof Buffer !== 'undefined' && pk instanceof Buffer)) {
-      bytes = new Uint8Array(pk);
-    } else if (typeof pk === 'string') {
-      if (/^[0-9a-fA-F]{66}$/.test(pk)) {
-        // Hex (33 bytes = 66 hex chars)
-        bytes = this.hexToBytes(pk);
-      } else {
-        // Assume Base58 (Saito-style pubkey encoding)
-        bytes = this.base58ToBytes(pk);
-      }
-    } else if (pk && typeof pk === 'object' && pk.data) {
-      bytes = new Uint8Array(pk.data);
-    }
-
-    if (!bytes) {
-      return null;
-    }
-
-    // Some encoders may prepend a 0x00; tolerate 34→33
-    if (bytes.length === 34 && bytes[0] === 0) {
-      bytes = bytes.slice(1);
-    }
-    if (bytes.length !== 33) {
-      return null;
-    }
-
-    // Return as hex string
-    return Array.from(bytes)
-      .map((b) => b.toString(16).padStart(2, '0'))
-      .join('');
-  }
-
-  hexToBytes(hex) {
-    let clean = hex.startsWith('0x') ? hex.slice(2) : hex;
-    let out = new Uint8Array(clean.length / 2);
-    for (let i = 0; i < out.length; i++) {
-      out[i] = parseInt(clean.substr(i * 2, 2), 16);
-    }
-    return out;
-  }
-
-  base58ToBytes(str) {
-    // Bitcoin Base58 alphabet
-    let B58_ALPHABET = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz';
-    let B58_MAP = (() => {
-      let m = new Map();
-      for (let i = 0; i < B58_ALPHABET.length; i++) m.set(B58_ALPHABET[i], i);
-      return m;
-    })();
-
-    // Count leading zeros
-    let zeros = 0;
-    while (zeros < str.length && str[zeros] === '1') zeros++;
-
-    // Base58 decode to a big integer in bytes (base256)
-    let bytes = [];
-    for (let i = zeros; i < str.length; i++) {
-      let val = B58_MAP.get(str[i]);
-      if (val == null) throw new Error('Invalid Base58 character');
-      let carry = val;
-      for (let j = 0; j < bytes.length; j++) {
-        let x = bytes[j] * 58 + carry;
-        bytes[j] = x & 0xff;
-        carry = x >> 8;
-      }
-      while (carry > 0) {
-        bytes.push(carry & 0xff);
-        carry >>= 8;
-      }
-    }
-
-    // Add leading zeros
-    for (let k = 0; k < zeros; k++) bytes.push(0);
-
-    // Output is little-endian; reverse to big-endian
-    bytes.reverse();
-    return new Uint8Array(bytes);
-  }
-
-  async setPrice(saitoAmount) {
-    if (saitoAmount == null) throw new Error('setPrice: amount is required');
-    let saitoStr =
-      typeof saitoAmount === 'bigint' ? saitoAmount.toString() : String(saitoAmount).trim();
-    if (!saitoStr || isNaN(Number(saitoStr))) throw new Error('setPrice: invalid amount');
-    let nolan = await this.app.wallet.convertSaitoToNolan(saitoStr);
-    if (nolan == null) throw new Error('setPrice: conversion failed');
-    this.price = BigInt(nolan);
-    return this;
-  }
-
-  getPrice() {
-    return this.app.wallet.convertNolanToSaito(this.price);
   }
 
   async setDeposit(saitoAmount) {
@@ -440,35 +333,31 @@ class SaitoNFT {
     return this.app.wallet.convertNolanToSaito(this.deposit);
   }
 
-  async setSeller(public_key) {
-    if (public_key) {
-      this.seller = public_key;
+  //
+  // count items for merge
+  //
+  getSlipCount() {
+    let arr = this.app?.options?.wallet?.nfts || [];
+    return arr.filter((n) => n?.id === this.id).length;
+  }
+
+  getTotalAmount() {
+    let all_slips = this.returnAllSlips();
+    let total_amount = 0;
+    for (let z = 0; z < all_slips.length; z++) {
+      total_amount += parseInt(all_slips[z].slip1.amount);
     }
-  }
-
-  async getSeller() {
-    return this.seller;
-  }
-
-  //
-  // for transactions and calculations
-  //
-  getBuyPriceNolan() {
-    return this.price ? this.price : this.deposit;
-  }
-
-  //
-  // for UI
-  //
-  getBuyPriceSaito() {
-    return this.price
-      ? this.app.wallet.convertNolanToSaito(this.price)
-      : this.app.wallet.convertNolanToSaito(this.deposit);
+    return total_amount;
   }
 
   returnAllSlips() {
     let nft_list = this.app.options.wallet.nfts;
     let all_slips = [];
+
+    if (this.slip2.public_key !== this.mod.publicKey) {
+      return [this];
+    }
+
     for (let z = 0; z < nft_list.length; z++) {
       let n = nft_list[z];
       if (n.id == this.id) {
@@ -483,12 +372,17 @@ class SaitoNFT {
       return this.nft_type;
     }
     if (this.slip3?.utxo_key) {
-      return this.app.wallet.extractNFTType(this.slip3.utxo_key);
+      this.nft_type = this.app.wallet.extractNFTType(this.slip3.utxo_key);
+      if (this.nft_type) {
+        return this.nft_type;
+      }
     }
     const properties = ['image', 'text', 'json', 'js', 'css'];
+
     for (const prop of properties) {
       const value = this[prop];
       if (value && (typeof value !== 'string' || value.trim() !== '')) {
+        this.nft_type = prop;
         return prop;
       }
     }
@@ -502,14 +396,14 @@ class SaitoNFT {
 
     // The creator is the public key on the NFT UTXO (slip1)
     if (this.slip1?.publicKey) {
-      return this.slip1.publicKey;
+      return this.slip1.public_key;
     }
 
     // Fallback: attempt extraction from utxo_key if available
     if (this.slip3?.utxo_key) {
       const nft = this.app.wallet.extractNFT(this.slip3.utxo_key);
-      if (nft?.slip1?.publicKey) {
-        return nft.slip1.publicKey;
+      if (nft?.slip1?.public_key) {
+        return nft.slip1.public_key;
       }
     }
 

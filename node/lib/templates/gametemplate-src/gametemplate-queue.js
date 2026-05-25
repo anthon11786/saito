@@ -131,16 +131,10 @@ class GameQueue {
       //The pending transactions are processed elsewhere...
     } else {
       if (this.game.player == 0) {
-        console.info(
-          'GT [initializeGameQueue]: Observer.... check for additional moves..., set active while loading...'
-        );
+        console.info('GT [initializeGameQueue]: Observer.... set active while loading...');
         this.gaming_active = 1;
-        this.observerDownloadNextMoves(() => {
-          this.startQueue();
-        });
-      } else {
-        await this.startQueue();
       }
+      await this.startQueue();
     }
 
     return 1;
@@ -150,6 +144,10 @@ class GameQueue {
    *  Game moves are processed through a queue.
    */
   async startQueue() {
+    console.log('[OBS_TRACE] startQueue()', {
+      halted: this.halted,
+      gaming_active: this.gaming_active
+    });
     console.info(
       `GT [startQueue] halted: (${this.halted}) , gaming_active (${this.gaming_active})`
     );
@@ -179,21 +177,6 @@ class GameQueue {
     // (1/2) We run commands from the queue until one returns a zero or we run out of queue
     //
     if ((await this.runQueue()) == 0) {
-      //
-      // Game Observer UI stuff
-      //
-      if (this.game.player == 0 && this.gameBrowserActive()) {
-        console.info(
-          'GT [observer] running Queue in Observer mode. paused? ',
-          this.observerControls.is_paused
-        );
-
-        if (this.observerControls.is_paused && !this.game?.live) {
-          console.info('GT Observer controls halt game');
-          this.halted = 1;
-        }
-      }
-
       //
       // (2/2) After which we check if there are any new moves received
       // PROCESS FUTURE MOVES will add those to the queue and recursively
@@ -257,6 +240,7 @@ class GameQueue {
     // this indicates we are processing our queue
     //
     this.gaming_active = 1; // prevents future moves from getting added to the queue while it is processing
+    console.log('[OBS_TRACE] runQueue(): set gaming_active = 1');
     //
     //stash a copy of state before doing anything
     //
@@ -971,6 +955,14 @@ class GameQueue {
         game_self.game.initializing = 0;
         game_self.game.queue.splice(game_self.game.queue.length - 1, 1);
         game_self.saveGame(game_self.game.id);
+
+        //
+        // observer mode
+        //
+        if (game_self.game.player == 0) {
+          game_self.game_state_pre_move = JSON.parse(JSON.stringify(game_self.game));
+        }
+
         if (game_self.gameBrowserActive()) {
           return 1;
         } else {
@@ -1136,9 +1128,6 @@ class GameQueue {
             game_self.game.deck[deckidx - 1].keys = [];
             game_self.game.deck[deckidx - 1].crypt = [];
           } else {
-            //Isn't this backwards????
-            //game_self.game.deck[deckidx - 1].keys = game_self.game.deck[deckidx - 1].keys.splice(cards,game_self.game.deck[deckidx - 1].keys.length - cards);
-            //game_self.game.deck[deckidx - 1].crypt = game_self.game.deck[deckidx - 1].crypt.splice(cards,game_self.game.deck[deckidx - 1].crypt.length - cards);
             game_self.game.deck[deckidx - 1].keys.splice(0, cards);
             game_self.game.deck[deckidx - 1].crypt.splice(0, cards);
             if (
@@ -1368,12 +1357,10 @@ class GameQueue {
         let sender = parseInt(gmv[2]);
         let recipient = parseInt(gmv[3]);
         let cards = parseInt(gmv[4]);
-        let opponent_deck_length = parseInt(gmv[5]); // this is telling us how many keys the other player has, so we can coordinate and not double-decrypt
-
-        game_self.game.queue.splice(game_self.game.queue.length - 1, 1); //Remove "ISSUEKEYS"
-
+        // how many keys the other player has
+        let opponent_deck_length = parseInt(gmv[5]);
+        game_self.game.queue.splice(game_self.game.queue.length - 1, 1);
         let keyidx = game_self.game.queue.length - cards;
-
         let my_deck_length = game_self.game.deck[deckidx - 1].crypt.length;
 
         if (game_self.game.player == recipient) {
@@ -2041,7 +2028,9 @@ class GameQueue {
         for (let i = 1; i <= cryptLength; i++) {
           //Adding one to i here so don't have to insert additional -1 term
           let card = game_self.game.queue.pop();
-          game_self.game.deck[deckidx - 1].crypt[cryptLength - i] = card;
+          if (game_self.game.player != 0) {
+            game_self.game.deck[deckidx - 1].crypt[cryptLength - i] = card;
+          }
         }
       }
       return 1;
@@ -2694,7 +2683,8 @@ class GameQueue {
               game_self.restartQueue();
               return 0;
             },
-            receiver
+            receiver,
+            `${game_self.name} stake`
           );
         };
 
@@ -2773,7 +2763,7 @@ class GameQueue {
                   game_self.game = game_self.loadGame(my_specific_game_id);
                 }
 
-                game_self.updateLog('payments received (maybe)... moving on...');
+                game_self.updateLog('payments received...');
                 game_self.game.queue.splice(game_self.game.queue.length - 1, 1);
 
                 game_self.restartQueue();
