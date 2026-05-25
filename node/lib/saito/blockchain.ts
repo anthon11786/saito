@@ -1,7 +1,7 @@
 import Saito from 'saito-js/saito';
 import SaitoBlockchain from 'saito-js/lib/blockchain';
 import Block from './block';
-import { Saito as S } from '../../apps/core';
+import { Saito as S } from './app';
 import { TransactionType } from 'saito-js/lib/transaction';
 import Transaction from './transaction';
 import { BlockType } from 'saito-js/lib/block';
@@ -34,7 +34,7 @@ export default class Blockchain extends SaitoBlockchain {
       confirmations: []
     };
     this.instance.reset();
-    await this.saveBlockchain();
+    this.app.storage.saveOptions();
   }
 
   async saveBlockchain() {
@@ -48,7 +48,6 @@ export default class Blockchain extends SaitoBlockchain {
       lowest_acceptable_block_hash: await this.instance.get_lowest_acceptable_block_hash(),
       lowest_acceptable_block_id: Number(await this.instance.get_lowest_acceptable_block_id()),
       fork_id: await this.instance.get_fork_id(),
-      //confirmations: JSON.parse(await Saito.getLibInstance().get_confirmations())
       confirmations: []
     };
     this.app.storage.saveOptions();
@@ -87,16 +86,12 @@ export default class Blockchain extends SaitoBlockchain {
     console.log('into affix callbacks... 1');
 
     if (this.callbacks.has(block.hash)) {
-      console.info('nope out of affixing callbacks on block: ' + block.hash);
+      console.info('nope out of affix callbacks on block: ' + block.hash);
       return;
     }
 
-    console.log('into affix callbacks... 2');
-
     let callbacks = [];
     let callbackIndices = [];
-
-    console.log('affixing callbacks to block...');
 
     let txs: Transaction[] = block.transactions as Transaction[];
 
@@ -104,14 +99,8 @@ export default class Blockchain extends SaitoBlockchain {
     for (let z = 0; z < txs.length; z++) {
       if (txs[z].type === TransactionType.Normal || txs[z].type === TransactionType.Bound) {
         let txmsg2 = txs[z].returnMessage();
-
-        const str_txmsg2 = JSON.stringify(txmsg2);
-        const ellipsis = '\n...\n';
-        const prefixLength = 500;
-        const suffixLength = 500;
-        const maxStrLength = prefixLength + ellipsis.length + suffixLength;
-
         await txs[z].decryptMessage(this.app);
+
         const txmsg = txs[z].returnMessage();
 
         //
@@ -122,6 +111,7 @@ export default class Blockchain extends SaitoBlockchain {
         // here by flagging the transactions which have them and sending them to teh wallet.
         //
         if (txs[z].type == TransactionType.Bound) {
+          console.log('into wallet on new bound tx', txs[z].type, TransactionType.Bound);
           this.app.wallet.onNewBoundTransaction(txs[z]);
         }
 

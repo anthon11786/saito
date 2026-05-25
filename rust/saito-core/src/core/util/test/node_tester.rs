@@ -2,30 +2,29 @@
 pub mod test {
     use crate::core::consensus::block::{Block, BlockType};
     use crate::core::consensus::blockchain::Blockchain;
-    use crate::core::consensus::blockchain_sync_state::BlockchainSyncState;
     use crate::core::consensus::context::Context;
     use crate::core::consensus::mempool::Mempool;
-    use crate::core::consensus::peers::peer_collection::PeerCollection;
+    use crate::core::network::gatekeeper::Gatekeeper;
+    use crate::core::network::peers::Peers;
+    use crate::core::network::sync::{FetchDispatcher, SyncManager};
 
     use crate::core::consensus::slip::Slip;
     use crate::core::consensus::transaction::Transaction;
     use crate::core::consensus::wallet::Wallet;
-    use crate::core::consensus_thread::{ConsensusEvent, ConsensusStats, ConsensusThread};
+    use crate::core::consensus_thread::{ConsensusEvent, ConsensusThread};
     use crate::core::defs::{
         BlockHash, BlockId, Currency, ForkId, PrintForLog, SaitoHash, SaitoPrivateKey,
-        StatVariable, RECOLLECT_NOTHING, STAT_BIN_COUNT,
+        RECOLLECT_NOTHING,
     };
     use crate::core::defs::{SaitoPublicKey, Timestamp};
-    use crate::core::io::network::Network;
-    use crate::core::io::network_event::NetworkEvent;
-    use crate::core::io::storage::Storage;
     use crate::core::mining_thread::{MiningEvent, MiningThread};
+    use crate::core::network::events::NetworkEvent;
+    use crate::core::network::network::Network;
     use crate::core::process::keep_time::KeepTime;
     use crate::core::process::keep_time::Timer;
     use crate::core::process::process_event::ProcessEvent;
-    use crate::core::routing_thread::{RoutingEvent, RoutingStats, RoutingThread};
-    use crate::core::stat_thread::{StatEvent, StatThread};
-    use crate::core::util::config_manager::{BLOCKCHAIN_CONFIG_PATH, CONGESTION_CONFIG_PATH};
+    use crate::core::routing_thread::{RoutingEvent, RoutingThread};
+    use crate::core::storage::storage::Storage;
     use crate::core::util::configuration::{
         get_default_issuance_writing_block_interval, get_default_recollect_mode, BlockchainConfig,
         Configuration, ConsensusConfig, Endpoint, PeerConfig, Server, WalletConfig,
@@ -33,7 +32,7 @@ pub mod test {
     use crate::core::util::crypto::{generate_keypair_from_private_key, generate_keys};
     use crate::core::util::test::test_io_handler::test::TestIOHandler;
     use crate::core::verification_thread::{VerificationThread, VerifyRequest};
-    use log::{info, warn};
+    use log::{debug, info, trace, warn};
     use serde::Deserialize;
     use std::io::{Error, ErrorKind};
     use std::ops::DerefMut;
@@ -60,8 +59,7 @@ pub mod test {
     pub struct TestConfiguration {
         server: Option<Server>,
         peers: Vec<PeerConfig>,
-        #[serde(skip)]
-        blockchain: Option<BlockchainConfig>,
+        blockchain: BlockchainConfig,
         spv_mode: bool,
         browser_mode: bool,
         #[serde(default = "get_default_consensus")]
@@ -76,11 +74,11 @@ pub mod test {
             &self.peers
         }
 
-        fn get_blockchain_configs(&self) -> Option<&BlockchainConfig> {
-            self.blockchain.as_ref()
+        fn get_blockchain_configs(&self) -> &BlockchainConfig {
+            &self.blockchain
         }
-        fn get_blockchain_configs_mut(&mut self) -> Option<&mut BlockchainConfig> {
-            self.blockchain.as_mut()
+        fn get_blockchain_configs_mut(&mut self) -> &mut BlockchainConfig {
+            &mut self.blockchain
         }
         fn get_block_fetch_url(&self) -> String {
             "".to_string()
@@ -94,7 +92,7 @@ pub mod test {
             self.browser_mode
         }
 
-        fn replace(&mut self, config: &dyn Configuration) {
+        fn replace(&mut self, _config: &dyn Configuration) {
             todo!()
         }
 
@@ -106,30 +104,15 @@ pub mod test {
             self.consensus.as_mut()
         }
 
-        fn get_congestion_data(
-            &self,
-        ) -> Option<&crate::core::consensus::peers::congestion_controller::CongestionStatsDisplay>
-        {
-            None
-        }
-
-        fn set_congestion_data(
-            &mut self,
-            congestion_data: Option<
-                crate::core::consensus::peers::congestion_controller::CongestionStatsDisplay,
-            >,
-        ) {
-        }
-
-        fn set_blockchain_configs(&mut self, config: Option<BlockchainConfig>) {
-            self.blockchain = config;
-        }
+        // fn set_blockchain_configs(&mut self, config: Option<BlockchainConfig>) {
+        //     self.blockchain = config;
+        // }
 
         fn get_config_path(&self) -> String {
             String::new()
         }
 
-        fn set_config_path(&mut self, path: String) {}
+        fn set_config_path(&mut self, _path: String) {}
 
         fn save(&self) -> Result<(), Error> {
             Ok(())
@@ -163,7 +146,7 @@ pub mod test {
                     block_fetch_batch_size: 0,
                 }),
                 peers: vec![],
-                blockchain: Some(BlockchainConfig::default()),
+                blockchain: BlockchainConfig::default(),
                 spv_mode: false,
                 browser_mode: false,
                 consensus: Some(ConsensusConfig {
@@ -186,13 +169,11 @@ pub mod test {
         pub routing_thread: RoutingThread,
         pub mining_thread: MiningThread,
         pub verification_thread: VerificationThread,
-        pub stat_thread: StatThread,
         pub timer: Timer,
         receiver_for_router: Receiver<RoutingEvent>,
         receiver_for_consensus: Receiver<ConsensusEvent>,
         receiver_for_miner: Receiver<MiningEvent>,
         receiver_for_verification: Receiver<VerifyRequest>,
-        receiver_for_stats: Receiver<StatEvent>,
         pub timeout_in_ms: u64,
         last_run_time: Timestamp,
         pub initial_token_supply: Currency,
@@ -225,7 +206,7 @@ pub mod test {
 
             let channel_size = 1_000_000;
 
-            let peers = Arc::new(RwLock::new(PeerCollection::default()));
+            let peers = Arc::new(RwLock::new(Peers::default()));
             let context = Context {
                 blockchain_lock: Arc::new(RwLock::new(Blockchain::new(
                     wallet.clone(),
@@ -245,7 +226,6 @@ pub mod test {
             let (sender_to_blockchain, receiver_in_blockchain) =
                 tokio::sync::mpsc::channel(channel_size);
             let (sender_to_miner, receiver_in_miner) = tokio::sync::mpsc::channel(channel_size);
-            let (sender_to_stat, receiver_in_stats) = tokio::sync::mpsc::channel(channel_size);
             let (sender_to_verification, receiver_in_verification) =
                 tokio::sync::mpsc::channel(channel_size);
 
@@ -256,6 +236,15 @@ pub mod test {
                     start_time: TestTimeKeeper {}.get_timestamp_in_ms(),
                 });
             }
+
+            let sync_lite_block_fetch = configuration
+                .try_read()
+                .expect("config lock should be available during NodeTester init")
+                .is_spv_mode();
+            let fetch_dispatcher: FetchDispatcher =
+                Arc::new(move |_block_hash, _peer_id, _url, _block_id| {
+                    // no-op
+                });
 
             NodeTester {
                 routing_thread: RoutingThread {
@@ -270,22 +259,26 @@ pub mod test {
                         Box::new(TestIOHandler {}),
                         peers.clone(),
                         context.wallet_lock.clone(),
-                        context.config_lock.clone(),
                         timer.clone().unwrap(),
                     ),
                     storage: Storage::new(Box::new(TestIOHandler {})),
                     reconnection_timer: 0,
                     peer_removal_timer: 0,
                     last_emitted_block_fetch_count: 0,
-                    stats: RoutingStats::new(sender_to_stat.clone()),
                     senders_to_verification: vec![sender_to_verification.clone()],
                     last_verification_thread_index: 0,
-                    stat_sender: sender_to_stat.clone(),
-                    blockchain_sync_state: BlockchainSyncState::new(10),
+                    sync: Arc::new(RwLock::new(SyncManager::new(
+                        context.blockchain_lock.clone(),
+                        context.mempool_lock.clone(),
+                        context.wallet_lock.clone(),
+                        Arc::new(timer.clone().unwrap()),
+                        sync_lite_block_fetch,
+                    ))),
+                    gatekeeper: Gatekeeper::default(),
                     congestion_check_timer: 0,
-                    received_ghost_chain: None,
-                    waiting_for_genesis_block: false,
+                    gatekeeper_monitor_timer: 0,
                     message_sending_timer: 0,
+                    fetch_dispatcher,
                 },
                 consensus_thread: ConsensusThread {
                     mempool_lock: context.mempool_lock.clone(),
@@ -301,13 +294,10 @@ pub mod test {
                         Box::new(TestIOHandler {}),
                         peers.clone(),
                         context.wallet_lock.clone(),
-                        configuration.clone(),
                         timer.clone().unwrap(),
                     ),
                     storage: Storage::new(Box::new(TestIOHandler {})),
-                    stats: ConsensusStats::new(sender_to_stat.clone()),
                     txs_for_mempool: vec![],
-                    stat_sender: sender_to_stat.clone(),
                     config_lock: configuration.clone(),
                     produce_blocks_by_timer: true,
                     delete_old_blocks: true,
@@ -322,7 +312,6 @@ pub mod test {
                     difficulty: 0,
                     public_key: [0; 33],
                     mined_golden_tickets: 0,
-                    stat_sender: sender_to_stat.clone(),
                     config_lock: configuration.clone(),
                     enabled: true,
                     mining_iterations: 1,
@@ -333,46 +322,13 @@ pub mod test {
                     blockchain_lock: context.blockchain_lock.clone(),
                     peer_lock: peers.clone(),
                     wallet_lock: wallet.clone(),
-                    processed_txs: StatVariable::new(
-                        "verification::processed_txs".to_string(),
-                        STAT_BIN_COUNT,
-                        sender_to_stat.clone(),
-                    ),
-                    processed_blocks: StatVariable::new(
-                        "verification::processed_blocks".to_string(),
-                        STAT_BIN_COUNT,
-                        sender_to_stat.clone(),
-                    ),
-                    processed_msgs: StatVariable::new(
-                        "verification::processed_msgs".to_string(),
-                        STAT_BIN_COUNT,
-                        sender_to_stat.clone(),
-                    ),
-                    invalid_txs: StatVariable::new(
-                        "verification::invalid_txs".to_string(),
-                        STAT_BIN_COUNT,
-                        sender_to_stat.clone(),
-                    ),
-                    stat_sender: sender_to_stat.clone(),
                     timer: timer.clone().unwrap(),
-                },
-                stat_thread: StatThread {
-                    stat_queue: Default::default(),
-                    io_interface: Box::new(TestIOHandler {}),
-                    enabled: true,
-                    // current_peer_state: Default::default(),
-                    current_wallet_state: Default::default(),
-                    current_mining_state: Default::default(),
-                    current_blockchain_state: Default::default(),
-                    current_mempool_state: Default::default(),
-                    file_write_timer: 0,
                 },
                 timer: timer.clone().unwrap(),
                 receiver_for_router: receiver_in_blockchain,
                 receiver_for_consensus: receiver_in_mempool,
                 receiver_for_miner: receiver_in_miner,
                 receiver_for_verification: receiver_in_verification,
-                receiver_for_stats: receiver_in_stats,
                 timeout_in_ms: Duration::new(10, 0).as_millis() as u64,
                 last_run_time: 0,
                 initial_token_supply: 0,
@@ -383,7 +339,6 @@ pub mod test {
             self.routing_thread.on_init().await;
             self.mining_thread.on_init().await;
             self.verification_thread.on_init().await;
-            self.stat_thread.on_init().await;
             self.initial_token_supply += self
                 .consensus_thread
                 .blockchain_lock
@@ -420,9 +375,6 @@ pub mod test {
             if let Ok(event) = self.receiver_for_miner.try_recv() {
                 self.mining_thread.process_event(event).await;
             }
-            if let Ok(event) = self.receiver_for_stats.try_recv() {
-                self.stat_thread.process_event(event).await;
-            }
             if let Ok(event) = self.receiver_for_consensus.try_recv() {
                 self.consensus_thread.process_event(event).await;
             }
@@ -440,7 +392,6 @@ pub mod test {
             let duration = Duration::from_millis(diff);
             self.routing_thread.process_timer_event(duration).await;
             self.mining_thread.process_timer_event(duration).await;
-            self.stat_thread.process_timer_event(duration).await;
             self.consensus_thread.process_timer_event(duration).await;
             self.verification_thread.process_timer_event(duration).await;
             self.last_run_time = self.timer.get_timestamp_in_ms();
@@ -458,7 +409,7 @@ pub mod test {
         pub async fn wait_till_block_id(&mut self, block_id: BlockId) -> Result<(), Error> {
             let time_keeper = TestTimeKeeper {};
             let timeout = time_keeper.get_timestamp_in_ms() + self.timeout_in_ms;
-            info!("waiting for block id : {}", block_id);
+            debug!("waiting for block id : {}", block_id);
             loop {
                 {
                     let blockchain = self.routing_thread.blockchain_lock.read().await;
@@ -483,7 +434,7 @@ pub mod test {
         ) -> Result<(), Error> {
             let time_keeper = TestTimeKeeper {};
             let timeout = time_keeper.get_timestamp_in_ms() + self.timeout_in_ms;
-            info!("waiting for block id : {}", block_id);
+            debug!("waiting for block id : {}", block_id);
             loop {
                 {
                     let blockchain = self.routing_thread.blockchain_lock.read().await;
@@ -603,12 +554,21 @@ pub mod test {
                 .await
                 .unwrap()
         }
+        pub async fn get_latest_block(&self) -> Block {
+            self.consensus_thread
+                .blockchain_lock
+                .read()
+                .await
+                .get_latest_block()
+                .cloned()
+                .unwrap()
+        }
         pub async fn add_block(&mut self, block: Block) {
             self.routing_thread
                 .process_network_event(NetworkEvent::BlockFetched {
                     block_hash: block.hash,
                     block_id: block.id,
-                    peer_index: block.routed_from_peer.unwrap_or(0),
+                    peer_id: block.routed_from_peer_id,
                     buffer: block.serialize_for_net(BlockType::Full),
                 })
                 .await;
@@ -651,7 +611,7 @@ pub mod test {
             &self,
             _parent_hash: SaitoHash,
             _tx_count: u32,
-            fee_amount: Currency,
+            _fee_amount: Currency,
             _with_gt: bool,
         ) -> Result<Block, Error> {
             todo!()
@@ -669,16 +629,7 @@ pub mod test {
             let latest_block_id = blockchain.get_latest_block_id();
             let genesis_period = configs.get_consensus_config().unwrap().genesis_period;
 
-            let mut tx = Transaction::create(
-                wallet.deref_mut(),
-                to_key,
-                with_payment,
-                with_fee,
-                false,
-                None,
-                latest_block_id,
-                genesis_period,
-            )?;
+            let mut tx = wallet.create_transaction(vec![to_key], vec![with_payment], with_fee)?;
             tx.generate(&wallet.public_key, 0, 0);
             tx.sign(&wallet.private_key);
             Ok(tx)
@@ -706,7 +657,7 @@ pub mod test {
                 .filter(|(_, value)| **value)
                 .map(|(key, value)| {
                     let slip = Slip::parse_slip_from_utxokey(key).unwrap();
-                    info!(
+                    trace!(
                         "Utxo : {:?} : {} : {:?}, block : {}-{}-{}, valid : {}",
                         slip.public_key.to_base58(),
                         slip.amount,
@@ -730,23 +681,23 @@ pub mod test {
             current_supply += latest_block.previous_block_unpaid;
             current_supply += latest_block.total_fees;
 
-            info!(
+            trace!(
                 "diff : {}",
                 self.initial_token_supply as i64 - current_supply as i64
             );
-            info!("Current supply is {}", current_supply);
-            info!("Initial token supply is {}", self.initial_token_supply);
-            info!(
+            trace!("Current supply is {}", current_supply);
+            trace!("Initial token supply is {}", self.initial_token_supply);
+            trace!(
                 "Social Stake Requirement is {}",
                 blockchain.social_stake_requirement
             );
-            info!("Graveyard is {}", latest_block.graveyard);
-            info!("Treasury is {}", latest_block.treasury);
-            info!("Unpaid fees is {}", latest_block.previous_block_unpaid);
-            info!("Total Fees ATR is {}", latest_block.total_fees_atr);
-            info!("Total Fees New is {}", latest_block.total_fees_new);
-            info!("Total Fee is {}", latest_block.total_fees);
-            info!("Amount in utxo {}", amount_in_utxo);
+            trace!("Graveyard is {}", latest_block.graveyard);
+            trace!("Treasury is {}", latest_block.treasury);
+            trace!("Unpaid fees is {}", latest_block.previous_block_unpaid);
+            trace!("Total Fees ATR is {}", latest_block.total_fees_atr);
+            trace!("Total Fees New is {}", latest_block.total_fees_new);
+            trace!("Total Fee is {}", latest_block.total_fees);
+            trace!("Amount in utxo {}", amount_in_utxo);
 
             if current_supply != self.initial_token_supply {
                 warn!(

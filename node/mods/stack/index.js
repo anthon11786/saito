@@ -1,4 +1,6 @@
-module.exports = (app, mod, build_number, og_card, recent_posts = []) => {
+module.exports = (app, mod, build_number, og_card = {}, initialPostSerialized = null) => {
+  console.log(og_card);
+
   let html = `
 
 <!DOCTYPE html>
@@ -22,22 +24,23 @@ module.exports = (app, mod, build_number, og_card, recent_posts = []) => {
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
   <meta name="msapplication-starturl" content="/index.html" />
 
-  <meta name="twitter:card" content="summary" />
+  <meta name="twitter:card" content="https://saito.io/stack/img/splash.png" />
   <meta name="twitter:site" content="${og_card.twitter}" />
   <meta name="twitter:creator" content="${og_card.twitter}" />
-  <meta name="twitter:title" content="${app.browser.escapeHTML(og_card.title)}" />
+  <meta name="twitter:title" content="${og_card.title}" />
   <meta name="twitter:url" content="${og_card.url}" />
-  <meta name="twitter:description" content="${app.browser.escapeHTML(og_card.description)}" />
+  <meta name="twitter:description" content="${og_card.description}" />
   <meta name="twitter:image" content="${og_card.image}" />
 
   <meta property="og:type" content="website" />
-  <meta property="og:title" content="${app.browser.escapeHTML(og_card.title)}" />
+  <meta property="og:title" content="${og_card.title}" />
   <meta property="og:url" content="${og_card.url}" />
-  <meta property="og:description" content="${app.browser.escapeHTML(og_card.description)}"/>
+  <meta property="og:description" content="${og_card.description}"/>
   <meta property="og:site_name" content="Saito" />
   <meta property="og:image" content="${og_card.image}"/>
   <meta property="og:image:url" content="${og_card.image}"/>
   <meta property="og:image:secure_url" content="${og_card.image}"/>
+  <meta property="og:image:secure_url" content="https://saito.io/stack/img/splash.png"/>
 
   <link rel="icon" sizes="192x192" href="/saito/img/touch/pwa-192x192.png" />
   <link rel="apple-touch-icon" sizes="192x192" href="/saito/img/touch/pwa-192x192.png" />
@@ -53,6 +56,8 @@ module.exports = (app, mod, build_number, og_card, recent_posts = []) => {
   <link rel="stylesheet" type="text/css" href="/saito/saito.css?v=${build_number}" />
 
   <title>Saito Stack</title>
+  <meta name="description" content="Stack - Permissioned Blogging">
+
 
     <style type="text/css">
     /* css for fade-out bg effect while content is loading */
@@ -75,9 +80,13 @@ module.exports = (app, mod, build_number, og_card, recent_posts = []) => {
 
 </head>
 <body>
-  <div class="saito-container" id="saito-container"></div>
+  <div class="saito-container hide-scrollbar" id="saito-container"></div>
 </body>
-<script type="text/javascript" src="/saito/saito.js?build=${build_number}"></script>
+`;
+  if (initialPostSerialized) {
+    html += `<script>window.__STACK_INITIAL_POST = JSON.parse(${JSON.stringify(initialPostSerialized)});</script>\n`;
+  }
+  html += `<script type="text/javascript" src="/saito/saito.js?build=${build_number}"></script>
 </html>`;
   return html;
 };

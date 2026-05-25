@@ -5,8 +5,9 @@ use std::time::Duration;
 use ahash::AHashMap;
 use log::{debug, info, trace, warn};
 use primitive_types::U256;
-use rayon::prelude::*;
 use tokio::sync::RwLock;
+
+use rayon::iter::{IndexedParallelIterator, IntoParallelRefIterator, ParallelIterator};
 
 use crate::core::consensus::block::Block;
 use crate::core::consensus::blockchain::Blockchain;
@@ -16,9 +17,9 @@ use crate::core::consensus::transaction::{Transaction, TransactionType};
 use crate::core::consensus::wallet::Wallet;
 use crate::core::defs::SaitoUTXOSetKey;
 use crate::core::defs::{
-    Currency, PrintForLog, SaitoHash, SaitoPublicKey, SaitoSignature, StatVariable, Timestamp,
+    format_timestamp, Currency, PrintForLog, SaitoHash, SaitoPublicKey, SaitoSignature, Timestamp,
 };
-use crate::core::io::storage::Storage;
+use crate::core::storage::storage::Storage;
 use crate::core::util::configuration::Configuration;
 use crate::core::util::crypto::hash;
 use crate::iterate;
@@ -80,7 +81,13 @@ impl Mempool {
         }
     }
     pub async fn add_golden_ticket(&mut self, golden_ticket: Transaction) {
-        let gt = GoldenTicket::deserialize_from_net(&golden_ticket.data);
+        let gt = match GoldenTicket::deserialize_from_net(&golden_ticket.data) {
+            Ok(gt) => gt,
+            Err(_) => {
+                warn!("failed to deserialize golden ticket data");
+                return;
+            }
+        };
         debug!(
             "adding golden ticket : {:?} target : {:?} public_key : {:?}",
             hash(&golden_ticket.serialize_for_net()).to_hex(),
@@ -121,10 +128,14 @@ impl Mempool {
 
         // validate
         if tx_valid {
+            info!(
+                "[TRANSACTION - RECEIPT] - transaction passed mempool pre-check tx_sig={}",
+                transaction.signature.to_hex()
+            );
             self.add_transaction(transaction).await;
         } else {
             debug!(
-                "transaction not valid : {:?}",
+                "transaction not valid : {:?}. cannot add to mempool",
                 transaction.signature.to_hex()
             );
         }
@@ -159,23 +170,24 @@ impl Mempool {
         // transaction.generate(&self.public_key, 0, 0);
 
         if !self.transactions.contains_key(&transaction.signature) {
-            self.routing_work_in_mempool += transaction.total_work_for_me;
-            // trace!(
-            //     "routing work available in mempool : {:?} after adding work : {:?} from tx with fees : {:?}",
-            //     self.routing_work_in_mempool, transaction.total_work_for_me, transaction.total_fees
-            // );
             if let TransactionType::GoldenTicket = transaction.transaction_type {
-                panic!("golden tickets should be in gt collection");
-            } else {
-                self.transactions
-                    .insert(transaction.signature, transaction.clone());
-                self.new_tx_added = true;
-
-                for input in transaction.from.iter() {
-                    let utxo_key = input.utxoset_key;
-                    self.utxo_map.insert(utxo_key, 1);
-                }
+                warn!("golden ticket routed to add_transaction; use add_golden_ticket instead");
+                return;
             }
+            self.routing_work_in_mempool += transaction.total_work_for_me;
+            self.transactions
+                .insert(transaction.signature, transaction.clone());
+            self.new_tx_added = true;
+
+            for input in transaction.from.iter() {
+                let utxo_key = input.utxoset_key;
+                self.utxo_map.insert(utxo_key, 1);
+            }
+            info!(
+                "[TRANSACTION - RECEIPT] - transaction added to mempool tx_sig={} mempool_tx_count={}",
+                transaction.signature.to_hex(),
+                self.transactions.len()
+            );
         }
     }
 
@@ -202,8 +214,8 @@ impl Mempool {
             if current_timestamp <= previous_block_timestamp {
                 warn!(
                     "current timestamp = {:?} should be larger than previous block timestamp : {:?}",
-                    StatVariable::format_timestamp(current_timestamp),
-                    StatVariable::format_timestamp(previous_block_timestamp)
+                    format_timestamp(current_timestamp),
+                    format_timestamp(previous_block_timestamp)
                 );
                 return None;
             }
@@ -364,7 +376,6 @@ impl Mempool {
             if current_timestamp < previous_block.timestamp + value {
                 return None;
             }
-            // info!("aaaa value = {:?}", value);
 
             let result = work_available >= work_needed;
             if result {
@@ -397,8 +408,14 @@ impl Mempool {
     pub fn delete_transactions(&mut self, transactions: &Vec<Transaction>) {
         for transaction in transactions {
             if let TransactionType::GoldenTicket = transaction.transaction_type {
-                let gt = GoldenTicket::deserialize_from_net(&transaction.data);
-                self.golden_tickets.remove(&gt.target);
+                match GoldenTicket::deserialize_from_net(&transaction.data) {
+                    Ok(gt) => {
+                        self.golden_tickets.remove(&gt.target);
+                    }
+                    Err(_) => {
+                        warn!("failed to deserialize golden ticket during transaction cleanup");
+                    }
+                }
             } else {
                 self.transactions.remove(&transaction.signature);
             }
@@ -429,6 +446,7 @@ mod tests {
 
     use crate::core::consensus::wallet::Wallet;
     use crate::core::defs::{SaitoPrivateKey, SaitoPublicKey};
+    use crate::core::util::crypto::generate_keys;
     use crate::core::util::test::test_manager::test::{create_timestamp, TestManager};
 
     use super::*;
@@ -492,8 +510,7 @@ mod tests {
             {
                 let mut wallet = wallet_lock.write().await;
 
-                let (inputs, outputs) =
-                    wallet.generate_slips(720_000, None, latest_block_id, genesis_period);
+                let (inputs, outputs) = wallet.generate_slips(720_000);
                 tx.from = inputs;
                 tx.to = outputs;
                 // _i prevents sig from being identical during test
@@ -527,5 +544,27 @@ mod tests {
             )
             .await
             .is_some());
+    }
+
+    // Item 23: a GoldenTicket transaction sent to add_transaction is silently rejected
+    // (warn log only) and does not enter the transactions map.
+    #[tokio::test]
+    #[serial_test::serial]
+    async fn golden_ticket_transaction_rejected_by_add_transaction() {
+        let keys = generate_keys();
+        let wallet_lock = Arc::new(RwLock::new(Wallet::new(keys.1, keys.0)));
+        let mut mempool = Mempool::new(wallet_lock);
+
+        let mut tx = Transaction::default();
+        tx.transaction_type = TransactionType::GoldenTicket;
+        // add_transaction has a debug_assert requiring hash_for_signature to be set.
+        tx.hash_for_signature = Some([0u8; 32]);
+
+        mempool.add_transaction(tx).await;
+
+        assert!(
+            mempool.transactions.is_empty(),
+            "a GoldenTicket tx must be rejected by add_transaction"
+        );
     }
 }

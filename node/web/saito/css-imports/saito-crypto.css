@@ -1,10 +1,9 @@
 .saito-crypto-deposit-container {
-  max-width: min(40rem, 90vw);
   display: flex;
   flex-direction: column;
   gap: 2rem;
-  min-height: 45rem;
   justify-content: space-between;
+  height: 54rem;
 }
 
 .saito-crypto-wallet-state {
@@ -33,8 +32,8 @@
 }
 
 .crypto-details-overlay {
-  width: 600px;
-  max-width: 100vw;
+  width: 720px;
+  max-width: calc(100vw - 2px);
   min-height: 700px;
   max-height: calc(100vh - var(--saito-header-height));
   padding: 2rem;
@@ -42,10 +41,6 @@
   display: flex;
   flex-direction: column;
   gap: 2rem;
-}
-
-.crypto-details-overlay .saito-overlay-form-header {
-  padding: 0 1rem;
 }
 
 .wallet-details {
@@ -88,6 +83,7 @@
   flex-direction: column;
   gap: 0.2rem;
   padding: 1rem;
+  justify-content: space-between;
 }
 
 .main-balance {
@@ -105,7 +101,7 @@
 
 .saito-button-grid {
   display: grid;
-  grid-template-columns: repeat(2, 1fr);
+  grid-template-columns: min-content repeat(2, 1fr);
   gap: 1rem;
   margin-top: auto;
 }
@@ -154,7 +150,7 @@
   position: absolute;
   right: 1rem;
   font-size: 2rem;
-  padding: 1rem;
+  padding: 0.5rem;
   cursor: pointer;
   top: 0;
 }
@@ -188,6 +184,21 @@
   }
 }
 
+.transaction-history-table div.saito-only {
+  display: none;
+}
+
+.transaction-history-table[data-crypto='SAITO'] div.saito-only {
+  display: flex;
+}
+
+.saitox-table.transaction-history-table {
+  grid-template-columns: repeat(3, minmax(max-content, 2fr)) repeat(
+      calc(var(--saitox-column-ct) - 3),
+      minmax(max-content, 3fr)
+    );
+}
+
 .refreshed {
   visibility: hidden;
 }
@@ -219,9 +230,36 @@
     gap: 0;
   }
 
+  .deposit-address,
+  .wallet-actions {
+    padding: 0.5rem;
+  }
+
+  .pubkey-container {
+    font-size: 1.5rem;
+  }
+
   .wallet-actions {
     min-width: 210px;
     margin-left: auto;
+    width: 100%;
+  }
+
+  .saitox-table.transaction-history-table {
+    grid-template-columns: 10rem 0px 1fr 0px 1fr 0px;
+  }
+
+  .saitox-table.transaction-history-table > div {
+    padding: 0;
+    overflow: hidden;
+  }
+
+  .wallet-details .qrcode {
+    height: 15rem;
+  }
+  .wallet-details .qrcode img {
+    height: 15rem;
+    width: 15rem;
   }
 }
 
@@ -240,39 +278,452 @@
     display: none;
   }*/
 
-  .wallet-actions {
-    padding: 1rem 0;
-    margin-left: unset;
-    display: grid;
-    grid-template-areas: 'A C' 'B C';
-  }
-
-  .saito-button-grid {
-    grid-area: C;
-  }
-
-  .refresh,
-  .main-balance .refresh {
-    right: unset;
-    left: 0;
-    top: -3rem;
-  }
-
-  .deposit-address .pubkey-container {
+  /*.deposit-address .pubkey-container {
     display: none;
   }
 
   .mobile-only460 {
     display: flex;
     margin-left: auto;
-  }
+  }*/
+}
 
-  .saitox-table.transaction-history-table {
-    grid-template-columns: 10rem 0px 1fr 0px 1fr;
-  }
+.saito-crypto-deposit-content {
+  font-size: 1.8rem;
+  line-height: 2.2rem;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: space-evenly;
+  gap: 1rem;
+  flex-grow: 1;
+  height: 350px;
+}
 
-  .saitox-table.transaction-history-table > div {
-    padding: 0;
-    overflow: hidden;
-  }
+.saito-crypto-deposit-content .img-prev {
+  width: 100%;
+  max-height: 30rem;
+  height: auto;
+  object-fit: cover;
+}
+
+.saito-progress-meter {
+  position: relative;
+  display: flex;
+  height: 3rem;
+  width: 100%;
+  color: var(--saito-primary-text);
+  background: var(--saito-highlight);
+  border: 1px solid var(--saito-border-color);
+  border-radius: var(--saito-border-radius);
+  overflow: hidden;
+}
+
+.saito-crypto-deposit-container .game-loader-spinner {
+  margin: 10rem auto;
+}
+
+/* -----------------------------------------------------------------
+   Withdraw overlay — unified token selector (single bordered control)
+   Overrides legacy split layout in saito-wallet.css via specificity.
+   ----------------------------------------------------------------- */
+
+#withdrawal-form #withdraw-step-one .token-dropdown {
+  display: block;
+  position: relative;
+  border: none;
+  background: none;
+  padding: 0;
+  margin: 0;
+  box-shadow: none;
+  gap: 0;
+}
+
+#withdrawal-form #withdraw-step-one .withdraw-token-custom {
+  position: relative;
+  width: 100%;
+  min-width: 0;
+}
+
+#withdrawal-form #withdraw-step-one .withdraw-token-trigger {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.45rem;
+  width: 100%;
+  min-height: 4.25rem;
+  padding: 0.45rem 0.65rem;
+  margin: 0;
+  box-sizing: border-box;
+  border: 1px solid
+    color-mix(in srgb, var(--saito-border-color) 40%, var(--saito-font-color-heavy) 60%);
+  border-radius: var(--saito-border-radius);
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--saito-background-color) 90%, var(--saito-primary) 10%),
+    color-mix(in srgb, var(--saito-background-color) 96%, black)
+  );
+  color: var(--saito-font-color);
+  font: inherit;
+  line-height: 1;
+  cursor: pointer;
+}
+
+#withdrawal-form #withdraw-step-one .withdraw-token-trigger-left {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 0.45rem;
+  min-width: 0;
+  flex: 1;
+}
+
+#withdrawal-form #withdraw-step-one .withdraw-logo-cont {
+  position: relative;
+  width: 1.75rem;
+  height: 1.75rem;
+  min-width: 1.75rem;
+  flex-shrink: 0;
+  border-radius: 50%;
+  overflow: hidden;
+}
+
+#withdrawal-form #withdraw-step-one .withdraw-logo-cont .crypto-logo {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+#withdrawal-form #withdraw-step-one .withdraw-logo-cont .chain-logo {
+  position: absolute;
+  width: auto;
+  height: 34%;
+  bottom: 6%;
+  right: 6%;
+}
+
+#withdrawal-form #withdraw-step-one #withdraw-token-trigger-ticker {
+  display: inline-flex;
+  align-items: center;
+  font-size: 1.4rem;
+  font-weight: 600;
+  line-height: 1.15;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+#withdrawal-form #withdraw-step-one .withdraw-token-trigger-caret {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  font-size: 0.95rem;
+  line-height: 1;
+  opacity: 0.82;
+}
+
+#withdrawal-form #withdraw-step-one .withdraw-select-crypto.hide-element,
+#withdrawal-form #withdraw-step-one .token-dropdown select.hide-element {
+  position: absolute !important;
+  width: 1px !important;
+  height: 1px !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  opacity: 0 !important;
+  pointer-events: none !important;
+  border: none !important;
+  clip: rect(0, 0, 0, 0);
+}
+
+#withdrawal-form #withdraw-step-one .withdraw-token-menu {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: calc(100% + 2px);
+  z-index: 120;
+  margin: 0;
+  padding: 0.18rem 0;
+  list-style: none;
+  max-height: 14rem;
+  overflow-y: auto;
+  background: color-mix(in srgb, var(--saito-background-color) 78%, black);
+  color: var(--saito-font-color);
+  border: 1px solid
+    color-mix(in srgb, var(--saito-border-color) 35%, var(--saito-font-color-heavy) 65%);
+  border-radius: var(--saito-border-radius);
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, var(--saito-font-color-heavy) 10%, transparent),
+    0 6px 16px rgba(0, 0, 0, 0.26);
+}
+
+#withdrawal-form #withdraw-step-one .withdraw-token-option {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.28rem 0.5rem;
+  min-height: 2.35rem;
+  cursor: pointer;
+}
+
+#withdrawal-form #withdraw-step-one .withdraw-token-option:hover {
+  background: color-mix(in srgb, var(--saito-primary) 7%, transparent);
+}
+
+#withdrawal-form #withdraw-step-one .withdraw-token-option[aria-selected='true'] {
+  background: color-mix(in srgb, var(--saito-primary) 4.5%, transparent);
+}
+
+#withdrawal-form #withdraw-step-one .withdraw-token-option-logo {
+  width: 1.65rem;
+  height: 1.65rem;
+  flex-shrink: 0;
+  border-radius: 50%;
+  object-fit: cover;
+}
+
+#withdrawal-form #withdraw-step-one .withdraw-token-option-chain {
+  width: 1.1rem;
+  height: 1.1rem;
+  flex-shrink: 0;
+  align-self: center;
+  border-radius: 50%;
+  object-fit: cover;
+}
+
+#withdrawal-form #withdraw-step-one .withdraw-token-option-ticker {
+  font-size: 1.25rem;
+  font-weight: 600;
+  line-height: 1.1;
+  display: inline-flex;
+  align-items: center;
+}
+
+/* -------------------------------------------------------------------------- */
+/* Game crypto send / confirm overlays (saito-crypto.send + confirm)          */
+/* -------------------------------------------------------------------------- */
+
+#crypto-send-confirm-root.game-crypto-transfer-manager-container.crypto-send-confirm-overlay,
+#send-crypto-request-container.game-crypto-transfer-manager-container.send-crypto-overlay {
+  min-width: min(44rem, 95vw);
+  max-width: min(52rem, 96vw);
+  padding: 2.6rem 3rem 3rem;
+  gap: 0;
+  align-items: stretch;
+  border: 1px solid color-mix(in srgb, var(--saito-white) 12%, transparent);
+  box-shadow: 0 1.2rem 3.6rem color-mix(in srgb, var(--saito-black) 45%, transparent);
+}
+
+.crypto-send-confirm-overlay__surface,
+.send-crypto-overlay__surface {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2.2rem;
+  width: 100%;
+}
+
+.crypto-send-confirm-overlay__header,
+.send-crypto-overlay__header {
+  width: 100%;
+  text-align: center;
+}
+
+.crypto-send-confirm-overlay__title,
+.send-crypto-overlay__title {
+  margin: 0;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+.crypto-send-confirm-overlay__body,
+.send-crypto-overlay__body {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1.6rem;
+  width: 100%;
+  text-align: center;
+}
+
+.crypto-send-confirm-overlay__status,
+.send-crypto-overlay__status {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  min-height: 10rem;
+}
+
+.crypto-send-confirm-overlay__summary,
+.crypto-send-confirm-overlay__recipient {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.6rem;
+  width: 100%;
+  text-align: center;
+}
+
+.crypto-send-confirm-overlay__summary-label {
+  font-size: 1.4rem;
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: color-mix(in srgb, var(--saito-white) 72%, transparent);
+}
+
+.crypto-send-confirm-overlay__amount {
+  margin: 0;
+  font-weight: 600;
+}
+
+.crypto-send-confirm-overlay__chain-address {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New',
+    monospace;
+  font-size: 1.5rem;
+  letter-spacing: 0.04em;
+  opacity: 0.88;
+  color: var(--saito-white);
+  text-align: center;
+  word-break: break-all;
+}
+
+#crypto-send-confirm-root .counterparty-details {
+  align-items: center;
+  text-align: center;
+  width: 100%;
+}
+
+#crypto-send-confirm-root .counterparty-details .saito-user {
+  align-items: center;
+}
+
+#crypto-send-confirm-root .counterparty-details .saito-user > .saito-address {
+  text-align: center;
+}
+
+.crypto-send-confirm-overlay__detail-message {
+  display: none;
+  width: 100%;
+  max-width: 42rem;
+  margin: 0 auto;
+  font-size: 1.5rem;
+  line-height: 1.45;
+  color: color-mix(in srgb, var(--saito-white) 88%, transparent);
+  text-align: center;
+  word-break: break-word;
+}
+
+#crypto-send-confirm-root.crypto-send-confirm-overlay--has-detail .crypto-send-confirm-overlay__detail-message {
+  display: block;
+}
+
+.crypto-send-confirm-overlay__footer {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1.2rem;
+  width: 100%;
+  margin-top: 0.4rem;
+}
+
+.crypto-send-confirm-overlay__footer--interactive {
+  gap: 1.4rem;
+}
+
+#crypto-send-confirm-root[data-confirm-mode='trusted'] .crypto-send-confirm-overlay__footer--interactive {
+  display: none;
+}
+
+#crypto-send-confirm-root[data-confirm-mode='interactive'] .crypto-send-confirm-overlay__footer--trusted {
+  display: none;
+}
+
+.crypto-send-confirm-overlay__countdown {
+  margin: 0 auto;
+  font-size: 1.8rem;
+  color: color-mix(in srgb, var(--saito-white) 88%, transparent);
+  text-align: center;
+}
+
+.crypto-send-confirm-overlay__countdown span {
+  font-family: monospace;
+}
+
+.crypto-send-confirm-overlay__close-btn {
+  min-width: 14rem;
+  text-transform: capitalize;
+}
+
+.crypto-send-confirm-overlay__ignore {
+  display: none;
+  flex-direction: row;
+  align-items: center;
+  justify-content: center;
+  gap: 0.9rem;
+  font-size: 1.6rem;
+  cursor: pointer;
+  user-select: none;
+  color: color-mix(in srgb, var(--saito-white) 92%, transparent);
+}
+
+#crypto-send-confirm-root.crypto-send-confirm-overlay--show-ignore .crypto-send-confirm-overlay__ignore {
+  display: flex;
+}
+
+.crypto-send-confirm-overlay__ignore-label {
+  line-height: 1.3;
+}
+
+.crypto-send-confirm-overlay__ignore-checkbox {
+  flex-shrink: 0;
+}
+
+/* Pending: spinner only; success / failure: icons only */
+#crypto-send-confirm-root[data-confirm-state='pending'] .crypto-send-confirm-overlay__result-icon {
+  display: none !important;
+}
+
+#crypto-send-confirm-root[data-confirm-state='success'] .crypto-send-confirm-overlay__spinner,
+#crypto-send-confirm-root[data-confirm-state='failed'] .crypto-send-confirm-overlay__spinner {
+  display: none;
+}
+
+#crypto-send-confirm-root[data-confirm-state='success']
+  .crypto-send-confirm-overlay__result-icon--success.game-crypto-icon,
+#crypto-send-confirm-root[data-confirm-state='failed']
+  .crypto-send-confirm-overlay__result-icon--failure.game-crypto-icon {
+  display: block;
+}
+
+#crypto-send-confirm-root[data-confirm-state='success'] .crypto-send-confirm-overlay__result-icon--failure,
+#crypto-send-confirm-root[data-confirm-state='failed'] .crypto-send-confirm-overlay__result-icon--success {
+  display: none !important;
+}
+
+/* Legacy send overlay: trusted vs interactive footers */
+.game-crypto-transfer-manager-container.send-crypto-overlay.send-crypto-overlay--mode-trusted
+  .send-crypto-overlay__footer--interactive {
+  display: none;
+}
+
+.game-crypto-transfer-manager-container.send-crypto-overlay.send-crypto-overlay--mode-interactive
+  .send-crypto-overlay__footer--trusted {
+  display: none;
+}
+
+.game-crypto-transfer-manager-container.send-crypto-overlay .send-crypto-overlay__footer--trusted
+  .send-crypto-overlay__countdown {
+  margin-left: auto;
+  margin-right: auto;
+  text-align: center;
+}
+
+.game-crypto-transfer-manager-container.send-crypto-overlay[data-send-state='success'] .send-crypto-overlay__spinner,
+.game-crypto-transfer-manager-container.send-crypto-overlay[data-send-state='failed'] .send-crypto-overlay__spinner {
+  display: none;
 }

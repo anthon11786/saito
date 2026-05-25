@@ -1,7 +1,0 @@
-.vscode/
-
-*.sai
-
-# Dependency directories
-node_modules/
-node/node_modules/

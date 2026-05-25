@@ -190,18 +190,24 @@ html:has(.stack-create-post-page) {
   font-style: italic;
 }
 
-/* Publish/Update Button */
-.stack-create-post-page .stack-editor-publish-btn {
+/* Shared structural invariant for primary editor controls (button and dropzone) */
+/* This class enforces identical geometry so elements align visually */
+.stack-create-post-page .stack-editor-primary-control {
   width: 100%;
+  min-width: 0; /* Override global button min-width: 18rem to allow container-defined width */
   margin: 0; /* No margin - container padding provides spacing */
   padding: 1rem 1.5rem;
+  box-sizing: border-box; /* Padding and border included in width calculation */
+}
+
+/* Publish/Update Button */
+.stack-create-post-page .stack-editor-publish-btn {
   font-size: 1.5rem;
   font-weight: 500;
   color: var(--saito-primary-text);
   background: var(--saito-primary);
   border: none;
   border-radius: 4px;
-  box-sizing: border-box; /* Padding included in width calculation - matches dropzone */
   cursor: pointer;
   transition: opacity 0.2s ease;
   font-family: inherit;
@@ -216,20 +222,43 @@ html:has(.stack-create-post-page) {
 }
 
 /* Help Section */
+.stack-editor-help-container {
+  display: flex;
+  flex-direction: column;
+}
+
+.stack-create-post-page .stack-editor-help-icon-container {
+  display: flex;
+  justify-content: space-around;
+}
+
+.stack-editor-help-text-container {
+  max-height: 0;
+  overflow: hidden;
+  transition: max-height ease-in-out 0.5s;
+}
+
+.stack-cheatsheet-title {
+ text-align: center;
+}
+
 .stack-create-post-page .stack-editor-help {
   display: block;
+  padding: 1rem;
+  border-radius: var(--saito-border-radius);
+  border: 1px solid var(--saito-border-color);
+  color: var(--saito-surface-text);
 }
 
 .stack-create-post-page .stack-editor-help-link {
   font-size: 1.4rem;
-  color: var(--saito-primary);
+  color: inherit; /* Inherit from container, not primary color */
   text-decoration: none;
   font-weight: 500;
-  transition: opacity 0.2s ease;
+  transition: text-decoration 0.2s ease;
 }
 
 .stack-create-post-page .stack-editor-help-link:hover {
-  opacity: 0.8;
   text-decoration: underline;
 }
 
@@ -237,9 +266,73 @@ html:has(.stack-create-post-page) {
   display: inline;
   font-size: 1.4rem;
   line-height: 1.5;
-  color: var(--saito-font-color);
-  opacity: 0.7;
+  color: inherit; /* Inherit from container */
   margin: 0;
+}
+
+.stack-create-post-page .stack-markdown-cheatsheet {
+  margin: 1rem 0 0 0;
+  font-size: small;
+}
+
+/* Help Icon Container - matches stack-view-post-actions styling */
+.stack-create-post-page .stack-editor-help-icon-container {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  flex-shrink: 0;
+}
+
+/* Circular icon-only badges - matches stack-view-post-action-badge styling */
+/* Direct icon (not wrapped in <a>) */
+.stack-create-post-page .stack-editor-help-icon-container > .stack-help-icon {
+  width: 3.6rem;
+  height: 3.6rem;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: 1px solid var(--saito-border-color);
+  color: var(--saito-font-color);
+  opacity: 0.6; /* Low contrast by default */
+  cursor: pointer;
+  transition: all 0.2s ease;
+  font-size: 1.6rem;
+  line-height: 1;
+}
+
+/* Link wrapper for icon */
+.stack-create-post-page .stack-editor-help-icon-container > a {
+  width: 3.6rem;
+  height: 3.6rem;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: 1px solid var(--saito-border-color);
+  color: var(--saito-font-color);
+  opacity: 0.6; /* Low contrast by default */
+  cursor: pointer;
+  transition: all 0.2s ease;
+  text-decoration: none;
+}
+
+/* Icon inside link wrapper */
+.stack-create-post-page .stack-editor-help-icon-container > a .stack-help-icon {
+  font-size: 1.6rem;
+  line-height: 1;
+}
+
+/* Hover states */
+.stack-create-post-page .stack-editor-help-icon-container > .stack-help-icon:hover,
+.stack-create-post-page .stack-editor-help-icon-container > a:hover {
+  opacity: 1;
+  background: var(--saito-primary);
+  border-color: var(--saito-primary);
+  color: white;
+  transform: scale(1.05);
 }
 
 .stack-create-post-page .stack-draft-state {
@@ -306,13 +399,9 @@ html:has(.stack-create-post-page) {
 
 /* Featured Image Dropzone (shown when no image) */
 .stack-featured-image-dropzone {
-  width: 100%;
   min-height: 100px; /* More compact for sidebar */
-  margin: 0; /* No margin - container padding provides spacing */
-  padding: 1.2rem; /* Reduced padding for sidebar */
-  border: 2px dashed var(--saito-border-color);
+  border: 2px dashed var(--saito-border-color); /* Border drawn INSIDE shared geometry */
   border-radius: 8px;
-  box-sizing: border-box; /* Border and padding included in width calculation */
   text-align: center;
   cursor: pointer;
   transition: all 0.2s ease;
@@ -456,8 +545,15 @@ html:has(.stack-create-post-page) {
 }
 
 /* Placeholder for empty editor - scoped to create-post page only */
-.stack-create-post-page .stack-post-body-editor.stack-editor-empty > p:first-child:empty:before {
-  content: attr(data-placeholder);
+/* Show placeholder when editor is empty (has stack-editor-empty class) */
+/* Target the first paragraph block, which may contain zero-width space for editability */
+/* Use CSS variable to pass placeholder text from editor's data-placeholder attribute */
+.stack-create-post-page .stack-post-body-editor.stack-editor-empty > p:first-child {
+  position: relative;
+}
+
+.stack-create-post-page .stack-post-body-editor.stack-editor-empty > p:first-child::before {
+  content: "Start writing..."; /* Placeholder text - matches data-placeholder on editor */
   color: var(--saito-font-color);
   opacity: 0.5;
   pointer-events: none;
@@ -465,6 +561,7 @@ html:has(.stack-create-post-page) {
   position: absolute;
   left: 0;
   top: 0;
+  white-space: nowrap;
 }
 
 .stack-create-post-page .stack-post-body-editor:focus {
@@ -1004,6 +1101,21 @@ html:has(.stack-create-post-page) {
 
   .stack-post-body-editor > h3 {
     font-size: 1.75rem;
+  }
+
+  .stack-create-post-page .stack-editor-help-icon-container {
+    gap: 0.5rem;
+  }
+
+  .stack-create-post-page .stack-editor-help-icon-container > .stack-help-icon,
+  .stack-create-post-page .stack-editor-help-icon-container > a {
+    width: 3.2rem;
+    height: 3.2rem;
+  }
+
+  .stack-create-post-page .stack-editor-help-icon-container > .stack-help-icon,
+  .stack-create-post-page .stack-editor-help-icon-container > a .stack-help-icon {
+    font-size: 1.4rem;
   }
 }
 

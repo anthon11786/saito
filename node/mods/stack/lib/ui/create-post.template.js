@@ -19,7 +19,7 @@ module.exports = (app, mod) => {
                 type="text" 
                 id="stack-post-title-input" 
                 class="stack-post-title-input" 
-                placeholder="Untitled Post"
+                placeholder="Give your post a working title"
               />
             </div>
             
@@ -43,23 +43,74 @@ module.exports = (app, mod) => {
             <!-- Upload box is only a chooser - image appears in main layout above title -->
             <div id="stack-featured-image-section" class="stack-featured-image-section">
               <!-- Upload Dropzone (shown when no image) -->
-              <div id="stack-featured-image-dropzone" class="stack-featured-image-dropzone">
+              <div id="stack-featured-image-dropzone" class="stack-featured-image-dropzone stack-editor-primary-control">
                 <div class="stack-featured-image-dropzone-content">
                   <i class="fa-solid fa-image stack-featured-image-upload-icon"></i>
-                  <p class="stack-featured-image-dropzone-text">Drag and drop an image here</p>
+                  <p class="stack-featured-image-dropzone-text">Drag and drop feature image here</p>
                   <p class="stack-featured-image-dropzone-subtext">or click to upload</p>
                 </div>
               </div>
             </div>
             
-            <button class="stack-editor-publish-btn" id="stack-editor-publish-btn">
+            <button class="stack-editor-publish-btn stack-editor-primary-control" id="stack-editor-publish-btn">
               Publish
             </button>
             
             <div class="stack-editor-help">
-              <span class="stack-editor-help-text">
-                <a href="#" class="stack-editor-help-link" id="stack-editor-help-link">Need help?</a> Learn how to write posts, add headers, quotes, images, and publish to the network.
-              </span>
+              <div class="stack-editor-help-container">
+                <div class="stack-editor-help-icon-container">
+                  <i class="fa-solid fa-question stack-help-icon"></i>
+                  <a href="https://wiki.saito.io/en/applications/stack" target="_blank"><i class="fa-solid fa-info stack-help-icon"></i></a>
+                </div>
+                <div class="stack-editor-help-text-container">
+                  <div class="stack-markdown-cheatsheet">
+                    <p class="stack-cheatsheet-title">
+                      <b>Cheat Sheet</b>
+                      <span>Markdown</span>
+                    </p>
+                    <div class="stack-cheatsheet-section">
+                      <div class="stack-cheatsheet-item">
+                        <code># Title</code>
+                      </div>
+                      <div class="stack-cheatsheet-item">
+                        <code>## Subtitle</code>
+                      </div>
+                      <div class="stack-cheatsheet-item">
+                        <code>### Heading</code>
+                      </div>
+                      <div class="stack-cheatsheet-item">
+                        <code>#### Subheading</code>
+                      </div>
+                    </div>
+                    <div class="stack-cheatsheet-section">
+                      <div class="stack-cheatsheet-item">
+                        <code>_italic_</code>
+                      </div>
+                      <div class="stack-cheatsheet-item">
+                        <code>**bold**</code>
+                      </div>
+                    </div>
+                    <div class="stack-cheatsheet-section">
+                      <div class="stack-cheatsheet-item">
+                        <code>––-</code> horizontal rule
+                      </div>
+                    </div>
+                    <div class="stack-cheatsheet-section">
+                      <div class="stack-cheatsheet-item">
+                        <code>* bullet</code>
+                      </div>
+                      <div class="stack-cheatsheet-item">
+                        <code>\`\`\` code \`\`\`</code>
+                      </div>
+                    </div>
+                    <div class="stack-cheatsheet-tips">
+                      <p>Paste images<p>
+                      <p>cltr/cmd + b for bold</p>
+                      <p>cltr/cmd + i for italic</p>
+                    </div>
+                  </div>
+                </div>
+              </div>
             </div>
           </div>
         </div>

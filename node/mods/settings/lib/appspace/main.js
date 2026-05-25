@@ -22,6 +22,9 @@ class SettingsAppspace {
 
 		this.overlay.show(SettingsAppspaceTemplate(this.app, this.mod, this));
 
+		this.clearSettingsWarningBar();
+		this.runBrowserNodeBuildCheck();
+
 		/**
 		 *  No modules are implementing this, but it is an idea to let modules render a component
 		 *  into the Settings appspace overlay
@@ -41,6 +44,97 @@ class SettingsAppspace {
 		this.renderCryptoGameSettings();
 
 		await this.attachEvents();
+	}
+
+	clearSettingsWarningBar() {
+		let bar = document.getElementById('settings-appspace-warning-bar');
+		if (!bar) {
+			return;
+		}
+		bar.style.display = 'none';
+		bar.innerHTML = '';
+		bar.removeAttribute('aria-label');
+	}
+
+	showSettingsWarningBar(message) {
+		let bar = document.getElementById('settings-appspace-warning-bar');
+		if (!bar) {
+			return;
+		}
+		bar.innerHTML = `<i class="fa-solid fa-triangle-exclamation" aria-hidden="true"></i><span class="settings-appspace-warning-bar-text"></span>`;
+		let span = bar.querySelector('.settings-appspace-warning-bar-text');
+		if (span) {
+			span.textContent = message;
+		}
+		bar.style.display = 'flex';
+		bar.setAttribute('aria-label', message);
+	}
+
+	selectPeerForBuildCheck(peers) {
+		let connected = peers.filter((p) => p?.status !== 'disconnected');
+		let fullNode = connected.find((p) => p.synctype && p.synctype !== 'lite');
+		return fullNode || connected[0] || null;
+	}
+
+	updateBuildInfoValues(browserBuild, nodePeerBuildDisplay) {
+		let browserEl = document.getElementById('settings-browser-build-value');
+		let nodeEl = document.getElementById('settings-node-peer-build-value');
+		if (browserEl) {
+			browserEl.textContent = browserBuild;
+		}
+		if (nodeEl) {
+			nodeEl.textContent = nodePeerBuildDisplay;
+		}
+	}
+
+	runBrowserNodeBuildCheck() {
+		if (!this.app.BROWSER) {
+			return;
+		}
+		let browserBuild = String(this.app.build_number);
+		this.updateBuildInfoValues(browserBuild, '—');
+
+		(async () => {
+			try {
+				let peers = await this.app.network.getPeers();
+				let peer = this.selectPeerForBuildCheck(peers);
+				if (!peer) {
+					this.updateBuildInfoValues(browserBuild, '—');
+					this.clearSettingsWarningBar();
+					return;
+				}
+				this.app.network.sendRequestAsTransaction(
+					'settings server build',
+					{},
+					(res) => {
+						if (!res || res.err === 'no response') {
+							this.updateBuildInfoValues(browserBuild, '—');
+							this.clearSettingsWarningBar();
+							return;
+						}
+						let nodeBuild = res.build_number != null ? String(res.build_number) : '';
+						if (!nodeBuild) {
+							this.updateBuildInfoValues(browserBuild, '—');
+							this.clearSettingsWarningBar();
+							return;
+						}
+						this.updateBuildInfoValues(browserBuild, nodeBuild);
+						if (browserBuild === nodeBuild) {
+							this.clearSettingsWarningBar();
+							return;
+						}
+						this.showSettingsWarningBar(
+							`Browser build ${browserBuild} does not match connected node build ${nodeBuild}.`
+						);
+					},
+					peer.publicKey
+				);
+			} catch (err) {
+				console.error('Settings build check:', err);
+				this.updateBuildInfoValues(browserBuild, '—');
+				this.clearSettingsWarningBar();
+			}
+		})();
 	}
 
 	//
@@ -141,15 +235,24 @@ class SettingsAppspace {
 	}
 
 	renderStorageInfo() {
-		navigator.storage.estimate().then((estimate) => {
-			let percentage = (estimate.usage / estimate.quota) * 100;
-			document.querySelector('.settings-appspace-indexdb-info .quota').innerHTML =
-				this.app.browser.formatNumberToLocale(estimate.quota);
-			document.querySelector('.settings-appspace-indexdb-info .usage').innerHTML =
-				this.app.browser.formatNumberToLocale(estimate.usage);
-			document.querySelector('.settings-appspace-indexdb-info .percent').innerHTML =
-				this.app.browser.formatNumberToLocale(percentage);
-		});
+		navigator.storage
+			.estimate()
+			.then((estimate) => {
+				if (estimate?.usage && estimate?.quota) {
+					let percentage = (estimate.usage / estimate.quota) * 100;
+					document.querySelector('.settings-appspace-indexdb-info .quota').innerHTML =
+						this.app.browser.formatNumberToLocale(estimate.quota);
+					document.querySelector('.settings-appspace-indexdb-info .usage').innerHTML =
+						this.app.browser.formatNumberToLocale(estimate.usage);
+					document.querySelector('.settings-appspace-indexdb-info .percent').innerHTML =
+						this.app.browser.formatNumberToLocale(percentage);
+				} else {
+					console.warn('Unexpected storage estimate: ', estimate);
+				}
+			})
+			.catch((err) => {
+				console.error(err);
+			});
 
 		function getLocalStorageSize() {
 			let total = 0;
@@ -342,11 +445,8 @@ class SettingsAppspace {
 			}
 
 			document.getElementById('nuke-account-btn').onclick = async (e) => {
-				let confirmation = await sconfirm(
-					'This will reset/nuke your account, do you wish to proceed?'
-				);
+				let confirmation = await app.wallet.onUpgrade('nuke');
 				if (confirmation) {
-					await app.wallet.onUpgrade('nuke');
 					reloadWindow(150);
 				}
 			};
@@ -369,6 +469,11 @@ class SettingsAppspace {
 							siteMessage('Clearing archive...');
 							await archive.onUpgrade('nuke');
 						}
+						siteMessage('Clearing cookies....');
+						localStorage.clear();
+
+						this.app.storage.saveOptions();
+
 						siteMessage('rebooting...');
 						if (this.app.browser.browser_active == 1) {
 							reloadWindow(300);
@@ -413,8 +518,17 @@ class SettingsAppspace {
 		}
 
 		if (document.querySelector('#settings-add-app')) {
-			document.querySelector('#settings-add-app').onclick = () => {
+			let addAppBtn = document.querySelector('#settings-add-app');
+			let addAppActivate = (e) => {
+				e.preventDefault();
+				e.stopPropagation();
 				app.connection.emit('saito-app-app-render-request');
+			};
+			addAppBtn.onclick = addAppActivate;
+			addAppBtn.onkeydown = (e) => {
+				if (e.key === 'Enter' || e.key === ' ') {
+					addAppActivate(e);
+				}
 			};
 		}
 	}

@@ -1,6 +1,5 @@
 const CreateNFTTemplate = require('./create-overlay.template');
 const SaitoOverlay = require('./../../saito-overlay/saito-overlay');
-const ProvideMetaDataOverlay = require('./provide-metadata');
 
 class CreateNFT {
   constructor(app, mod, container = '') {
@@ -16,7 +15,6 @@ class CreateNFT {
       this.render();
     });
     this.enable_deposit = false;
-    this.provide_metadata_overlay = new ProvideMetaDataOverlay(app, mod, container);
   }
 
   async render() {
@@ -67,8 +65,8 @@ class CreateNFT {
       try {
         let modobj = this.module_provided_nfts[z];
         if (modobj.class.includes(this.nft_type)) {
-          if (modobj.createObject) {
-            obj = await modobj.createObject(this.file);
+          if (modobj.createData) {
+            obj = await modobj.createData(this.file);
             processed = true;
           } else {
             obj.text = text;
@@ -87,6 +85,13 @@ class CreateNFT {
       } catch (e) {
         salert('Provide parseable TEXT to create NFT');
         return false;
+      }
+      processed = true;
+    }
+
+    if (this.nft_type === 'token' && processed == false) {
+      if (this.image) {
+        obj.image = this.image;
       }
       processed = true;
     }
@@ -134,7 +139,6 @@ class CreateNFT {
         salert(`Attach an image/file to create nft`);
         return false;
       }
-
       obj.image = this.image;
       processed = true;
     }
@@ -210,19 +214,13 @@ class CreateNFT {
         this_self.help_overlay.show(`
           <div class="create-nft-help-overlay">
             <div class="create-nft-help-text">
-    SAITO NFTs can contain text or images or transactions. When you 
-    transfer these NFTs to other members on the network, they get 
-    access to the data contained within the transaction. When you 
-    create an NFT, the first thing we ask is what data you want 
-    inside it.
-    <p></p>
-    The cost of creating an NFT is a "deposit" of SAITO that 
-    circulates with the NFT and ensures the network can track and
-    transfer it.
-                <p></p>
-                We recommend all NFTs are created with a 1 SAITO deposit. This 
-    is not a network fee — the owner of the NFT can destroy the NFT
-    and recover the SAITO at any time.
+    Creating an NFT requires a deposit of SAITO per NFT created. This 
+    circulates with the NFT and ensures the network can track and 
+    transfer it. Destroying the NFT will recover the deposit.
+            <p></p>
+    You can manually change the deposit amount, just be aware that 
+    removing the deposit completely will result in the network 
+    automatically pruning the NFT after a single genesis period.
             </div>
 
             <div class="create-nft-deposit-container">
@@ -270,23 +268,10 @@ class CreateNFT {
       true
     );
 
-    // const nftAmountInput = document.getElementById('create-nft-amount');
-
-    // nftAmountInput.addEventListener('input', function () {
-    //   let val = this.value;
-    //   val = val.replace(/[^\d.]/g, '');
-    //   if (val.includes('.')) {
-    //     val = val.split('.')[0];
-    //   }
-    //   this.value = val;
-    // });
-
     document.querySelector('#create-nft-type-dropdown').onchange = async (e) => {
       let element = e.target;
       this.nft_type = element.value;
       let textarea = document.querySelector('#create-nft-textarea');
-
-      this.image = '';
 
       if (document.querySelector('.nft-file-transfer')) {
         document.querySelector('.nft-file-transfer').remove();
@@ -298,10 +283,19 @@ class CreateNFT {
 
       let processed = false;
 
+      //alert(this.nft_type + ' ... ');
+
       if (this.nft_type === 'text') {
         document.querySelector('#nft-image-upload').style.display = 'none';
         document.querySelector('#create-nft-textarea').style.display = 'flex';
         textarea.innerHTML = 'provide text or markdown';
+      }
+      if (this.nft_type === 'token') {
+        document.querySelector('.nft-upload-text').innerHTML = 'upload token logo/image (optional)';
+        document.querySelector('.saito-nft-input-label.ticker').style.display = 'block';
+        document.querySelector('.saito-nft-metadata-box.ticker').style.display = 'block';
+        document.querySelector('#nft-image-upload').style.display = 'flex';
+        document.querySelector('#create-nft-textarea').style.display = 'none';
       }
       if (this.nft_type === 'js') {
         document.querySelector('#nft-image-upload').style.display = 'none';
@@ -337,24 +331,44 @@ class CreateNFT {
               textarea.innerHTML = JSON.stringify(obj.json, null, 2);
             }
 
-            if (obj.createObject) {
-              document.querySelector('#nft-image-upload').style.display = 'block';
+            if (obj.createData) {
+              document.querySelector('#nft-image-upload').style.display = 'flex';
               document.querySelector('#create-nft-textarea').style.display = 'none';
             }
           }
         }
       }
+
+      const uploadEl = document.querySelector('#nft-image-upload');
+      if (this.image && uploadEl) {
+        this.addImage(this.image);
+      }
     };
 
-    document.querySelector('#create_nft').onclick = async (e) => {
-      console.log('create nft 1');
+    if (document.getElementById('next-step')) {
+      document.getElementById('next-step').onclick = () => {
+        document.querySelector('.nft-creator-overlay.panels').classList.add('provide-metadata');
+        if (document.querySelector('.saito-overlay-form-header-title div')) {
+          document.querySelector('.saito-overlay-form-header-title div').innerHTML =
+            'Provide Metadata';
+        }
+      };
+    }
 
+    if (document.getElementById('back-btn')) {
+      document.getElementById('back-btn').onclick = () => {
+        document.querySelector('.nft-creator-overlay.panels').classList.remove('provide-metadata');
+        if (document.querySelector('.saito-overlay-form-header-title div')) {
+          document.querySelector('.saito-overlay-form-header-title div').innerHTML = 'Create NFT';
+        }
+      };
+    }
+
+    document.querySelector('#create_nft').onclick = async (e) => {
       let obj = await this.createObject();
       if (obj == false) {
         return;
       }
-
-      console.log('create nft 2');
 
       //
       // this value is not either nolan/saito
@@ -391,7 +405,27 @@ class CreateNFT {
         data: obj
       };
 
-      console.log('create nft 3');
+      let ticker = document.querySelector('.saito-nft-metadata-box.ticker').value || '';
+      let title_el = document.querySelector('.saito-nft-metadata-box.title');
+      let title = title_el.value || title_el.getAttribute('placeholder') || '';
+      title = title.trim();
+
+      let desc_field = document.querySelector('.saito-nft-metadata-box.description');
+      let description = desc_field?.innerText || desc_field?.value || desc_field.innerHTML || '';
+      description = description.trim();
+
+      if (ticker) {
+        tx_msg.ticker = ticker;
+        this.nft_type = 'NFT-' + ticker;
+      }
+
+      if (title) {
+        tx_msg.title = title;
+      }
+
+      if (description) {
+        tx_msg.description = description;
+      }
 
       this.overlay.close();
 
@@ -406,10 +440,8 @@ class CreateNFT {
         publickey,
         this.nft_type
       );
-
-      console.log('create nft 4');
-      this.provide_metadata_overlay.render(newtx);
-      console.log('create nft 5');
+      await newtx.sign();
+      await this.app.network.propagateTransaction(newtx);
     };
   }
 

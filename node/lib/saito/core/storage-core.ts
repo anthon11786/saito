@@ -8,7 +8,7 @@ import path from 'path';
 import { open } from 'sqlite';
 import sqlite3 from 'sqlite3';
 
-import { Saito } from '../../../apps/core';
+import { Saito } from '../app';
 import Block from '../block';
 import Slip from '../slip';
 import { SlipType } from 'saito-js/lib/slip';
@@ -45,7 +45,7 @@ class StorageCore extends Storage {
       return fs.unlinkSync(filename);
     } catch (error) {
       console.error(`failed deleting the block file ${filename} from disk`);
-      console.error(error);
+      // console.error(error);
     }
   }
 
@@ -75,7 +75,7 @@ class StorageCore extends Storage {
       return this.db[this.db.length - 1];
     } catch (err) {
       console.error('Error creating database for db-name: ' + dbname);
-      console.error(err);
+      // console.error(err);
       return null;
     }
   }
@@ -100,8 +100,7 @@ class StorageCore extends Storage {
         return block;
       }
     } catch (error) {
-      console.log('Error reading block from disk');
-      console.error(error);
+      // console.error('Error reading block from disk: ', error);
     }
     return null;
   }
@@ -244,11 +243,10 @@ class StorageCore extends Storage {
       // block.generateHashes();
       return block;
     } catch (err) {
-      console.error('Error reading block from disk');
-      console.error(err);
+      // console.error('Error reading block from disk:', err);
     }
 
-    console.log('Block not being returned... returning null');
+    console.warn('Block not being returned... returning null');
     return null;
   }
 
@@ -295,8 +293,8 @@ class StorageCore extends Storage {
         this.app.options.spv_mode = false;
       } catch (err) {
         // this.app.logger.logError("Error Reading Options File", {message:"", stack: err});
-        console.error(err);
-        console.log('options = ', optionsfile);
+        // console.error(err);
+        // console.warn('options = ', optionsfile);
         process.exit();
       }
     } else {
@@ -322,6 +320,17 @@ class StorageCore extends Storage {
           "peers": [],
           "spv_mode": false,
           "browser_mode": false,
+          "blockchain":{
+            "last_block_hash":"0000000000000000000000000000000000000000000000000000000000000000",
+            "last_block_id":0,
+            "last_timestamp":0,
+            "genesis_block_id":0,
+            "genesis_timestamp":0,
+            "lowest_acceptable_timestamp":0,
+            "lowest_acceptable_block_hash":"0000000000000000000000000000000000000000000000000000000000000000",
+            "lowest_acceptable_block_id":0,
+            "fork_id":"0000000000000000000000000000000000000000000000000000000000000000"
+          },
           "wallet": {
           }
         }
@@ -344,7 +353,7 @@ class StorageCore extends Storage {
         this.app.options.runtime = JSON.parse(configfile.toString());
       } catch (err) {
         // this.app.logger.logError("Error Reading Runtime Config File", {message:"", stack: err});
-        console.error(err);
+        // console.error(err);
         process.exit();
       }
     } else {
@@ -371,7 +380,7 @@ class StorageCore extends Storage {
         return;
       }
     } catch (err) {
-      console.error('Problem hashing app.options: ', err);
+      // console.error('Problem hashing app.options: ', err);
     }
 
     try {
@@ -394,7 +403,7 @@ class StorageCore extends Storage {
     } catch (err) {
       this.wallet_options_hash = null;
       // this.app.logger.logError("Error thrown in storage.saveOptions", {message: "", stack: err});
-      console.error(err);
+      // console.error(err);
       return;
     }
   }
@@ -517,7 +526,7 @@ class StorageCore extends Storage {
     try {
       fs.writeFileSync(`${__dirname}/web/client.options`, JSON.stringify(t));
     } catch (err) {
-      console.error(err);
+      // console.error(err);
     }
   }
 
@@ -549,6 +558,7 @@ class StorageCore extends Storage {
     t.wallet = {};
     t.consensus = this.app.options.consensus;
     t.registry = this.app.options.registry;
+    t.homeModule = this.app.options.homeModule;
     //t.appstore             = {};
     //t.appstore.default     = this.app.wallet.getPublicKey();
     t.peers.push(client_peer);
@@ -575,7 +585,7 @@ class StorageCore extends Storage {
       const filename = `${row.timestamp}-${block_hash}.blk`;
       mycallback(filename, null);
     } catch (err) {
-      console.log('ERROR getting block filename in storage: ' + err);
+      // console.error('ERROR getting block filename in storage: ' + err);
       mycallback(null, err);
     }
   }
@@ -608,8 +618,8 @@ class StorageCore extends Storage {
         return await db.run(sql, params, mycallback);
       }
     } catch (err) {
-      console.log('sql : ', sql);
-      console.log(err);
+      // console.error('sql : ', sql);
+      // console.error(err);
     }
   }
 
@@ -625,8 +635,8 @@ class StorageCore extends Storage {
       const db = await this.returnDatabaseByName(database);
       return await db.exec(sql);
     } catch (err) {
-      console.log('sql : ', sql);
-      console.log(err);
+      // console.error('db error: ', err);
+      // console.warn('failed executing sql : ', sql);
     }
   }
 
@@ -640,8 +650,8 @@ class StorageCore extends Storage {
       }
       return rows;
     } catch (err) {
-      console.log('failed executing sql : ', sql);
-      console.error(err);
+      // console.error('db error: ', err);
+      // console.warn('failed executing sql : ', sql);
       return [];
     }
   }

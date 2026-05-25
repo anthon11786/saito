@@ -41,7 +41,8 @@ class ModTemplate {
     this.theme_options = {
       lite: 'fa-solid fa-sun',
       raven: 'fa-solid fa-crow',
-      dark: 'fa-solid fa-moon'
+      dark: 'fa-solid fa-moon',
+      prism: 'fa-solid fa-gem'
     };
 
     this.processedTxs = {};
@@ -113,7 +114,7 @@ class ModTemplate {
             let data = fs.readFileSync(filename, 'utf8');
             await app.storage.executeDatabase(data, dbname);
           } catch (err) {
-            console.error('installModule Error: ', err);
+            // console.error('installModule Error: ', err);
           }
         }
       }
@@ -158,6 +159,23 @@ class ModTemplate {
       app.connection.on(this.events[i], (data) => {
         this.receiveEvent(this.events[i], data);
       });
+    }
+
+    //
+    // Modules can list their dependencies
+    // This checks and shows an error that if the dependent module is missing
+    // the module may not operate correctly
+    //
+    if (this.dependencies?.length) {
+      for (let om of this.dependencies) {
+        if (!this.app.modules.returnModule(om)) {
+          console.error(
+            `WARNING/ERROR : ${this.name} may not function correctly because ${om} not installed!!!`
+          );
+        } else {
+          //console.info(`${om} successfully installed for ${this.name}`);
+        }
+      }
     }
 
     //
@@ -632,11 +650,11 @@ class ModTemplate {
       // here so are leaving a visible and obvious error indicator here
       // to catch any problems.
       //
-      console.log(
-        '!!@@!@#!#!@#!@#\n!!@@!@#!#!@#!@#\n!!@@!@#!#!@#!@#\n',
-        JSON.parse(JSON.stringify(tx))
-      );
-      console.error('ModTemplate [HPT] ERROR: ', err);
+      // console.log(
+      //   '!!@@!@#!#!@#!@#\n!!@@!@#!#!@#!@#\n!!@@!@#!#!@#!@#\n',
+      //   JSON.parse(JSON.stringify(tx))
+      // );
+      // console.error('ModTemplate [HPT] ERROR: ', err);
 
       return 0;
     }
@@ -764,7 +782,7 @@ class ModTemplate {
         function (res) {
           return mycallback(res);
         },
-        peer.peerIndex
+        peer.publicKey
       );
     }
   }
@@ -850,7 +868,7 @@ class ModTemplate {
             success_callback(res);
           }
         },
-        peer.peerIndex
+        peer.publicKey
       );
     }
   }
@@ -1094,7 +1112,7 @@ class ModTemplate {
     let hashed_data = this.name + tx.signature;
     if (this.processedTxs[hashed_data] !== undefined) {
       if (this.processedTxs[hashed_data]) {
-        console.log(
+        console.debug(
           'prevent processing duplicated on chain transaction : ',
           tx.from[0]?.publicKey,
           tx.returnMessage(),

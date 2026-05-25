@@ -213,7 +213,7 @@ class Chat extends ModTemplate {
     let chat_id = this.app.browser.returnURLParameter('chat_id');
 
     if (chat_id) {
-      if (this.app.wallet.isValidPublicKey(chat_id)) {
+      if (this.app.crypto.isPublicKey(chat_id)) {
         //data.key = public key(s) of other chat parties
         this.app.connection.emit('open-chat-with', { key: chat_id });
       } else {
@@ -403,7 +403,7 @@ class Chat extends ModTemplate {
               this.app.connection.emit('chat-ready');
             }
           },
-          peer.peerIndex
+          peer.publicKey
         );
       }
 
@@ -829,7 +829,7 @@ class Chat extends ModTemplate {
     }
 
     if (txmsg.request === 'chat history') {
-      console.log('Chat history request for: ', peer.publicKey, peer.peerIndex);
+      console.log('Chat history request for: ', peer.publicKey);
       let group = this.returnGroup(txmsg?.data?.group_id);
 
       if (!group) {
@@ -908,7 +908,7 @@ class Chat extends ModTemplate {
               let peers = await app.network.getPeers();
               peers.forEach((p) => {
                 if (p.publicKey !== peer.publicKey) {
-                  app.network.sendTransactionWithCallback(tx, null, p.peerIndex);
+                  app.network.sendTransactionWithCallback(tx, null, p.publicKey);
                 }
               });
             }
@@ -945,7 +945,7 @@ class Chat extends ModTemplate {
               app.network.sendTransactionWithCallback(
                 tx, // the relay wrapped message
                 null,
-                p.peerIndex
+                p.publicKey
               );
               //}
             });
@@ -985,7 +985,7 @@ class Chat extends ModTemplate {
           message.request,
           message.data,
           null,
-          peer.peerIndex
+          peer.publicKey
         );
       }
     }
@@ -999,8 +999,7 @@ class Chat extends ModTemplate {
     let pk = this.app.crypto.generateKeys();
     let id = this.app.crypto.generatePublicKey(pk);
 
-    this.app.keychain.addWatchedPublicKey(id);
-    this.app.keychain.addKey(id, { identifier: name, group: 1, privateKey: pk });
+    this.app.keychain.addKey(id, { identifier: name, group: 1, privateKey: pk, watched: true });
 
     let newtx = await this.app.wallet.createUnsignedTransaction(
       this.publicKey,
@@ -1043,10 +1042,10 @@ class Chat extends ModTemplate {
         return;
       }
 
-      this.app.keychain.addWatchedPublicKey(txmsg.id);
       this.app.keychain.addKey(txmsg.id, {
         identifier: txmsg.name,
-        group: 1
+        group: 1,
+        watched: true
       });
 
       let newGroup = {
@@ -1728,7 +1727,7 @@ class Chat extends ModTemplate {
               } else {
                 if (block[z].link_properties) {
                   if (solo_link_regex.test(saniText)) {
-                    console.log('Chat block is just a link: ', saniText);
+                    //console.log('Chat block is just a link: ', saniText);
                   } else {
                     msg += saniText;
                   }

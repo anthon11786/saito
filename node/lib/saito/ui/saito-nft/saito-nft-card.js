@@ -1,6 +1,5 @@
 const SaitoNFTCardTemplate = require('./saito-nft-card.template');
 const SaitoNFT = require('./saito-nft');
-const SaitoNFTDetails = require('./overlays/nft-overlay');
 
 class SaitoNFTCard {
   constructor(app, mod, container = '', tx = null, data = null, callback = null) {
@@ -8,6 +7,8 @@ class SaitoNFTCard {
     this.mod = mod;
     this.container = container;
     this.nft = new SaitoNFT(app, mod, tx, data);
+    this.template = SaitoNFTCardTemplate;
+    this.my_qs = this.container + ` #nft-card-${this.nft.uuid}`;
 
     //
     // UI helpers
@@ -35,16 +36,15 @@ class SaitoNFTCard {
     // render can be writing a NEW NFT Card or attempting to re-render
     // an existing one.
     //
-    let my_qs = this.container + ' .nfttxsig' + this.nft.tx_sig;
 
-    if (document.querySelector(my_qs)) {
+    if (document.querySelector(this.my_qs)) {
       this.app.browser.replaceElementBySelector(
-        SaitoNFTCardTemplate(this.app, this.mod, this.nft),
-        my_qs
+        this.template(this.app, this.mod, this.nft),
+        this.my_qs
       );
     } else {
       this.app.browser.prependElementToSelector(
-        SaitoNFTCardTemplate(this.app, this.mod, this.nft),
+        this.template(this.app, this.mod, this.nft),
         this.container
       );
     }
@@ -59,6 +59,8 @@ class SaitoNFTCard {
     } else {
       if (this.nft?.tx) {
         this.insertNFTDetails();
+      } else {
+        console.warn('NFT-Card: No transaction..., cannot insert details...');
       }
     }
 
@@ -67,7 +69,7 @@ class SaitoNFTCard {
   }
 
   async attachEvents() {
-    const el = document.querySelector(`.nfttxsig${this.nft.tx_sig}`);
+    const el = document.querySelector(this.my_qs);
     if (el) {
       el.onclick = () => {
         if (this.callback) {
@@ -80,28 +82,34 @@ class SaitoNFTCard {
   }
 
   insertNFTDetails() {
-    if (this.app.BROWSER != 1) {
+    if (!this.app.BROWSER) {
       return 0;
+    }
+
+    console.log('Insert fetched NFT details into CARD');
+
+    let type = document.querySelector(this.my_qs + ' .nft-card-type');
+    if (type) {
+      type.innerHTML = this.nft.returnType();
     }
 
     if (this.nft.title) {
       try {
-        let telm = document.querySelector(`.nfttxsig${this.nft.tx_sig} .nft-card-title`);
+        let telm = document.querySelector(this.my_qs + ' .nft-card-title');
         telm.innerHTML = this.nft.title;
-      } catch (err) {
-
-      }
+      } catch (err) {}
     }
 
-
-    let elm = document.querySelector(`.nfttxsig${this.nft.tx_sig} .nft-card-img`);
+    let elm = document.querySelector(this.my_qs + ' .nft-card-img');
     if (elm) {
-      if (this.nft.nft_type == "vault") {
-	try {
+      if (this.nft.nft_type == 'vault') {
+        try {
           elm.innerHTML = `<div class="nft-card-text">${this.nft.json}</div>`;
-	  let obj = JSON.parse(this.nft.json);
+          let obj = JSON.parse(this.nft.json);
           elm.style.backgroundImage = `url("/vault/img/jade_key_min.png")`;
-          if (obj.file_access_script) { elm.style.backgroundImage = `url("/vault/img/crystal_key_min.png")`; }
+          if (obj.file_access_script) {
+            elm.style.backgroundImage = `url("/vault/img/crystal_key_min.png")`;
+          }
           return;
         } catch (err) {}
       }
@@ -130,10 +138,10 @@ class SaitoNFTCard {
       if (this.nft.load_failed) {
         elm.innerHTML = `<i class="fa-solid fa-heart-crack"></i>`;
       } else {
-        elm.innerHTML = `<img class="spinner" src="/saito/img/spinner.svg">`;
+        elm.innerHTML = `<div class="saito_spinner spinner"></div>`;
       }
     } else {
-      console.log('Element not rendered');
+      console.warn('NFT Element not rendered --', this.my_qs);
     }
   }
 }

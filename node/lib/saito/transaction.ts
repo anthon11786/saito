@@ -1,6 +1,6 @@
 import * as JSON from 'json-bigint';
 import Slip from './slip';
-import { Saito } from '../../apps/core';
+import { Saito } from './app';
 import { TransactionType } from 'saito-js/lib/transaction';
 import { SlipType } from 'saito-js/lib/slip';
 import SaitoTransaction from 'saito-js/lib/transaction';
@@ -115,7 +115,7 @@ export default class Transaction extends SaitoTransaction {
         }
       }
     } catch (error) {
-      console.error(error);
+      // console.error(error);
     }
 
     this.unpackData();
@@ -125,6 +125,7 @@ export default class Transaction extends SaitoTransaction {
 
   async decryptMessage(app: Saito) {
     if (!app) {
+      console.error('Need to pass Saito App into decryptMessage');
       return;
     }
     let myPublicKey = await app.wallet.getPublicKey();
@@ -263,9 +264,9 @@ export default class Transaction extends SaitoTransaction {
         // console.log('fallback on failure... 3');
       } catch (err) {
         // console.log(
-        // 	`buffer length = ${
-        // 		this.data.byteLength
-        // 	} type = ${typeof this.data}`
+        //  `buffer length = ${
+        //    this.data.byteLength
+        //  } type = ${typeof this.data}`
         // );
         // console.error('error parsing return message', err);
         // console.log('here: ' + JSON.stringify(this.msg));
@@ -333,8 +334,8 @@ export default class Transaction extends SaitoTransaction {
       this.unpackData();
       this.optional = JSON.parse(app.crypto.base64ToString(web_obj.opt));
     } catch (err) {
-      console.error('failed deserializing from buffer : ', webstring);
-      console.error(err);
+      // console.error('failed deserializing from buffer : ', webstring);
+      // console.error(err);
     }
   }
 
@@ -346,5 +347,14 @@ export default class Transaction extends SaitoTransaction {
   deserialize_from_base64(base64string: string) {
     let b = Buffer.from(base64string, 'base64');
     this.deserialize(b);
+  }
+
+  printSlips() {
+    for (let s of this.to) {
+      console.log('to: ', s.toJson());
+    }
+    for (let s of this.from) {
+      console.log('from: ', s.toJson());
+    }
   }
 }

@@ -1,7 +1,7 @@
 module.exports = (app, mod, publickey = '', address = '') => {
   let identicon = null;
 
-  if (publickey && app.wallet.isValidPublicKey(publickey)) {
+  if (publickey && app.crypto.isPublicKey(publickey)) {
     identicon = app.keychain.returnIdenticon(publickey);
   }
 
@@ -20,8 +20,17 @@ module.exports = (app, mod, publickey = '', address = '') => {
           <div class="dropdown-cont">
             <div class="saito-overlay-form-input">
                 <div class="token-dropdown">
-                  <div id="withdraw-logo-cont"></div>
-                  <select class="withdraw-select-crypto" id="withdraw-select-crypto"></select>
+                  <div class="withdraw-token-custom" id="withdraw-token-custom">
+                    <button type="button" class="withdraw-token-trigger" id="withdraw-token-trigger" aria-haspopup="listbox" aria-expanded="false">
+                      <div class="withdraw-token-trigger-left">
+                        <div id="withdraw-logo-cont" class="withdraw-logo-cont"></div>
+                        <span id="withdraw-token-trigger-ticker"></span>
+                      </div>
+                      <div class="withdraw-token-trigger-caret" aria-hidden="true">▾</div>
+                    </button>
+                    <ul id="withdraw-token-menu" class="withdraw-token-menu hide-element" role="listbox"></ul>
+                    <select class="withdraw-select-crypto hide-element" id="withdraw-select-crypto" aria-hidden="true" tabindex="-1"></select>
+                  </div>
                 </div>
             </div>
 
@@ -66,7 +75,6 @@ module.exports = (app, mod, publickey = '', address = '') => {
 
 
           <div class="saito-button-row form-submit-container">
-            <button type="submit" class="saito-button-secondary" id="reset-form">Clear</button>
             <button type="submit" class="withdraw-submit saito-button-primary saito-overlay-form-submit" id="saito-overlay-submit">Send</button>
           </div>
 
@@ -76,10 +84,19 @@ module.exports = (app, mod, publickey = '', address = '') => {
         <div id="withdraw-step-two" class="hide-element">
           <div class="confirm-msg-container">
             <i class="withdraw-msg-icon fa-solid fa-circle-exclamation"></i>
-            <img class="spinner" src="/saito/img/spinner.svg">
+            <div class="saito_spinner spinner"></div>
             <div class="confirm-msg">
-              <span class="withdraw-msg-text">Send</span> <b><span class="withdraw-confirm-amount">0 SAITO</span></b> to address <b><span class="withdraw-confirm-address">wcyj2qSvmPsNcbEx9PnjXtNzsDoCf1Xtv9SqWH6wYxnk</span></b><span class="withdraw-msg-question">?</span> <br>
-              <span class="withdraw-confirm-fee">(fee: 0 SAITO)</span>      
+              <div>
+                <span class="withdraw-msg-text">Send</span> 
+                <span class="withdraw-confirm-amount">0 SAITO</span>
+                to address 
+              </div>
+              <div class="withdraw-confirm-address">
+                <div class="withdraw-address withdraw-address-1"></div>
+                <div class="withdraw-address withdraw-address-2"></div>
+                <div class="withdraw-msg-question">?</div>
+              </div>
+              <div class="withdraw-confirm-fee">(fee: 0 SAITO)</div>
             </div>
           </div>
 

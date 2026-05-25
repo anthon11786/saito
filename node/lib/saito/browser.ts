@@ -1,7 +1,7 @@
 // @ts-nocheck
-import screenfull, { element } from 'screenfull';
 import React from 'react';
 import { createRoot } from 'react-dom';
+import screenfull from 'screenfull';
 let marked = require('marked');
 let sanitizeHtml = require('sanitize-html');
 const sanitizer = require('sanitizer');
@@ -96,6 +96,7 @@ class Browser {
       setTimeout(() => {
         if (elem) {
           elem.classList.add('pace-erase');
+          this.render_ts = Date.now();
         }
         document.querySelector('body').classList.add('xclose');
       }, delay);
@@ -312,17 +313,6 @@ class Browser {
       }
 
       this.updateThemeInHeader(theme);
-
-      const updateViewHeight = () => {
-        let vh = window.innerHeight / 100;
-        document.documentElement.style.setProperty('--saito-vh', `${vh}px`);
-        //siteMessage(`Update: ${vh}px`);
-      };
-
-      window.addEventListener('resize', debounce(updateViewHeight, 200));
-      setTimeout(() => {
-        updateViewHeight();
-      }, 200);
     } catch (err) {
       if (err == 'ReferenceError: document is not defined') {
         console.error('non-browser detected: ', err);
@@ -334,15 +324,34 @@ class Browser {
     //
     // Add Connection Monitors
     //
-    this.app.connection.on('peer_connect', function (peerIndex: bigint) {
+    let first_connect = true;
+    this.page_navigation_active = false;
+    let browser_self = this;
+
+    this.app.connection.on('peer_connect', function (publicKey: string) {
       // eslint-disable-next-line @typescript-eslint/ban-ts-comment
       // @ts-ignore
-      siteMessage('Websocket Connection Established', 1000);
+      if (first_connect) {
+        siteMessage('Peer Connected, Syncing Blockchain', 2500);
+      } else {
+        siteMessage('Connection Restored', 1000);
+      }
+      console.info('Browser... Peer Connect');
+      first_connect = false;
+      if (this.render_ts) {
+        let now = Date.now();
+        console.info(
+          `${(Math.round((now - this.render_ts) / 1000), 1)}s from Render to Peer Connect [Browser]`
+        );
+        delete this.render_ts;
+      }
     });
-    this.app.connection.on('peer_disconnect', function (peerIndex: bigint) {
+    this.app.connection.on('peer_disconnect', function (publicKey: string) {
       // eslint-disable-next-line @typescript-eslint/ban-ts-comment
       // @ts-ignore
-      siteMessage('Websocket Connection Lost');
+      if (!browser_self.page_navigation_active) {
+        siteMessage('Connection Lost', 1000);
+      }
     });
 
     // attach listening events
@@ -358,7 +367,7 @@ class Browser {
           let publicKey = e.target.getAttribute('data-id');
           if (
             !publicKey ||
-            !app.wallet.isValidPublicKey(publicKey) ||
+            !app.crypto.isPublicKey(publicKey) ||
             disable_click === 'true' ||
             disable_click == true
           ) {
@@ -396,12 +405,21 @@ class Browser {
     const current_url = window.location.toString();
     const myurl = new URL(current_url);
     const myurlpath = myurl.pathname.split('/');
+    const default_mod = 'website';
 
     if (myurlpath[1]) {
       return myurlpath[1].toLowerCase();
     }
 
-    return window?.active_module || 'website';
+    if (window?.active_module) {
+      return window.active_module;
+    }
+
+    if (this.app?.options?.homeModule) {
+      return this.app.options.homeModule;
+    }
+
+    return default_mod;
   }
 
   extractIdentifiers(text = '') {
@@ -439,7 +457,7 @@ class Browser {
             if (key) {
               add = key.publicKey;
             }
-            if (this.app.wallet.isValidPublicKey(cleaner) && (add == '' || add == null)) {
+            if (this.app.crypto.isPublicKey(cleaner) && (add == '' || add == null)) {
               add = cleaner;
             }
             if (!keys.includes(add) && add != '' && add != null) {
@@ -455,7 +473,7 @@ class Browser {
 
     if (adds) {
       adds.forEach((add) => {
-        if (this.app.wallet.isValidPublicKey(add) && !keys.includes(add)) {
+        if (this.app.crypto.isPublicKey(add) && !keys.includes(add)) {
           keys.push(add);
         }
       });
@@ -465,7 +483,7 @@ class Browser {
         let key = this.app.keychain.returnKey({ identifier: id });
         if (key.publicKey) {
           let add = key.publicKey;
-          if (this.app.wallet.isValidPublicKey(add)) {
+          if (this.app.crypto.isPublicKey(add)) {
             if (!keys.includes(add)) {
               keys.push(add);
             }
@@ -1100,6 +1118,16 @@ class Browser {
     }
   }
 
+  formatTimeDifference(timestamp) {
+    const now = Math.floor(Date.now() / 1000); // Convert current time to seconds
+    const diff = now - timestamp;
+
+    if (diff < 60) return 'Just now';
+    if (diff < 3600) return `${Math.floor(diff / 60)} minutes ago`;
+    if (diff < 86400) return `${Math.floor(diff / 3600)} hours ago`;
+    return `${Math.floor(diff / 86400)} days ago`;
+  }
+
   saneTimeFromTimestamp(timestamp, with_seconds = true) {
     var date = new Date(timestamp);
     var hours = date.getHours();
@@ -1142,7 +1170,7 @@ class Browser {
     if (dropArea.querySelector('.saito-file-read-spinner')) {
       return; // Already showing
     }
-    
+
     // Ensure position relative for absolute positioning of spinner
     const computedStyle = window.getComputedStyle(dropArea);
     if (computedStyle.position === 'static') {
@@ -1152,14 +1180,14 @@ class Browser {
         dropArea.dataset.originalPosition = dropArea.style.position || '';
       }
     }
-    
+
     const spinnerHtml = `
       <div class="saito-file-read-spinner" style="
         position: absolute; top: 0; left: 0; right: 0; bottom: 0;
         display: flex; flex-direction: column; align-items: center; justify-content: center;
         background: rgba(0, 0, 0, 0.7); z-index: 1000; border-radius: inherit;
       ">
-        <img src="/saito/img/spinner.svg" style="width: 4rem; height: 4rem;" />
+        <div class="saito_spinner" style="width: 4rem; height: 4rem;"></div>
         <div style="color: white; margin-top: 1rem; font-size: 1.4rem;">Reading file...</div>
       </div>
     `;
@@ -1171,7 +1199,7 @@ class Browser {
     if (spinner) {
       spinner.remove();
     }
-    
+
     // Restore original position if we changed it
     if (dropArea.dataset.originalPosition !== undefined) {
       const originalPos = dropArea.dataset.originalPosition;
@@ -1191,7 +1219,6 @@ class Browser {
     read_as_array_buffer = false,
     read_as_text = false
   ) {
-
     const hidden_upload_form = `
       <form id="uploader_${id}" class="saito-file-uploader" style="display:none">
         <p>Upload multiple files with the file dialog or by dragging and dropping images onto the dashed region</p>
@@ -1226,7 +1253,9 @@ class Browser {
             // Early size validation - check BEFORE reading
             // This prevents memory issues with very large files when using readAsDataURL
             if (!read_as_array_buffer && !read_as_text && file.size > self.MAX_FILE_SIZE) {
-              console.warn(`File ${file.name} (${file.size} bytes) exceeds safe size limit for readAsDataURL`);
+              console.warn(
+                `File ${file.name} (${file.size} bytes) exceeds safe size limit for readAsDataURL`
+              );
               // Call handler with null file to indicate failure
               if (handleFileDrop) {
                 handleFileDrop(null, false, file);
@@ -1238,7 +1267,7 @@ class Browser {
             self.showFileReadSpinner(dropArea);
 
             const reader = new FileReader();
-            
+
             // Helper to hide spinner and call handler
             const cleanupAndCall = (result, file) => {
               self.hideFileReadSpinner(dropArea);
@@ -1246,19 +1275,19 @@ class Browser {
                 handleFileDrop(result, false, file);
               }
             };
-            
+
             // Add error handler (backwards compatible - calls handler with null file)
             reader.addEventListener('error', (event) => {
               console.error('FileReader error for file:', file.name, file.size, 'bytes');
               cleanupAndCall(null, file);
             });
-            
+
             // Add abort handler
             reader.addEventListener('abort', (event) => {
               console.warn('FileReader aborted for file:', file.name);
               cleanupAndCall(null, file);
             });
-            
+
             reader.addEventListener('load', (event) => {
               cleanupAndCall(event.target.result, file);
             });
@@ -1282,11 +1311,13 @@ class Browser {
             const self = this; // Capture Browser instance
             [...files].forEach(function (file) {
               drag_and_drop = true;
-              
+
               // Early size validation - check BEFORE reading
               const MAX_SAFE_SIZE = 100 * 1024 * 1024; // 100MB safety limit
               if (!read_as_array_buffer && !read_as_text && file.size > MAX_SAFE_SIZE) {
-                console.warn(`File ${file.name} (${file.size} bytes) exceeds safe size limit for readAsDataURL`);
+                console.warn(
+                  `File ${file.name} (${file.size} bytes) exceeds safe size limit for readAsDataURL`
+                );
                 if (handleFileDrop) {
                   handleFileDrop(null, true, file);
                 }
@@ -1297,7 +1328,7 @@ class Browser {
               self.showFileReadSpinner(dropArea);
 
               const reader = new FileReader();
-              
+
               // Helper to hide spinner and call handler
               const cleanupAndCall = (result, file) => {
                 self.hideFileReadSpinner(dropArea);
@@ -1305,19 +1336,19 @@ class Browser {
                   handleFileDrop(result, true, file);
                 }
               };
-              
+
               // Add error handler
               reader.addEventListener('error', (event) => {
                 console.error('FileReader error for file:', file.name, file.size, 'bytes');
                 cleanupAndCall(null, file);
               });
-              
+
               // Add abort handler
               reader.addEventListener('abort', (event) => {
                 console.warn('FileReader aborted for file:', file.name);
                 cleanupAndCall(null, file);
               });
-              
+
               reader.addEventListener('load', (event) => {
                 cleanupAndCall(event.target.result, file);
               });
@@ -1359,7 +1390,9 @@ class Browser {
               // Early size validation - check BEFORE reading
               const MAX_SAFE_SIZE = 100 * 1024 * 1024; // 100MB safety limit
               if (!read_as_array_buffer && !read_as_text && file.size > MAX_SAFE_SIZE) {
-                console.warn(`File ${file.name} (${file.size} bytes) exceeds safe size limit for readAsDataURL`);
+                console.warn(
+                  `File ${file.name} (${file.size} bytes) exceeds safe size limit for readAsDataURL`
+                );
                 if (handleFileDrop) {
                   handleFileDrop(null, false, file);
                 }
@@ -1370,7 +1403,7 @@ class Browser {
               self.showFileReadSpinner(dropArea);
 
               const reader = new FileReader();
-              
+
               // Helper to hide spinner and call handler
               const cleanupAndCall = (result, file) => {
                 self.hideFileReadSpinner(dropArea);
@@ -1378,19 +1411,19 @@ class Browser {
                   handleFileDrop(result, false, file);
                 }
               };
-              
+
               // Add error handler
               reader.addEventListener('error', (event) => {
                 console.error('FileReader error for file:', file.name, file.size, 'bytes');
                 cleanupAndCall(null, file);
               });
-              
+
               // Add abort handler
               reader.addEventListener('abort', (event) => {
                 console.warn('FileReader aborted for file:', file.name);
                 cleanupAndCall(null, file);
               });
-              
+
               reader.addEventListener('load', (event) => {
                 cleanupAndCall(event.target.result, file);
               });
@@ -1828,22 +1861,11 @@ class Browser {
     }
 
     try {
-      Array.from(document.querySelectorAll(`.saito-address[data-id='${key}']`)).forEach(
+      Array.from(document.querySelectorAll(`.saito-address.treated[data-id='${key}']`)).forEach(
         (add) => (add.innerText = id)
       );
     } catch (err) {
       console.error('Browser [updateAddressHTML] error: ', err);
-    }
-  }
-
-  logMatomoEvent(category, action, name, value) {
-    try {
-      let m = this.app.modules.returnFirstRespondTo('matomo_event_push');
-      if (m) {
-        m.push(category, action, name, value);
-      }
-    } catch (err) {
-      console.error('Browser [logMatomoEvent] error: ', err);
     }
   }
 
@@ -2247,7 +2269,6 @@ class Browser {
         return result;
       };
 
-
       window.salert = function (message) {
         if (document.getElementById('saito-alert')) {
           return;
@@ -2281,10 +2302,8 @@ class Browser {
           },
           false
         );
+        document.querySelector('#saito-alert-box').style.top = '1rem';
       };
-
-
-
 
       window.sconfirm = function (message) {
         if (document.getElementById('saito-alert')) {
@@ -2325,6 +2344,7 @@ class Browser {
             resolve(false);
             // }, false);
           };
+          document.querySelector('#saito-alert-box').style.top = '1rem';
         });
       };
 
@@ -2375,6 +2395,7 @@ class Browser {
             },
             false
           );
+          document.querySelector('#saito-alert-box').style.top = '1rem';
         });
       };
 
@@ -2392,7 +2413,10 @@ class Browser {
         document.body.appendChild(wrapper);
 
         let timeout = setTimeout(() => {
-          wrapper.remove();
+          wrapper.classList.add('fade-out');
+          timeout = setTimeout(() => {
+            wrapper.remove();
+          }, 500);
         }, killtime);
 
         document.querySelector('#site-message-wrapper').addEventListener(
@@ -2416,9 +2440,6 @@ class Browser {
         });
       };
 
-
-
-
       HTMLElement.prototype.destroy = function destroy() {
         try {
           this.parentNode.removeChild(this);
@@ -2429,6 +2450,12 @@ class Browser {
 
       window.reloadWindow = this.reloadWindow;
       window.navigateWindow = this.navigateWindow.bind(this);
+    }
+  }
+
+  siteMessage(message, killtime = 9999999, callback = null) {
+    if (window) {
+      siteMessage(message, (killtime = 9999999), (callback = null));
     }
   }
 
@@ -2470,12 +2497,13 @@ class Browser {
           if (el.classList.contains('saito-address') && !el.classList.contains('treated')) {
             el.classList.add('treated');
             let key = el.dataset?.id;
-            if (key && saito_app.wallet.isValidPublicKey(key)) {
+            if (key && saito_app.crypto.isPublicKey(key)) {
               // Returns registered name from our keychain or empty string
               let identifier = saito_app.keychain.returnIdentifierByPublicKey(key);
 
               if (identifier) {
                 el.innerText = identifier;
+                saito_app.browser.updateAddressHTML(key, identifier);
               } else {
                 // Prettify anon key
                 el.innerHTML = saito_app.keychain.returnUsername(key);
@@ -2689,7 +2717,7 @@ class Browser {
         key = split[1];
       }
 
-      if (this.app.wallet.isValidPublicKey(key)) {
+      if (this.app.crypto.isPublicKey(key)) {
         if (!keys.includes(key)) {
           keys.push(key);
         }
@@ -2713,7 +2741,7 @@ class Browser {
         key = split[1];
       }
 
-      if (this.app.wallet.isValidPublicKey(key)) {
+      if (this.app.crypto.isPublicKey(key)) {
         return `<span class="saito-mention saito-address" data-id="${key}">${username}</span>`;
       } else {
         return k;
@@ -2865,9 +2893,16 @@ class Browser {
   reloadWindow(delay = 0) {
     if (delay > 0) {
       setTimeout(() => {
+        if (this) {
+          this.page_navigation_active = true;
+        }
         window.location.reload();
       }, delay);
     } else {
+      if (this) {
+        this.page_navigation_active = true;
+      }
+
       window.location.reload();
     }
   }
@@ -2911,11 +2946,108 @@ class Browser {
 
     if (delay > 0) {
       setTimeout(() => {
+        this.page_navigation_active = true;
         window.location.href = target;
       }, delay);
     } else {
+      this.page_navigation_active = true;
       window.location.href = target;
     }
+  }
+
+  safeConsole(header, ui_component, log_level = '') {
+    const getCircularReplacer = () => {
+      const seen = new WeakSet();
+      return (key, value) => {
+        if (key == 'mod' || key == 'app') {
+          return undefined;
+        }
+        if (typeof value === 'object' && value !== null) {
+          if (seen.has(value)) {
+            //console.warn('JSON.Stringify -- Circular reference found at key:', key); // Log the key
+            return; // Discard the circular reference
+          }
+          seen.add(value);
+        }
+        return typeof value === 'bigint' ? value.toString() : value; // return everything else unchanged
+      };
+    };
+
+    let new_obj = JSON.parse(JSON.stringify(ui_component, getCircularReplacer()));
+
+    switch (log_level) {
+      case 'debug':
+        console.debug(header, new_obj);
+        break;
+      case 'info':
+        console.info(header, new_obj);
+        break;
+      case 'warn':
+        console.warn(header, new_obj);
+        break;
+      case 'error':
+        console.error(header, new_obj);
+        break;
+      default:
+        console.log(header, new_obj);
+    }
+  }
+
+  handleShare(data) {
+    // Use Web Share API if available, otherwise fall back to copy
+    if (this.isMobileBrowser() && navigator.share) {
+      navigator.share(data).catch((err) => {
+        // User cancelled or error - fall back to copy
+        this.handleCopyLink(data?.url);
+      });
+    } else {
+      // Fall back to copy link
+      this.handleCopyLink(data?.url);
+    }
+  }
+
+  handleCopyLink(shareUrl = window.location.href) {
+    // Copy to clipboard
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard
+        .writeText(shareUrl)
+        .then(() => {
+          if (typeof siteMessage === 'function') {
+            siteMessage('Link copied to clipboard', 1500);
+          }
+        })
+        .catch((err) => {
+          console.error('Failed to copy:', err);
+          this.fallbackCopy(shareUrl);
+        });
+    } else {
+      this.fallbackCopy(shareUrl);
+    }
+  }
+
+  fallbackCopy(text) {
+    // Fallback for older browsers
+    const textArea = document.createElement('textarea');
+    textArea.value = text;
+    textArea.style.position = 'fixed';
+    textArea.style.left = '-999999px';
+    document.body.appendChild(textArea);
+    textArea.focus();
+    textArea.select();
+
+    try {
+      document.execCommand('copy');
+      if (typeof siteMessage === 'function') {
+        siteMessage('Link copied to clipboard', 1500);
+      }
+    } catch (err) {
+      console.error('Fallback copy failed:', err);
+      if (typeof siteMessage === 'function') {
+        siteMessage('Failed to copy link', 1500);
+      }
+    }
+
+    document.body.removeChild(textArea);
   }
 
   /**
@@ -2948,6 +3080,33 @@ class Browser {
       root,
       cleanup
     };
+  }
+
+  //
+  // convenience function, used in scripting, put here so it
+  // will be available on for the OPCODEs on the app.* structure
+  //
+  // it takes a value, and an object and either extracts the
+  // value from the object (if exists) or returns the string
+  //
+  resolveVarReference(vars, value) {
+    if (typeof value !== 'string') {
+      return value;
+    }
+    const parts = value.split('.');
+    let cursor = vars;
+    for (let key of parts) {
+      if (
+        cursor &&
+        typeof cursor === 'object' &&
+        Object.prototype.hasOwnProperty.call(cursor, key)
+      ) {
+        cursor = cursor[key];
+      } else {
+        return value; // fail closed: treat as literal
+      }
+    }
+    return cursor;
   }
 }
 

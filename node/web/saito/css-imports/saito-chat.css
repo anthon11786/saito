@@ -307,14 +307,10 @@
 
 .chat-header-info {
   height: 4rem;
-  display: flex;
-  flex-direction: row;
-  justify-content: space-between;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) min-content;
   align-items: center;
   box-shadow: 0px 2px 2px -2px; /* added some depth to the header here. Across all themes, but I feel it is necessary. */
-}
-
-.chat-header-info i {
 }
 
 .chat-container.minimized .chat-header-info {
@@ -385,7 +381,6 @@
   gap: 1rem;
   margin-left: 1rem;
   align-items: center;
-  flex-grow: 1;
 }
 
 .chat-header-nav .chat-details {
@@ -812,12 +807,12 @@
 @media screen and (max-width: 600px) {
   .chat-manager-overlay {
     top: 0;
-    height: 100vh;
-    height: calc(100 * var(--saito-vh));
+    height: 100dvh;
     width: 100vw;
     max-height: -webkit-fill-available;
     max-width: -webkit-fill-available;
     border-radius: unset;
+    transition: height 0.3s;
   }
 
   .chat-manager-overlay .chat-manager {
@@ -839,8 +834,8 @@
     margin: 0;
     min-width: unset;
     width: 100vw;
-    height: 100vh;
-    height: calc(100 * var(--saito-vh));
+    height: 100dvh;
+    transition: height 0.3s;
     max-height: -webkit-fill-available;
     max-width: -webkit-fill-available;
     border-radius: 0;
@@ -855,6 +850,10 @@
     display: none;
   }
 
+  .chat-header-info {
+    grid-template-columns: min-content minmax(0, 1fr) min-content;
+  }
+
   .chat-mobile-back {
     display: flex;
     margin: 1rem;
@@ -862,8 +861,8 @@
 
   /* emoji-picker breaks this */
   .chat-manager-overlay + .chat-container {
-    height: 100vh;
-    height: calc(var(--saito-vh) * 100);
+    height: 100dvh;
+    transition: height 0.3s;
     z-index: 90;
   }
 

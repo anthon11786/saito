@@ -73,11 +73,11 @@ const GameCardfan = require('./../saito/ui/game-cardfan/game-cardfan');
 const GameBoardSizer = require('./../saito/ui/game-board-sizer/game-board-sizer');
 const GameHexGrid = require('./../saito/ui/game-hexgrid/game-hexgrid');
 const GameAcknowledgeOverlay = require('./../saito/ui/game-acknowledge-overlay/game-acknowledge-overlay');
-const GameObserverControls = require('./../saito/ui/game-observer/game-observer');
 const GameHelp = require('./../saito/ui/game-help/game-help');
 const GameScoreboard = require('./../saito/ui/game-scoreboard/game-scoreboard');
 const GameHammerMobile = require('./../saito/ui/game-hammer-mobile/game-hammer-mobile');
 const GameRaceTrack = require('./../saito/ui/game-racetrack/game-racetrack');
+const GameObserverControls = require('./../saito/ui/game-observer/game-observer');
 
 const JSON = require('json-bigint');
 
@@ -89,6 +89,7 @@ class GameTemplate extends ModTemplate {
     this.game_length = 30; //Estimated number of minutes to complete a game
     this.game = {};
     this.moves = [];
+    this.future = [];
     this.description = 'Peer to peer gaming on the blockchain';
     this.endmoves = [];
     this.commands = [];
@@ -206,7 +207,6 @@ class GameTemplate extends ModTemplate {
     this.pending = [];
 
     this.archive_connected = false;
-    this.archive_exhausted = 0;
 
     //
     // used to generate provably-fair dice rolls
@@ -323,7 +323,7 @@ class GameTemplate extends ModTemplate {
       }
     });
 
-    app.connection.on('stop-game', async (game, id, reason) => {
+    app.connection.on('arcade-stop-game', async (game, id, reason) => {
       if (this.name === game) {
         if (!this.gameBrowserActive()) {
           let current_game_id = this.game.id;
@@ -331,7 +331,7 @@ class GameTemplate extends ModTemplate {
           await this.sendStopGameTransaction(reason);
           this.loadGame(current_game_id);
         } else {
-          // we have received stop-game that should not be triggered if we are IN the game... this means
+          // we have received arcade-stop-game that should not be triggered if we are IN the game... this means
           // something is sending an event that is forcing game-over...
           alert(
             'we are bug-hunting a game-ending bug -- please report this bug to developers - 582434'
@@ -341,10 +341,18 @@ class GameTemplate extends ModTemplate {
     });
 
     app.connection.on('relay-notification', (data) => {
-      let { mod, game_id, notification } = data;
+      let { mod, game_id, step, notification } = data;
       if (mod == this.name) {
         if (this.gameBrowserActive(game_id)) {
           siteMessage(notification, 2500);
+
+          if (step > this.game.step.game) {
+            console.warn('My game state is behind opponents!');
+            setTimeout(() => {
+              siteMessage('Game state out of sync, auto-fixing...', 2000);
+              this.fetchRecentMoves();
+            }, 2000);
+          }
 
           //
           // Opponent sent me notice that they entered, be kind and respond
@@ -353,6 +361,7 @@ class GameTemplate extends ModTemplate {
             let data = {
               mod: this.name,
               game_id: this.game?.id,
+              step: this.game.step.game,
               notification: `${this.app.keychain.returnUsername(
                 this.publicKey
               )} is already in the game`,
@@ -470,6 +479,12 @@ class GameTemplate extends ModTemplate {
       return 0;
     }
 
+    console.log('[OBS_TRACE] initializeHTML() (first run)', {
+      game_player: this.game?.player,
+      game_id: this.game?.id?.substring?.(0, 12),
+      browser_active: this.browser_active
+    });
+
     //
     // Query server to make sure you know and remember your new friends names
     this.app.connection.emit('registry-fetch-identifiers-and-update-dom', this.game.players);
@@ -482,11 +497,10 @@ class GameTemplate extends ModTemplate {
       let oldHash = window.location.hash;
       window.location.hash = `#`;
 
-      let short_game_id = this.app.crypto.hash(this.game.id).slice(-6);
-
+      const game_id = this.game.id;
       //This function is stupid and confusing
       window.location.hash = app.browser.initializeHash(
-        `#gid=${short_game_id}&step=${this.game.step.game}`,
+        `#gid=${encodeURIComponent(game_id)}&step=${this.game.step.game}`,
         oldHash,
         {}
       );
@@ -515,12 +529,7 @@ class GameTemplate extends ModTemplate {
     }
 
     if (this.game.player == 0) {
-      this.observerControls.render();
       document.body.classList.add('observer-mode');
-      if (this.game.live) {
-        this.observerControls.step_speed = 3;
-        //this.observerControls.play(); //Just update the controls so they match our altered state
-      }
     }
 
     //
@@ -542,16 +551,18 @@ class GameTemplate extends ModTemplate {
 
   gameBrowserActive(game_id = null) {
     if (this.browser_active) {
-      if (!game_id) {
-        game_id = this.game.id;
-      }
       try {
-        let short_game_id = this.app.crypto.hash(game_id).slice(-6);
-        let gid = window.location.hash.split('&')[0].substring(5);
-        if (gid === short_game_id) {
-          return true;
-        }
+        const vars_in_url = this.app.browser.parseHash(window.location.hash);
+        if (vars_in_url?.gid == null) return false;
+        game_id = vars_in_url.gid;
+        try {
+          game_id = decodeURIComponent(vars_in_url.gid);
+        } catch (_) {}
+        return game_id === this.game.id;
       } catch (err) {
+        if (this.game?.player === 0) {
+          console.log('[OBS_TRACE] gameBrowserActive() catch', err?.message);
+        }
         return false;
       }
     }
@@ -561,6 +572,10 @@ class GameTemplate extends ModTemplate {
 
   async attachEvents(app) {
     if (this?.game?.id) {
+      console.log('[OBS_TRACE] attachEvents() calling initializeGameQueue', {
+        game_id: this.game.id?.substring?.(0, 12),
+        game_player: this.game?.player
+      });
       await this.initializeGameQueue(this.game.id);
     } else {
       document.documentElement.setAttribute('data-theme', 'arcade');
@@ -617,15 +632,12 @@ class GameTemplate extends ModTemplate {
         }
       });
 
-      this.app.modules.respondTo('game-manager', { container: '.league-overlay-games-list' });
-
       // Add Recent Game Activity
       this.app.connection.on('arcade-data-loaded', () => {
         if (document.querySelector('.game-activity')) {
           document.querySelector('.game-activity').innerHTML =
-            `<div class="game-page-invites"></div><div class="league-overlay-games-list"></div>`;
+            `<div class="league-overlay-games-list"></div>`;
         }
-        this.app.modules.respondTo('invite-manager', { filter: this.name });
         this.app.connection.emit('league-overlay-games-list', { game: this.name });
       });
 
@@ -711,6 +723,7 @@ class GameTemplate extends ModTemplate {
       let data = {
         mod: this.name,
         game_id: this.game?.id,
+        step: this.game.step.game,
         notification: `${this.app.keychain.returnUsername(this.publicKey)} has entered the game`,
         code: 'enter'
       };
@@ -746,10 +759,17 @@ class GameTemplate extends ModTemplate {
   async initializeObserverMode(tx, use_state = false) {
     let game_id = tx.signature;
     let txmsg = tx.returnMessage();
+    console.log('[OBS_TRACE] initializeObserverMode()', {
+      game_id: game_id?.substring?.(0, 12),
+      use_state
+    });
 
-    console.log(' !!!!!\n GT: OBSERVER MODE\n !!!!!\n', game_id, JSON.parse(JSON.stringify(txmsg)));
+    // console.log(' !!!!!\n GT: OBSERVER MODE\n !!!!!\n', game_id, JSON.parse(JSON.stringify(txmsg)));
 
     this.loadGame(game_id);
+
+    this.game.player = 0;
+    this.saveGame(game_id);
 
     //
     // otherwise setup the game
@@ -866,10 +886,32 @@ class GameTemplate extends ModTemplate {
     //
     // we grab the game with the most current timestamp (ts)
     // since no ID is provided
+    const params = new URLSearchParams(window.location.search);
     if (!this.loadGame()) {
-      console.error('GT [initialize] No valid game.... stop!!!!!');
-      this.initialize_game_run = 1; //Will prevent rendering of game assets
-      return;
+      const observerParam = params.get('observer') === '1';
+      const vars_in_url =
+        typeof window !== 'undefined' && window.location?.hash
+          ? this.app.browser.parseHash(window.location.hash)
+          : {};
+      if (observerParam && vars_in_url?.gid) {
+        this.game = this.newGame(vars_in_url.gid);
+        this.game.player = 0;
+        this._observer_stub_bootstrap = true;
+      } else {
+        console.error('GT [initialize] No valid game.... stop!!!!!');
+        this.initialize_game_run = 1; //Will prevent rendering of game assets
+        return;
+      }
+    }
+
+    if (params.get('observer') === '1') {
+      this.game = this.game || {};
+      this.game.player = 0;
+      if (this.game.id && !this._observer_stub_bootstrap) this.saveGame(this.game.id);
+    }
+
+    if (this.game?.player === 0 && this.observerControls) {
+      this.observerControls.initialize(this.game.id);
     }
 
     //
@@ -988,30 +1030,26 @@ class GameTemplate extends ModTemplate {
           //
           // process game move
           //
+          const asFuture =
+            this?.treat_all_moves_as_future || this.isFutureMove(tx.from[0].publicKey, txmsg);
+          const asNext = !asFuture && this.isUnprocessedMove(tx.from[0].publicKey, txmsg);
+          console.log('[OBS_TRACE] onConfirmation(game move)', {
+            step: txmsg?.step?.game,
+            game_player: this.game?.player,
+            asFuture,
+            asNext,
+            gaming_active: this.gaming_active,
+            halted: this.halted
+          });
 
           //
           // cache recently received move
           //
           this.cacheRecentMove(tx);
 
-          if (this?.treat_all_moves_as_future || this.isFutureMove(tx.from[0].publicKey, txmsg)) {
+          if (asFuture) {
             await this.addFutureMove(tx);
-
-            //Safety check in case observer missed a move
-            //If we have multiple moves in the future queue and are receiving moves on chain,
-            //then something has probably gone wrong
-            if (this.game.player === 0 && this.game.future.length > 3) {
-              console.info(
-                'GT [onConfirmation] Observer receives future move',
-                this.gaming_active,
-                this.halted
-              );
-              if (!this.gaming_active && !this.halted) {
-                console.info('GT [onConfirmation] Observer auto steps forward');
-                await this.observerControls.next();
-              }
-            }
-          } else if (this.isUnprocessedMove(tx.from[0].publicKey, txmsg)) {
+          } else if (asNext) {
             await this.addNextMove(tx);
             this.notifyMove();
           } else {
@@ -1059,7 +1097,7 @@ class GameTemplate extends ModTemplate {
     try {
       message = tx.returnMessage();
     } catch (err) {
-      console.error('GT HPT Error: ', err);
+      // console.error('GT HPT Error: ', err);
       return 0;
     }
 
@@ -1085,7 +1123,7 @@ class GameTemplate extends ModTemplate {
             gametx = newtx;
             gametxmsg = newtx.returnMessage();
           } catch (err) {
-            console.log('error with game relay moves return');
+            // console.log('error with game relay moves return');
           }
 
           if (
@@ -1164,17 +1202,28 @@ class GameTemplate extends ModTemplate {
               return 0;
             }
 
+            const asFuture =
+              this?.treat_all_moves_as_future ||
+              this.isFutureMove(gametx.from[0].publicKey, gametxmsg);
+            const asNext = !asFuture && this.isUnprocessedMove(gametx.from[0].publicKey, gametxmsg);
+            if (this.game?.player === 0) {
+              console.log('[OBS_TRACE] handlePeerTransaction(game relay gamemove)', {
+                step: gametxmsg?.step?.game,
+                asFuture,
+                asNext,
+                gaming_active: this.gaming_active,
+                halted: this.halted
+              });
+            }
+
             //
             // cache recently received move
             //
             this.cacheRecentMove(gametx);
 
-            if (
-              this?.treat_all_moves_as_future ||
-              this.isFutureMove(gametx.from[0].publicKey, gametxmsg)
-            ) {
+            if (asFuture) {
               await this.addFutureMove(gametx);
-            } else if (this.isUnprocessedMove(gametx.from[0].publicKey, gametxmsg)) {
+            } else if (asNext) {
               await this.addNextMove(gametx);
               this.notifyMove();
             } else {
@@ -1283,7 +1332,7 @@ class GameTemplate extends ModTemplate {
       clearInterval(this.clock_timers[player]); //Just in case
     }
 
-    console.debug('GT Start CLOCK: ', player, JSON.parse(JSON.stringify(this.game.clock)));
+    // console.debug('GT Start CLOCK: ', player, JSON.parse(JSON.stringify(this.game.clock)));
 
     if (!player) {
       return;
@@ -1331,7 +1380,7 @@ class GameTemplate extends ModTemplate {
     //
     // Only process if the clock is running (avoid double taps for when we send a move and receive it back on chain)
     //
-    console.debug('GT Stop CLOCK: ', player, JSON.parse(JSON.stringify(this.game.clock)));
+    // console.debug('GT Stop CLOCK: ', player, JSON.parse(JSON.stringify(this.game.clock)));
 
     clearInterval(this.clock_timers[player]);
     delete this.clock_timers[player];
@@ -1412,7 +1461,7 @@ class GameTemplate extends ModTemplate {
     if (txmsg.request == 'SHARE') {
       if (this.expecting_state) {
         console.info('GT [Meta] Player shared last game state', tx.from[0].publicKey);
-        console.debug(JSON.parse(JSON.stringify(this.game)));
+        // console.debug(JSON.parse(JSON.stringify(this.game)));
 
         if (txmsg?.data != '') {
           this.game = JSON.parse(txmsg.data);
@@ -1478,7 +1527,7 @@ class GameTemplate extends ModTemplate {
           }
         }
       } catch (err) {
-        console.error('GT Staking ERROR: ', err);
+        // console.error('GT Staking ERROR: ', err);
       }
 
       if (auths == this.game.players.length) {
@@ -1504,7 +1553,7 @@ class GameTemplate extends ModTemplate {
       return;
     }
 
-    console.warn('GT: unprocessed meta transaction -- ', tx, txmsg);
+    // console.warn('GT: unprocessed meta transaction -- ', tx, txmsg);
   }
 
   /*
@@ -1526,11 +1575,11 @@ class GameTemplate extends ModTemplate {
       newtx.addTo(this.game.accepted[i]);
     }
 
-    console.info(
-      'GT [sendMetaMessage] to ',
-      JSON.parse(JSON.stringify(this.game.accepted)),
-      newtx.msg
-    );
+    // console.info(
+    //   'GT [sendMetaMessage] to ',
+    //   JSON.parse(JSON.stringify(this.game.accepted)),
+    //   newtx.msg
+    // );
 
     await newtx.sign();
 
@@ -1564,24 +1613,6 @@ class GameTemplate extends ModTemplate {
       if (this.game.player) {
         this.app.connection.emit('relay-notify-peer', this.game.opponents, data);
       }
-    }
-  }
-
-  // this function runs "connect" event
-  onConnectionStable(app, peer) {
-    if (this.app.BROWSER === 1) {
-      siteMessage('Connection Restored', 1000);
-    }
-  }
-
-  //
-  //
-  // ON CONNECTION UNSTABLE
-  //
-  // this function runs "disconnect" event
-  onConnectionUnstable(app, publicKey) {
-    if (this.app.BROWSER === 1) {
-      siteMessage('Connection Unstable', 1000);
     }
   }
 
@@ -1673,23 +1704,24 @@ class GameTemplate extends ModTemplate {
 
   async injectGameHTML(template) {
     if (!this.game_template_injected) {
-      //
-      // Initialize Header just before rendering...
-      //
       this.header = new SaitoHeader(this.app, this);
       this.header.header_class = 'game';
 
       await this.timeout(500);
-
       await this.header.initialize(this.app);
 
-      // Delete any default html
       while (document.body.hasChildNodes()) {
         document.body.firstChild.remove();
       }
-
       document.body.innerHTML = template;
       this.calculateBoardRatio();
+
+      console.log('INJECT GAME HTML:' + this.game.player);
+
+      if (this.game?.player === 0 && this.observerControls) {
+        console.log('and into observerControls...');
+        this.observerControls.render();
+      }
     }
     this.game_template_injected = 1;
   }

@@ -1,5 +1,4 @@
 use log::{debug, error, info};
-use saito_core::core::consensus::peers::congestion_controller::CongestionStatsDisplay;
 use saito_core::core::util::configuration::{
     BlockchainConfig, Configuration, ConsensusConfig, Endpoint, PeerConfig, Server, WalletConfig,
 };
@@ -14,7 +13,7 @@ use base64::Engine;
 use pbkdf2::pbkdf2_hmac_array;
 use rand::rngs::OsRng;
 use rand::RngCore;
-use sha2::{Digest, Sha256};
+use sha2::Sha256;
 
 fn get_default_consensus() -> Option<ConsensusConfig> {
     Some(ConsensusConfig::default())
@@ -29,12 +28,9 @@ pub struct NodeConfigurations {
     spv_mode: Option<bool>,
     #[serde(default = "get_default_consensus")]
     consensus: Option<ConsensusConfig>,
+    #[serde(default)]
+    blockchain: BlockchainConfig,
     /// these skipped values are written into a separate file
-    #[serde(skip)]
-    blockchain: Option<BlockchainConfig>,
-    /// these skipped values are written into a separate file
-    #[serde(skip)]
-    congestion: Option<CongestionStatsDisplay>,
     #[serde(skip)]
     config_path: String,
     wallet: Option<WalletConfig>,
@@ -63,8 +59,7 @@ impl Default for NodeConfigurations {
             lite: false,
             spv_mode: Some(false),
             consensus: Some(ConsensusConfig::default()),
-            blockchain: Some(BlockchainConfig::default()),
-            congestion: None,
+            blockchain: BlockchainConfig::default(),
             config_path: String::from("config/config.json"),
             wallet: None,
         }
@@ -135,11 +130,11 @@ impl Configuration for NodeConfigurations {
         &self.peers
     }
 
-    fn get_blockchain_configs(&self) -> Option<&BlockchainConfig> {
-        self.blockchain.as_ref()
+    fn get_blockchain_configs(&self) -> &BlockchainConfig {
+        &self.blockchain
     }
-    fn get_blockchain_configs_mut(&mut self) -> Option<&mut BlockchainConfig> {
-        self.blockchain.as_mut()
+    fn get_blockchain_configs_mut(&mut self) -> &mut BlockchainConfig {
+        &mut self.blockchain
     }
     fn get_block_fetch_url(&self) -> String {
         let endpoint = &self.get_server_configs().unwrap().endpoint;
@@ -164,8 +159,7 @@ impl Configuration for NodeConfigurations {
         self.spv_mode = Some(config.is_spv_mode());
         self.lite = config.is_spv_mode();
         self.consensus = config.get_consensus_config().cloned();
-        self.congestion = config.get_congestion_data().cloned();
-        self.blockchain = config.get_blockchain_configs().cloned();
+        self.blockchain = config.get_blockchain_configs().clone();
         self.wallet = config.get_wallet_configs().cloned();
     }
 
@@ -173,13 +167,6 @@ impl Configuration for NodeConfigurations {
         self.consensus.as_ref()
     }
 
-    fn get_congestion_data(&self) -> Option<&CongestionStatsDisplay> {
-        self.congestion.as_ref()
-    }
-
-    fn set_congestion_data(&mut self, congestion_data: Option<CongestionStatsDisplay>) {
-        self.congestion = congestion_data;
-    }
     fn save(&self) -> Result<(), Error> {
         let config_file_path = self.get_config_path();
         let json_bytes = serde_json::to_vec_pretty(&self)?;
@@ -214,9 +201,9 @@ impl Configuration for NodeConfigurations {
         self.wallet.as_mut()
     }
 
-    fn set_blockchain_configs(&mut self, config: Option<BlockchainConfig>) {
-        self.blockchain = config;
-    }
+    //     fn set_blockchain_configs(&mut self, config: Option<BlockchainConfig>) {
+    //         self.blockchain = config;
+    //     }
 }
 
 pub struct ConfigHandler {}

@@ -97,6 +97,7 @@ class CreatePost {
     this.sessionIntent = null; // Session intent: { mode: 'resume'|'select'|'new', draftId?: string }
     this.activeDraftId = null; // Active draft ID for this session (bound to autosave)
     this.featuredImage = null; // Featured/teaser image (base64 data, stored in tx.msg.image)
+    this.pendingIntent = null; // Intent to use on next render() call (set by handleStartWriting for draft detection)
   }
 
   render(container = "") {
@@ -156,7 +157,10 @@ class CreatePost {
     // Mount happens FIRST (infrastructure), draft loading happens SECOND (data)
     // Draft loading must NOT suppress mount - mount is independent of draft state
     // INVARIANT 2: Editor requires explicit intent - default to "new" mode if no intent provided
-    const defaultIntent = { mode: 'new' };
+    // Note: If intent is provided externally (e.g., from handleStartWriting), it will be used
+    // Otherwise, default to "new" mode
+    const defaultIntent = this.pendingIntent || { mode: 'new' };
+    this.pendingIntent = null; // Clear after use
     this.initializeDocument(defaultIntent).then(() => {
       this.onEditorMount();
       // Update featured image display after mount (in case draft was loaded)
@@ -580,6 +584,9 @@ class CreatePost {
     // ========================================================================
     console.debug('[EDITOR-INVARIANT] Mount verified, attaching event listeners');
 
+    // Normalize DOM: blockquote must never be a child of <ul>
+    this._ensureBlockquoteNotInList();
+
     // Mount verified - attach event listeners exactly once
     this.attachEvents();
     this.eventsAttached = true;
@@ -644,9 +651,202 @@ class CreatePost {
    * It does NOT use cached state, draft snapshots, or autosave output.
    * What the user sees in the editor is exactly what gets serialized.
    */
-  serializeDOMToMarkdown(imageIdMap = null) {
+  /**
+   * DOM repair: blockquote must never be a child of <ul>.
+   * Move any blockquote found inside a list to be a sibling after the list.
+   */
+  _ensureBlockquoteNotInList() {
     const editor = document.querySelector('#stack-post-body-editor');
-    if (!editor) return '';
+    if (!editor) return;
+    const uls = editor.querySelectorAll('ul');
+    for (const ul of uls) {
+      const blockquotes = Array.from(ul.children).filter(n => n.tagName === 'BLOCKQUOTE' && n.hasAttribute('data-block-id'));
+      for (const bq of blockquotes) {
+        const editorParent = ul.parentNode;
+        ul.removeChild(bq);
+        if (ul.nextSibling) {
+          editorParent.insertBefore(bq, ul.nextSibling);
+        } else {
+          editorParent.appendChild(bq);
+        }
+      }
+    }
+  }
+
+  /**
+   * Parse markdown string into editor block elements (with data-block-id, data-block-type).
+   * Ensures block structure round-trips: paste -> serialize -> reload -> identical structure.
+   * @param {string} markdown - Markdown content to parse
+   * @param {{ blockIndex: number }} state - Optional; mutated blockIndex for unique IDs across multiple calls
+   */
+  _parseMarkdownToBlockElements(markdown, state = { blockIndex: 0 }) {
+    const elements = [];
+    const lines = (markdown || '').split(/\n/);
+    let i = 0;
+
+    const nextId = () => generateBlockId(state.blockIndex++, 'block');
+
+    while (i < lines.length) {
+      const line = lines[i];
+      const trimmed = line.trim();
+
+      if (trimmed === '') {
+        i++;
+        continue;
+      }
+
+      const headingMatch = trimmed.match(/^(#{1,6})\s+(.+)$/);
+      if (headingMatch) {
+        const level = headingMatch[1].length;
+        const text = headingMatch[2].trim();
+        const el = document.createElement(`h${level}`);
+        el.setAttribute('data-block-id', nextId());
+        el.setAttribute('data-block-type', 'heading');
+        el.textContent = text;
+        el.contentEditable = 'true';
+        elements.push(el);
+        i++;
+        continue;
+      }
+
+      const unorderedMatch = trimmed.match(/^([*\-+])\s+(.*)$/);
+      const orderedMatch = trimmed.match(/^(\d+)([.)])\s+(.*)$/);
+      const listMatch = unorderedMatch || orderedMatch;
+      if (listMatch) {
+        const ul = document.createElement('ul');
+        while (i < lines.length) {
+          const liLine = lines[i];
+          const liTrimmed = liLine.trim();
+          const liUnordered = liTrimmed.match(/^([*\-+])\s+(.*)$/);
+          const liOrdered = liTrimmed.match(/^(\d+)([.)])\s+(.*)$/);
+          const liMatch = liUnordered || liOrdered;
+          if (!liMatch) break;
+          const liMarker = liUnordered ? liUnordered[1] + ' ' : liOrdered[1] + liOrdered[2] + ' ';
+          const liText = (liUnordered ? liUnordered[2] : liOrdered[3]) || '';
+          const li = document.createElement('li');
+          li.setAttribute('data-block-id', nextId());
+          li.setAttribute('data-block-type', 'list-item');
+          li.setAttribute('data-list-marker', liMarker);
+          li.textContent = liText;
+          li.contentEditable = 'true';
+          ul.appendChild(li);
+          i++;
+        }
+        elements.push(ul);
+        continue;
+      }
+
+      if (trimmed.startsWith('> ')) {
+        const bqLines = [];
+        while (i < lines.length && lines[i].trimStart().startsWith('>')) {
+          bqLines.push(lines[i].replace(/^>\s?/, ''));
+          i++;
+        }
+        const bq = document.createElement('blockquote');
+        bq.setAttribute('data-block-id', nextId());
+        bq.setAttribute('data-block-type', 'blockquote');
+        bq.textContent = bqLines.join('\n').replace(/\u200B/g, '').trim();
+        bq.contentEditable = 'true';
+        elements.push(bq);
+        continue;
+      }
+
+      if (trimmed === '```') {
+        const codeLines = [];
+        i++;
+        while (i < lines.length && lines[i].trim() !== '```') {
+          codeLines.push(lines[i]);
+          i++;
+        }
+        if (i < lines.length) i++;
+        const pre = document.createElement('pre');
+        pre.setAttribute('data-block-id', nextId());
+        pre.setAttribute('data-block-type', 'code');
+        pre.textContent = codeLines.join('\n');
+        pre.contentEditable = 'true';
+        elements.push(pre);
+        continue;
+      }
+
+      const imageMatch = trimmed.match(/^!\[([^\]]*)\]\((stack:image:[^)]+)\)$/);
+      if (imageMatch && this.images && this.images.length > 0) {
+        const imageId = imageMatch[2].replace('stack:image:', '');
+        const imgData = this.images.find((im) => im.id === imageId);
+        if (imgData) {
+          const figure = document.createElement('figure');
+          figure.setAttribute('data-block-id', nextId());
+          figure.setAttribute('data-block-type', 'image');
+          figure.className = 'stack-image-block';
+          const img = document.createElement('img');
+          img.src = `data:${imgData.mime};base64,${imgData.data}`;
+          img.dataset.stackImageId = imgData.id;
+          img.alt = imageMatch[1] || '';
+          figure.appendChild(img);
+          elements.push(figure);
+          i++;
+          continue;
+        }
+      }
+
+      const paraLines = [];
+      while (i < lines.length) {
+        const pl = lines[i];
+        if (pl.trim() === '') break;
+        if (/^#{1,6}\s/.test(pl.trim()) || /^[*\-+]\s/.test(pl.trim()) || /^\d+[.)]\s/.test(pl.trim()) || pl.trimStart().startsWith('>') || pl.trim() === '```') break;
+        paraLines.push(pl);
+        i++;
+      }
+      const p = document.createElement('p');
+      p.setAttribute('data-block-id', nextId());
+      p.setAttribute('data-block-type', 'paragraph');
+      const paraText = paraLines.join('\n').replace(/\u200B/g, '').trim();
+      if (paraText) {
+        p.textContent = paraText;
+      } else {
+        p.appendChild(document.createTextNode('\u200B'));
+      }
+      p.contentEditable = 'true';
+      elements.push(p);
+    }
+
+    return elements;
+  }
+
+  /**
+   * Serialize inline content from a container, treating <code> and <pre> as opaque.
+   * No linkification, emphasis parsing, or any transformation of code content.
+   */
+  _serializeInlineContent(container) {
+    if (!container) return '';
+    let out = '';
+    for (const node of container.childNodes) {
+      if (node.nodeType === Node.TEXT_NODE) {
+        out += (node.textContent || '').replace(/\u200B/g, '');
+      } else if (node.nodeType === Node.ELEMENT_NODE) {
+        const tag = node.tagName ? node.tagName.toLowerCase() : '';
+        if (tag === 'code') {
+          out += '`' + (node.textContent || '').replace(/\u200B/g, '') + '`';
+        } else if (tag === 'pre') {
+          out += (node.textContent || '').replace(/\u200B/g, '');
+        } else if (tag === 'br') {
+          out += '  \n';
+        } else {
+          out += this._serializeInlineContent(node);
+        }
+      }
+    }
+    return out;
+  }
+
+  serializeDOMToMarkdown(imageIdMap = null) {
+
+    // PUBLISH MODE: build imageIdMap if not provided
+    if (imageIdMap === null) {
+      imageIdMap = new Map();
+    }
+
+    const editor = document.querySelector('#stack-post-body-editor');
+    if (!editor) { return ''; }
 
     const markdownLines = [];
     const blockElements = Array.from(editor.querySelectorAll('[data-block-id]'));
@@ -661,35 +861,30 @@ class CreatePost {
       }
 
       switch (blockType) {
-        case 'heading':
+        case 'heading': {
           const level = parseInt(blockEl.tagName.charAt(1)) || 1;
-          const headingText = (blockEl.textContent || '').replace(/\u200B/g, '').trim();
+          const headingText = this._serializeInlineContent(blockEl).replace(/\u200B/g, '').trim();
           const headingPrefix = '#'.repeat(level);
           markdownLines.push(`${headingPrefix} ${headingText}`);
           break;
+        }
 
-        case 'image':
-          const img = blockEl.querySelector('img');
-          const captionEl = blockEl.querySelector('.stack-image-caption');
-          const alt = captionEl ? captionEl.textContent : '';
-          
-          // If imageIdMap is provided (publish-time), use image reference
-          // Otherwise (autosave), preserve original src for draft recovery
-          if (imageIdMap && img && img.src) {
-            // Find the imageId for this image src in the map
-            const imageId = imageIdMap.get(img.src);
-            if (imageId) {
-              markdownLines.push(`![${alt}](stack:image:${imageId})`);
-            } else {
-              // Fallback: if no ID found, use original src (should not happen)
-              markdownLines.push(`![${alt}](${img.src})`);
-            }
-          } else {
-            // Draft serialization: preserve original src
-          const src = img ? img.src : '';
-          markdownLines.push(`![${alt}](${src})`);
-          }
-          break;
+case 'image': {
+  const img = blockEl.querySelector('img');
+  const captionEl = blockEl.querySelector('.stack-image-caption');
+  const alt = captionEl ? captionEl.textContent : '';
+
+  if (!img) break;
+
+  const imageId = img.dataset.stackImageId;
+  if (!imageId) {
+    throw new Error('serializeDOMToMarkdown: image missing stackImageId');
+  }
+
+  markdownLines.push(`![${alt}](stack:image:${imageId})`);
+  break;
+}
+
 
         case 'code':
           // Code blocks: <pre> with data-block-type="code"
@@ -705,16 +900,32 @@ class CreatePost {
           markdownLines.push(htmlContent);
           break;
 
+	case 'list-item': {
+	  const text = this._serializeInlineContent(blockEl).replace(/\u200B/g, '').trim();
+	  if (text) {
+	    const marker = blockEl.getAttribute('data-list-marker') || '- ';
+	    markdownLines.push(`${marker}${text}`);
+	  }
+	  break;
+	}
+
+        case 'blockquote': {
+          // Blockquote: emit "> " prefix per line so structure round-trips
+          const rawText = this._serializeInlineContent(blockEl).replace(/\u200B/g, '');
+          const lines = rawText.split(/\n/);
+          const blockquoteLines = lines.map((line) => '> ' + (line || ''));
+          markdownLines.push(blockquoteLines.join('\n'));
+          break;
+        }
         case 'paragraph':
-        case 'list-item':
-        case 'blockquote':
-        default:
-          // Paragraph, list-item, and blockquote are plain text
-          const text = (blockEl.textContent || '').replace(/\u200B/g, '').trim();
+        default: {
+          // Paragraph: serialize inline content; <code>/<pre> are opaque
+          const text = this._serializeInlineContent(blockEl).replace(/\u200B/g, '').trim();
           if (text) {
             markdownLines.push(text);
           }
           break;
+        }
       }
     }
 
@@ -1126,13 +1337,51 @@ class CreatePost {
     const editor = document.querySelector('#stack-post-body-editor');
     if (editor) {
       if (content.trim()) {
-        // Parse markdown content to document structure
-        const tempDocument = parseMarkdownToDocument(content);
-        
-        // Render document to editor
-        renderDocument(tempDocument, editor, {
-          contentEditable: true
-        });
+
+// ----------------------------------------------------
+// EDIT MODE RENDERING (markdown + images)
+// Parse markdown into block structure so paste->save->reload round-trips exactly
+// ----------------------------------------------------
+
+editor.innerHTML = '';
+this.images = Array.isArray(clonedData.images) ? [...clonedData.images] : [];
+
+const parts = content.split(/!\[([^\]]*)\]\(stack:image:([^)]+)\)/g);
+const blockState = { blockIndex: 0 };
+const nextBlockId = () => generateBlockId(blockState.blockIndex++, 'block');
+
+for (let i = 0; i < parts.length; i++) {
+  if (i % 3 === 0 && parts[i]) {
+    const blockEls = this._parseMarkdownToBlockElements(parts[i], blockState);
+    blockEls.forEach((el) => editor.appendChild(el));
+  }
+  if (i % 3 === 2) {
+    const imageId = parts[i];
+    const image = this.images.find((img) => img.id === imageId);
+    if (!image) continue;
+    const figure = document.createElement('figure');
+    figure.setAttribute('data-block-id', nextBlockId());
+    figure.setAttribute('data-block-type', 'image');
+    figure.className = 'stack-image-block';
+    const img = document.createElement('img');
+    img.src = `data:${image.mime};base64,${image.data}`;
+    img.dataset.stackImageId = image.id;
+    img.alt = parts[i - 1] || '';
+    figure.appendChild(img);
+    editor.appendChild(figure);
+  }
+}
+
+if (editor.children.length === 0) {
+  const p = document.createElement('p');
+  p.setAttribute('data-block-id', generateBlockId(blockState.blockIndex++, 'block'));
+  p.setAttribute('data-block-type', 'paragraph');
+  p.appendChild(document.createTextNode('\u200B'));
+  p.contentEditable = 'true';
+  editor.appendChild(p);
+}
+
+
       } else {
         // Empty content - render empty document
         const tempDocument = { blocks: [{ type: 'paragraph', id: generateBlockId(0), text: '' }] };
@@ -1246,18 +1495,19 @@ class CreatePost {
         // Create new unsigned transaction
         tx = await this.app.wallet.createUnsignedTransactionWithDefaultFee(this.mod.publicKey);
         
-        // Set transaction message structure matching Stack post format
-        const data = {
-          type: 'stack_post',
-          title: title.trim() || '',
-          content: content.trim() || '',
-          tags: [],
-          image: this.featuredImage || '', // Featured/teaser image (singular, separate)
-          imageUrl: '',
-          timestamp: Date.now(),
-          subscriptionTier: 'free',
-          excerpt: ''
-        };
+const data = {
+  type: 'stack_post',
+  title: title.trim() || '',
+  content: content.trim() || '',
+  tags: [],
+  image: this.featuredImage || '',
+  imageUrl: '',
+  images: Array.isArray(this.images) ? this.images : [],   // ← FIX
+  timestamp: Date.now(),
+  subscriptionTier: 'free',
+  excerpt: ''
+};
+
 
         tx.msg = {
           module: 'Stack',
@@ -1274,16 +1524,16 @@ class CreatePost {
         // ========================================================================
         // DIAGNOSTIC: Log exact values being stored (field1, field2, field4, peer)
         // ========================================================================
-        console.log('[DIAG] saveDraftTransaction() About to save with:');
-        console.log('[DIAG]   - field1: (auto-populated from tx.msg.module, expected: "Stack")');
-        console.log('[DIAG]   - field2: (auto-populated from tx.from[0].publicKey, expected:', this.mod.publicKey, ')');
-        console.log('[DIAG]   - field4:', field4Value);
-        console.log('[DIAG]   - peer: "localhost"');
-        console.log('[DIAG]   - tx.msg.module =', JSON.stringify(tx.msg?.module), '(type:', typeof tx.msg?.module, ')');
-        console.log('[DIAG]   - tx.from =', tx.from ? JSON.stringify(tx.from) : 'N/A');
-        console.log('[DIAG]   - tx.from[0].publicKey =', tx.from && tx.from[0] ? JSON.stringify(tx.from[0].publicKey) : 'N/A');
-        console.log('[DIAG]   - tx.signature =', tx.signature || 'N/A (unsigned transaction - signature may be generated on save)');
-        console.log('[DIAG]   - this.mod.publicKey =', JSON.stringify(this.mod.publicKey));
+        // console.log('[DIAG] saveDraftTransaction() About to save with:');
+        // console.log('[DIAG]   - field1: (auto-populated from tx.msg.module, expected: "Stack")');
+        // console.log('[DIAG]   - field2: (auto-populated from tx.from[0].publicKey, expected:', this.mod.publicKey, ')');
+        // console.log('[DIAG]   - field4:', field4Value);
+        // console.log('[DIAG]   - peer: "localhost"');
+        // console.log('[DIAG]   - tx.msg.module =', JSON.stringify(tx.msg?.module), '(type:', typeof tx.msg?.module, ')');
+        // console.log('[DIAG]   - tx.from =', tx.from ? JSON.stringify(tx.from) : 'N/A');
+        // console.log('[DIAG]   - tx.from[0].publicKey =', tx.from && tx.from[0] ? JSON.stringify(tx.from[0].publicKey) : 'N/A');
+        // console.log('[DIAG]   - tx.signature =', tx.signature || 'N/A (unsigned transaction - signature may be generated on save)');
+        // console.log('[DIAG]   - this.mod.publicKey =', JSON.stringify(this.mod.publicKey));
 
         // Save new draft transaction (field1 is auto-populated from tx.msg.module)
         await this.app.storage.saveTransaction(tx, {
@@ -1371,6 +1621,7 @@ class CreatePost {
           tags: [],
           image: this.featuredImage || '', // Featured/teaser image (singular, separate)
           imageUrl: '',
+          images: Array.isArray(this.images) ? this.images : [],
           timestamp: tx.msg?.data?.timestamp || Date.now(),
           subscriptionTier: 'free',
           excerpt: ''
@@ -1553,6 +1804,36 @@ class CreatePost {
   }
 
   /**
+   * Ensure the caret is inside a block. If not, create an empty paragraph and move the caret into it.
+   * Used by Enter and paste to restore the invariant (caret must live inside a block).
+   * @returns {HTMLElement|null} The focused block, or the new block after recovery, or null if no editor.
+   */
+  _ensureFocusedBlock() {
+    let block = this.getFocusedBlock();
+    if (block) return block;
+    const editor = document.querySelector('#stack-post-body-editor');
+    if (!editor) return null;
+    const newBlockElement = document.createElement('p');
+    const newBlockId = generateBlockId(this.getBlockCount());
+    newBlockElement.setAttribute('data-block-id', newBlockId);
+    newBlockElement.setAttribute('data-block-type', 'paragraph');
+    newBlockElement.contentEditable = 'true';
+    const caretAnchor = document.createTextNode('\u200B');
+    newBlockElement.appendChild(caretAnchor);
+    editor.appendChild(newBlockElement);
+    this.updatePlaceholderVisibility();
+    const newRange = document.createRange();
+    const newSelection = window.getSelection();
+    newRange.setStart(caretAnchor, 0);
+    newRange.setEnd(caretAnchor, 0);
+    newSelection.removeAllRanges();
+    newSelection.addRange(newRange);
+    newBlockElement.focus();
+    this.autoScrollToCaret();
+    return newBlockElement;
+  }
+
+  /**
    * Get block count from DOM (replaces this.document.blocks.length)
    * B1: Block identity - counts ONLY elements with data-block-id (true blocks)
    * Structural containers like <ul> are never counted
@@ -1586,6 +1867,72 @@ class CreatePost {
   }
 
   /**
+   * Get block content as serialized text (code as backticks) and cursor offset in that text.
+   * Code nodes are serialized as `...` so linkification treats their content as opaque.
+   */
+  getBlockContentForLinkification(blockElement, selection) {
+    const range = selection && selection.rangeCount ? selection.getRangeAt(0) : null;
+    let serialized = '';
+    let splitOffset = 0;
+    const targetNode = range ? range.startContainer : null;
+    const targetOffset = range ? range.startOffset : 0;
+
+    const offsetInNode = (node) => {
+      if (node === targetNode) return targetOffset;
+      if (node.nodeType === Node.TEXT_NODE) return -1;
+      const walker = document.createTreeWalker(node, NodeFilter.SHOW_TEXT, null);
+      let pos = 0;
+      let n = walker.nextNode();
+      while (n) {
+        if (n === targetNode) return pos + targetOffset;
+        pos += (n.textContent || '').replace(/\u200B/g, '').length;
+        n = walker.nextNode();
+      }
+      return -1;
+    };
+
+    const walk = (node) => {
+      if (node.nodeType === Node.TEXT_NODE) {
+        const text = (node.textContent || '').replace(/\u200B/g, '');
+        if (node === targetNode) {
+          splitOffset = serialized.length + Math.min(targetOffset, text.length);
+        }
+        serialized += text;
+        return;
+      }
+      if (node.nodeType === Node.ELEMENT_NODE) {
+        const tag = node.tagName ? node.tagName.toLowerCase() : '';
+        if (tag === 'code') {
+          const inner = (node.textContent || '').replace(/\u200B/g, '');
+          const idx = offsetInNode(node);
+          if (idx >= 0) {
+            splitOffset = serialized.length + 1 + Math.min(idx, inner.length);
+          }
+          serialized += '`' + inner + '`';
+          return;
+        }
+        if (tag === 'pre') {
+          const inner = (node.textContent || '').replace(/\u200B/g, '');
+          const idx = offsetInNode(node);
+          if (idx >= 0) {
+            splitOffset = serialized.length + Math.min(idx, inner.length);
+          }
+          serialized += inner;
+          return;
+        }
+        for (let i = 0; i < node.childNodes.length; i++) {
+          walk(node.childNodes[i]);
+        }
+      }
+    };
+
+    for (let i = 0; i < blockElement.childNodes.length; i++) {
+      walk(blockElement.childNodes[i]);
+    }
+    return { text: serialized, splitOffset };
+  }
+
+  /**
    * Get text offset from a range within a block
    */
   getTextOffsetFromRange(blockElement, range) {
@@ -1611,6 +1958,125 @@ class CreatePost {
     }
     
     return offset;
+  }
+
+  /**
+   * Convert bare http/https URLs to Markdown link syntax [url](url).
+   * Pure text rewrite only. Does not create DOM nodes.
+   * Skips URLs already inside [text](url). Strips trailing punctuation in post-processing.
+   *
+   * Emphasis-aware: emphasis ALWAYS dominates. Links inside emphasized spans are
+   * linkified within the span; markers are never included in URLs or hrefs.
+   * Supports mixed text + link (e.g. **Check this: https://x.com**) and nested emphasis.
+   *
+   * Code-invariant: text inside `...` or ```...``` is never linkified.
+   */
+  _convertBareUrlsToMarkdownLinks(text) {
+    if (!text || typeof text !== 'string') return text;
+
+    // Pre-pass: extract code spans (opaque - no linkification). Match ``` before `.
+    const codeSpans = [];
+    const CODE_PLACEHOLDER = '\u0000CODE\u0000';
+    text = text.replace(/```[\s\S]*?```/g, (m) => {
+      codeSpans.push(m);
+      return CODE_PLACEHOLDER + (codeSpans.length - 1) + CODE_PLACEHOLDER;
+    });
+    text = text.replace(/`[^`]*`/g, (m) => {
+      codeSpans.push(m);
+      return CODE_PLACEHOLDER + (codeSpans.length - 1) + CODE_PLACEHOLDER;
+    });
+
+    // Pre-pass: emphasis spans. Match longest delimiters first (*** before ** before *).
+    // For each span, linkify inner content only; never consume emphasis delimiters.
+    const emphasisPatterns = [
+      { marker: '***', re: /\*\*\*([^*]+?)\*\*\*/g },
+      { marker: '**', re: /\*\*([^*]+?)\*\*/g },
+      { marker: '__', re: /__([^_]+?)__/g },
+      { marker: '*', re: /\*([^*]+?)\*/g },
+      { marker: '_', re: /_([^_]+?)_/g }
+    ];
+
+    for (const { marker, re } of emphasisPatterns) {
+      text = text.replace(re, (_, inner) => {
+        const linkified = this._linkifyBareUrlsOnly(inner);
+        return `${marker}${linkified}${marker}`;
+      });
+    }
+
+    // Standard linkification for non-emphasized bare URLs
+    const bareUrlRe = /\b(https?:\/\/[^\s<>\[\]]+)/g;
+    text = text.replace(bareUrlRe, (match, _p1, offset, fullString) => {
+      // Skip if already inside markdown link: ](href) or [link text
+      if (offset >= 2 && fullString.slice(offset - 2, offset) === '](') return match;
+      if (offset >= 1 && fullString[offset - 1] === '[') return match;
+      let url = match.replace(/[.,;:!?\]]+$/, '');
+      const openParens = (url.match(/\(/g) || []).length;
+      const closeParens = (url.match(/\)/g) || []).length;
+      if (closeParens > openParens && url.endsWith(')')) {
+        url = url.slice(0, -1);
+      }
+      const trailing = match.slice(url.length);
+      return `[${url}](${url})${trailing}`;
+    });
+
+    // Restore code spans (unchanged)
+    for (let i = 0; i < codeSpans.length; i++) {
+      text = text.replace(CODE_PLACEHOLDER + i + CODE_PLACEHOLDER, codeSpans[i]);
+    }
+    return text;
+  }
+
+  /**
+   * Linkify bare URLs only (no emphasis handling). Used when processing inner content
+   * of emphasis spans. Preserves code spans as opaque.
+   */
+  _linkifyBareUrlsOnly(text) {
+    if (!text || typeof text !== 'string') return text;
+
+    const codeSpans = [];
+    const CODE_PLACEHOLDER = '\u0000CODE\u0000';
+    text = text.replace(/```[\s\S]*?```/g, (m) => {
+      codeSpans.push(m);
+      return CODE_PLACEHOLDER + (codeSpans.length - 1) + CODE_PLACEHOLDER;
+    });
+    text = text.replace(/`[^`]*`/g, (m) => {
+      codeSpans.push(m);
+      return CODE_PLACEHOLDER + (codeSpans.length - 1) + CODE_PLACEHOLDER;
+    });
+
+    const bareUrlRe = /\b(https?:\/\/[^\s<>\[\]]+)/g;
+    text = text.replace(bareUrlRe, (match, _p1, offset, fullString) => {
+      if (offset >= 2 && fullString.slice(offset - 2, offset) === '](') return match;
+      if (offset >= 1 && fullString[offset - 1] === '[') return match;
+      let url = match.replace(/[.,;:!?\]]+$/, '');
+      const openParens = (url.match(/\(/g) || []).length;
+      const closeParens = (url.match(/\)/g) || []).length;
+      if (closeParens > openParens && url.endsWith(')')) {
+        url = url.slice(0, -1);
+      }
+      const trailing = match.slice(url.length);
+      return `[${url}](${url})${trailing}`;
+    });
+
+    for (let i = 0; i < codeSpans.length; i++) {
+      text = text.replace(CODE_PLACEHOLDER + i + CODE_PLACEHOLDER, codeSpans[i]);
+    }
+    return text;
+  }
+
+  /**
+   * Clean a bare URL for linkification: strip trailing punctuation.
+   * Returns empty string if input is invalid.
+   */
+  _linkifyBareUrl(url) {
+    if (!url || typeof url !== 'string') return '';
+    let clean = url.replace(/[.,;:!?\]]+$/, '');
+    const openParens = (clean.match(/\(/g) || []).length;
+    const closeParens = (clean.match(/\)/g) || []).length;
+    if (closeParens > openParens && clean.endsWith(')')) {
+      clean = clean.slice(0, -1);
+    }
+    return clean;
   }
 
   /**
@@ -1653,6 +2119,9 @@ class CreatePost {
     // No branch in this function "decides" whether Enter is prevented - it is always prevented.
     e.preventDefault();
 
+    // DOM repair: blockquote must never be a child of <ul> (ensures clean block boundaries before Enter)
+    this._ensureBlockquoteNotInList();
+
     // ========================================================================
     // PHASE 1: INTENT CAPTURE
     // ========================================================================
@@ -1662,7 +2131,11 @@ class CreatePost {
     // DOM-AUTHORITATIVE: Get focused block element (DOM node only)
     let focusedBlock = this.getFocusedBlock();
     if (!focusedBlock) {
-      throw new Error('Enter pressed in invalid editor state: no focused block (cursor outside block element)');
+      // Recovery: caret can end up in the contenteditable root when the last block becomes empty.
+      if (!this._ensureFocusedBlock()) {
+        throw new Error('Enter pressed in invalid editor state: no focused block (cursor outside block element)');
+      }
+      return;
     }
 
     // Postcondition enforcement: track structural mutations
@@ -1888,6 +2361,37 @@ class CreatePost {
           focusedBlock = codeElement;
           blockType = 'code';
         }
+      }
+    }
+
+    // List-item blockquote: "> " at start of list item → break out of list, start new blockquote.
+    // Blockquote must never be a child of <ul>; insert after the list.
+    if (blockType === 'list-item' && focusedBlock.tagName === 'LI') {
+      const liText = (focusedBlock.textContent || '').replace(/\u200B/g, '');
+      const liTrimmed = liText.trimStart();
+      if (liTrimmed.startsWith('> ')) {
+        const leadingWs = liText.length - liTrimmed.length;
+        const text = liText.substring(leadingWs + 2);
+        const blockquoteElement = document.createElement('blockquote');
+        blockquoteElement.setAttribute('data-block-id', generateBlockId(this.getBlockCount()));
+        blockquoteElement.setAttribute('data-block-type', 'blockquote');
+        blockquoteElement.contentEditable = 'true';
+        blockquoteElement.textContent = text;
+
+        const ulElement = focusedBlock.parentNode;
+        const editor = ulElement.parentNode;
+        ulElement.removeChild(focusedBlock);
+        if (ulElement.children.length === 0) {
+          editor.replaceChild(blockquoteElement, ulElement);
+        } else {
+          if (ulElement.nextSibling) {
+            editor.insertBefore(blockquoteElement, ulElement.nextSibling);
+          } else {
+            editor.appendChild(blockquoteElement);
+          }
+        }
+        focusedBlock = blockquoteElement;
+        blockType = 'blockquote';
       }
     }
 
@@ -2421,34 +2925,29 @@ class CreatePost {
     // This ensures that EVERY Enter keypress in a paragraph results in exactly one structural action.
     // e.preventDefault() already called at function start
 
-    const currentText = (focusedBlock.textContent || '').replace(/\u200B/g, '');
-    
-    // Cursor offset logic is ONLY used for paragraph-to-paragraph splitting.
-    // If blockType changed during normalization, originalCursorOffset is INVALID.
-    // Only use originalCursorOffset if we're still a paragraph (no normalization occurred).
-    let cursorOffset;
-    if (blockType === 'paragraph' && originalBlockType === 'paragraph') {
-      // Paragraph-to-paragraph splitting: use pre-normalization offset
-      cursorOffset = originalCursorOffset;
-    } else {
-      // BlockType changed during normalization: offset is INVALID, recompute from live selection
-      const currentSelection = window.getSelection();
-      if (!currentSelection.rangeCount) {
-        throw new Error('No selection after normalization - structural violation');
-      }
-      cursorOffset = this.getTextOffsetInBlock(focusedBlock, currentSelection);
-    }
-    
-    // Ensure cursor offset is within bounds
-    if (cursorOffset < 0) cursorOffset = 0;
-    if (cursorOffset > currentText.length) cursorOffset = currentText.length;
-    
+    // Use serialized content (code as backticks) so URLs inside <code> are never linkified.
+    const currentSelection = window.getSelection();
+    const { text: currentText, splitOffset: cursorOffset } = this.getBlockContentForLinkification(
+      focusedBlock,
+      currentSelection
+    );
+
+    // Clamp cursor offset; if getBlockContentForLinkification failed to set it, fall back to end
+    let safeCursorOffset = cursorOffset;
+    if (safeCursorOffset < 0) safeCursorOffset = 0;
+    if (safeCursorOffset > currentText.length) safeCursorOffset = currentText.length;
+
     // Split text into before and after cursor
-    const beforeText = currentText.substring(0, cursorOffset);
-    const afterText = currentText.substring(cursorOffset);
+    const beforeText = currentText.substring(0, safeCursorOffset);
+    const afterText = currentText.substring(safeCursorOffset);
+
+    // Auto-link bare URLs: text-only rewrite before DOM write. Safe per invariants:
+    // no new blocks, no <a> elements, no cursor/selection changes—only textContent content.
+    const beforeTextTransformed = this._convertBareUrlsToMarkdownLinks(beforeText);
+    const afterTextTransformed = this._convertBareUrlsToMarkdownLinks(afterText);
 
     // Update current block text in DOM
-    focusedBlock.textContent = beforeText;
+    focusedBlock.textContent = beforeTextTransformed;
 
     // Create new paragraph block in DOM
     // ILLEGAL: Enter completion MUST create a new block. If no block is created here, this is a bug.
@@ -2465,7 +2964,7 @@ class CreatePost {
       const caretAnchor = document.createTextNode('\u200B');
       newBlockElement.appendChild(caretAnchor);
     } else {
-    newBlockElement.textContent = afterText;
+    newBlockElement.textContent = afterTextTransformed;
     }
     
     // Insert after current block
@@ -2624,6 +3123,9 @@ class CreatePost {
    * DOM is authoritative: sync from DOM FIRST
    */
   handleBackspaceKey(e) {
+    // DOM repair: blockquote must never be a child of <ul> (ensures clean block boundaries before Backspace)
+    this._ensureBlockquoteNotInList();
+
     // Check if an image is selected first
     const selectedImage = document.querySelector('.stack-image-selected');
     if (selectedImage) {
@@ -3010,7 +3512,9 @@ class CreatePost {
   }
 
   /**
-   * Handle paste events - support images and text
+   * Handle paste events - support images and text.
+   * Text paste replays content line-by-line through existing insert + Enter logic so that
+   * normalization, block creation, and link conversion stay invariant-safe.
    */
   async handlePaste(e) {
     const clipboardData = e.clipboardData || window.clipboardData;
@@ -3024,15 +3528,98 @@ class CreatePost {
       e.preventDefault();
       const file = imageItem.getAsFile();
       await this.insertImageAtCursor(file);
-      // Auto-scroll after paste
       setTimeout(() => {
         this.autoScrollToCaret();
       }, 0);
       return;
     }
 
-    // Handle text paste - let default behavior happen, then process
-    // Auto-scroll will be handled by input event
+    // Text paste: replay as typing + Enter. Never parse Markdown or create structure here.
+    const text = clipboardData.getData('text/plain');
+    if (text == null) return;
+
+    e.preventDefault();
+
+    // Reuse same invariant recovery as Enter: caret must be inside a block.
+    if (!this._ensureFocusedBlock()) return;
+
+    const lines = text.split(/\r?\n/);
+    const syntheticEnter = { preventDefault: () => {} };
+
+    // Merge lines connected by markdown hard breaks (two trailing spaces)
+    const mergedLines = [];
+    for (let i = 0; i < lines.length; i++) {
+      let chunk = lines[i];
+      while (/  $/.test(chunk) && i + 1 < lines.length && lines[i + 1].length > 0) {
+        chunk += '\n' + lines[++i];
+      }
+      mergedLines.push(chunk);
+    }
+
+    // List context must be preserved across pasted lines so list items continue in the same list
+    // (Markdown lists are context-dependent; Enter already handles continuation when typing).
+    const lineStartsWithListMarker = (line) =>
+      (line.length >= 2 && (line.startsWith('* ') || line.startsWith('- ') || line.startsWith('+ '))) ||
+      /^\d+[.)]\s/.test(line);
+    const stripListMarker = (line) => {
+      if (line.startsWith('* ') || line.startsWith('- ') || line.startsWith('+ ')) return line.slice(2);
+      const m = line.match(/^(\d+[.)]\s)(.*)$/);
+      return m ? m[2] : line;
+    };
+
+    for (let i = 0; i < mergedLines.length; i++) {
+      const line = mergedLines[i];
+      const focusedBlock = this.getFocusedBlock();
+      const blockType = focusedBlock ? focusedBlock.getAttribute('data-block-type') : null;
+      const inList = blockType === 'list-item';
+
+      if (inList && lineStartsWithListMarker(line)) {
+        // Insert content only (no marker) so existing list item gets correct text; Enter will create next item.
+        if (stripListMarker(line).length > 0) {
+          document.execCommand('insertText', false, stripListMarker(line));
+        }
+      } else {
+        if (inList && line.length > 0) {
+          // Exit list first so the line becomes a new paragraph, not a list item.
+          this.handleEnterKey(syntheticEnter);
+        }
+        if (line.length > 0) {
+          if (line.includes('\n')) {
+            const parts = line.split('\n');
+            for (let j = 0; j < parts.length; j++) {
+              if (parts[j].length > 0) {
+                document.execCommand('insertText', false, parts[j]);
+              }
+              if (j < parts.length - 1) {
+                const sel = window.getSelection();
+                if (sel.rangeCount) {
+                  const r = sel.getRangeAt(0);
+                  const br = document.createElement('br');
+                  r.insertNode(br);
+                  r.setStartAfter(br);
+                  r.collapse(true);
+                  sel.removeAllRanges();
+                  sel.addRange(r);
+                }
+              }
+            }
+          } else {
+            document.execCommand('insertText', false, line);
+          }
+        }
+      }
+
+      if (i < mergedLines.length - 1) {
+        this.handleEnterKey(syntheticEnter);
+      }
+    }
+
+    // DOM repair: blockquote must never be a child of <ul> (paste can create list+blockquote structure)
+    this._ensureBlockquoteNotInList();
+
+    this.scheduleSerialization();
+    this.updatePlaceholderVisibility();
+    this.autoScrollToCaret();
   }
 
   /**
@@ -3628,20 +4215,57 @@ class CreatePost {
     img.style.margin = '0 auto';
     imageElement.appendChild(img);
 
-    // Create new paragraph element in DOM
-    const newParagraphElement = document.createElement('p');
-    const newParagraphId = generateBlockId(this.getBlockCount() + 1);
-    newParagraphElement.setAttribute('data-block-id', newParagraphId);
-    newParagraphElement.setAttribute('data-block-type', 'paragraph');
-    newParagraphElement.contentEditable = 'true';
-    newParagraphElement.textContent = '';
-    newParagraphElement.appendChild(document.createTextNode('\u200B'));
+
+// ----------------------------------------------------
+// REGISTER IMAGE IN EDITOR STATE
+// ----------------------------------------------------
+
+// Ensure image registry exists
+this.images = Array.isArray(this.images) ? this.images : [];
+
+// Assign stable image ID
+const imageId = `img_${this.images.length}`;
+
+// Extract mime + base64 (do NOT reuse existing base64Data variable)
+const parts = imageDataUrl.split(',');
+const meta = parts[0];
+const imageBase64 = parts[1];
+
+const mimeMatch = meta.match(/data:(.*?);base64/);
+const mime = mimeMatch ? mimeMatch[1] : 'image/png';
+
+// Store image payload
+this.images.push({
+  id: imageId,
+  mime,
+  data: imageBase64
+});
+
+// Stamp ID onto DOM node for serialization
+img.dataset.stackImageId = imageId;
 
     // Insert into DOM at the correct position
     // Images are always direct children of the editor, not nested
     // Get all blocks to find the correct insertion point relative to editor's direct children
     const allBlocks = Array.from(editor.querySelectorAll('[data-block-id]'));
-    
+    const insertAtEnd = insertIndex >= allBlocks.length;
+
+    // [IMAGE INSERT] Temporary logging: insertion position and at-end decision
+    console.log('[IMAGE INSERT] insertIndex=', insertIndex, 'allBlocks.length=', allBlocks.length, 'insertAtEnd=', insertAtEnd);
+
+    // Only create a new paragraph when inserting at end of document (no following block).
+    // When inserting before an existing block, do NOT add a paragraph — leave structure intact.
+    let newParagraphElement = null;
+    if (insertAtEnd) {
+      newParagraphElement = document.createElement('p');
+      const newParagraphId = generateBlockId(this.getBlockCount() + 1);
+      newParagraphElement.setAttribute('data-block-id', newParagraphId);
+      newParagraphElement.setAttribute('data-block-type', 'paragraph');
+      newParagraphElement.contentEditable = 'true';
+      newParagraphElement.textContent = '';
+      newParagraphElement.appendChild(document.createTextNode('\u200B'));
+    }
+
     if (insertIndex <= 0) {
       // Insert at the beginning (index 0) - insert as first child
       if (editor.firstChild) {
@@ -3649,64 +4273,66 @@ class CreatePost {
       } else {
         editor.appendChild(imageElement);
       }
-      // Insert paragraph after the image
-      if (imageElement.nextSibling) {
-        editor.insertBefore(newParagraphElement, imageElement.nextSibling);
-      } else {
-        editor.appendChild(newParagraphElement);
+      if (newParagraphElement) {
+        if (imageElement.nextSibling) {
+          editor.insertBefore(newParagraphElement, imageElement.nextSibling);
+        } else {
+          editor.appendChild(newParagraphElement);
+        }
       }
-    } else if (insertIndex >= allBlocks.length) {
-      // Insert at the end
+      console.log('[IMAGE INSERT] inserted at start; paragraph auto-created=', !!newParagraphElement);
+    } else if (insertAtEnd) {
+      // Insert at the end — image then new paragraph
       editor.appendChild(imageElement);
       editor.appendChild(newParagraphElement);
-        } else {
-      // Insert at the specified index - find the block at that index and insert before it (or its parent)
+      console.log('[IMAGE INSERT] inserted at end; paragraph auto-created=true');
+    } else {
+      // Insert before an existing block — image only, no new paragraph
       const targetBlock = allBlocks[insertIndex];
       if (targetBlock) {
-        // Find the direct child of editor to insert before
-        // If targetBlock is nested (like <li> in <ul>), insert before its parent container
         let insertBeforeElement = targetBlock;
         while (insertBeforeElement && insertBeforeElement.parentNode !== editor) {
           insertBeforeElement = insertBeforeElement.parentNode;
         }
-        
         if (insertBeforeElement && insertBeforeElement.parentNode === editor) {
           editor.insertBefore(imageElement, insertBeforeElement);
-          // Insert paragraph after the image
-          if (imageElement.nextSibling) {
-      editor.insertBefore(newParagraphElement, imageElement.nextSibling);
-          } else {
-            editor.appendChild(newParagraphElement);
-          }
         } else {
-          // Fallback: append to end
           editor.appendChild(imageElement);
-          editor.appendChild(newParagraphElement);
         }
       } else {
-        // Fallback: append to end
         editor.appendChild(imageElement);
-        editor.appendChild(newParagraphElement);
       }
-        }
+      console.log('[IMAGE INSERT] inserted before existing block; paragraph auto-created=false');
+    }
 
     // Update placeholder visibility
     this.updatePlaceholderVisibility();
 
-    // Focus the new paragraph synchronously
+    // Cursor placement: at end → new paragraph; before existing block → start of next block
     const newRange = document.createRange();
     const newSelection = window.getSelection();
-    const textNode = newParagraphElement.firstChild;
-    if (textNode && textNode.nodeType === Node.TEXT_NODE) {
-      newRange.setStart(textNode, 0);
-      newRange.setEnd(textNode, 0);
-        } else {
-      newRange.setStart(newParagraphElement, 0);
-      newRange.setEnd(newParagraphElement, 0);
+    if (newParagraphElement) {
+      const textNode = newParagraphElement.firstChild;
+      if (textNode && textNode.nodeType === Node.TEXT_NODE) {
+        newRange.setStart(textNode, 0);
+        newRange.setEnd(textNode, 0);
+      } else {
+        newRange.setStart(newParagraphElement, 0);
+        newRange.setEnd(newParagraphElement, 0);
+      }
+      newParagraphElement.focus();
+    } else {
+      // Place cursor at start of the block immediately after the image (existing content)
+      const nextBlock = imageElement.nextSibling;
+      if (nextBlock) {
+        newRange.setStart(nextBlock, 0);
+        newRange.setEnd(nextBlock, 0);
+        const editorEl = document.querySelector('#stack-post-body-editor');
+        if (editorEl && editorEl.focus) editorEl.focus();
+      }
     }
     newSelection.removeAllRanges();
     newSelection.addRange(newRange);
-    newParagraphElement.focus();
 
     // ========================================================================
     // IMAGE INSERTION MUST TRIGGER AUTOSAVE
@@ -4090,6 +4716,154 @@ class CreatePost {
           this.handlePublishTriggerClick();
         });
       }
+
+      // Help section - toggle cheat sheet visibility
+      const helpQuestionIcon = document.querySelector('.stack-editor-help-icon-container .fa-question');
+      if (helpQuestionIcon) {
+        helpQuestionIcon.addEventListener('click', (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          const helpTextContainer = document.querySelector('.stack-editor-help-text-container');
+          if (helpTextContainer) {
+            const currentMaxHeight = helpTextContainer.style.maxHeight;
+            // Toggle between '0' (collapsed) and '1000px' (expanded)
+            // Using max-height instead of height for smooth CSS transitions
+            if (currentMaxHeight === '1000px') {
+              // If expanded, collapse it
+              helpTextContainer.style.maxHeight = '0';
+            } else {
+              // If collapsed (0 or empty), expand it
+              helpTextContainer.style.maxHeight = '1000px';
+            }
+          }
+        });
+      }
+
+      // Markdown cheat sheet - make items clickable to insert markdown
+      const cheatSheetItems = document.querySelectorAll('.stack-cheatsheet-item');
+      cheatSheetItems.forEach((item) => {
+        item.style.cursor = 'pointer';
+        item.addEventListener('click', (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          
+          // Get the markdown text from the <code> element
+          const codeElement = item.querySelector('code');
+          if (!codeElement) return;
+          
+          let markdownText = codeElement.textContent.trim();
+          
+          // Check if cursor is in the editor or its children
+          const editor = document.querySelector('#stack-post-body-editor');
+          if (!editor) return;
+          
+          const selection = window.getSelection();
+          if (!selection.rangeCount) return;
+          
+          // Check if the selection is within the editor
+          const range = selection.getRangeAt(0);
+          const isInEditor = editor.contains(range.commonAncestorContainer);
+          if (!isInEditor) return;
+          
+          // Determine if this is a start-of-line element
+          const headerElements = ['# Title', '## Subtitle', '### Heading', '#### Subheading'];
+          const isHeader = headerElements.includes(markdownText);
+          // Check for start-of-line elements: horizontal rule, bullet, code block
+          const isStartOfLine = markdownText.startsWith('––-') || 
+                                markdownText.startsWith('* bullet') ||
+                                markdownText.startsWith('```');
+          
+          // Get the focused block
+          const focusedBlock = this.getFocusedBlock();
+          if (!focusedBlock) return;
+          
+          const blockType = focusedBlock.getAttribute('data-block-type');
+          const blockText = (focusedBlock.textContent || '').replace(/\u200B/g, '');
+          const cursorOffset = this.getTextOffsetInBlock(focusedBlock, selection);
+          
+          // For headers and start-of-line elements, place at start of line
+          if (isHeader || isStartOfLine) {
+            // If cursor is not at the start of the block, create a new block
+            if (cursorOffset > 0) {
+              // Split the block at cursor position
+              const beforeText = blockText.substring(0, cursorOffset);
+              const afterText = blockText.substring(cursorOffset);
+              
+              // Update current block with text before cursor
+              focusedBlock.textContent = beforeText;
+              
+              // Create new block with the markdown text at the start
+              const editor = focusedBlock.parentNode;
+              const newBlockElement = document.createElement('p');
+              const newBlockId = generateBlockId(this.getBlockCount());
+              newBlockElement.setAttribute('data-block-id', newBlockId);
+              newBlockElement.setAttribute('data-block-type', 'paragraph');
+              newBlockElement.contentEditable = 'true';
+              
+              // For headers, place hashes at start; for others, add markdown then any remaining text
+              if (afterText.trim().length > 0) {
+                newBlockElement.textContent = markdownText + ' ' + afterText;
+              } else {
+                newBlockElement.textContent = markdownText;
+              }
+              
+              // Insert after current block
+              focusedBlock.parentNode.insertBefore(newBlockElement, focusedBlock.nextSibling);
+              
+              // Place cursor after the inserted markdown text
+              const textNode = newBlockElement.firstChild;
+              if (textNode) {
+                const newRange = document.createRange();
+                const cursorPos = markdownText.length + (afterText.trim().length > 0 ? 1 : 0);
+                newRange.setStart(textNode, cursorPos);
+                newRange.collapse(true);
+                selection.removeAllRanges();
+                selection.addRange(newRange);
+              }
+              
+              // Focus the new block
+              newBlockElement.focus();
+            } else {
+              // Cursor is at start, replace or prepend the markdown text
+              if (blockText.trim().length > 0) {
+                focusedBlock.textContent = markdownText + ' ' + blockText;
+              } else {
+                focusedBlock.textContent = markdownText;
+              }
+              
+              // Place cursor after the inserted markdown text
+              const textNode = focusedBlock.firstChild;
+              if (textNode) {
+                const newRange = document.createRange();
+                const cursorPos = markdownText.length + (blockText.trim().length > 0 ? 1 : 0);
+                newRange.setStart(textNode, cursorPos);
+                newRange.collapse(true);
+                selection.removeAllRanges();
+                selection.addRange(newRange);
+              }
+            }
+          } else {
+            // For inline elements (_italic_, **bold**), insert at cursor position
+            const beforeText = blockText.substring(0, cursorOffset);
+            const afterText = blockText.substring(cursorOffset);
+            focusedBlock.textContent = beforeText + markdownText + afterText;
+            
+            // Place cursor after the inserted markdown text
+            const textNode = focusedBlock.firstChild;
+            if (textNode) {
+              const newRange = document.createRange();
+              newRange.setStart(textNode, beforeText.length + markdownText.length);
+              newRange.collapse(true);
+              selection.removeAllRanges();
+              selection.addRange(newRange);
+            }
+          }
+          
+          // Schedule serialization and update placeholder
+          this.scheduleSerialization();
+          this.updatePlaceholderVisibility();
+        });
+      });
       
       // Title input - update next step button on change
       const titleInput = document.querySelector('#stack-post-title-input');

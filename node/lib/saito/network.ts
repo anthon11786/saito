@@ -1,7 +1,7 @@
 import Transaction from './transaction';
 import Peer from './peer';
 import S from 'saito-js/saito';
-import { Saito } from '../../apps/core';
+import { Saito } from './app';
 import PeerService from 'saito-js/lib/peer_service';
 
 export default class Network {
@@ -17,15 +17,26 @@ export default class Network {
   }
 
   public async propagateTransaction(tx: Transaction) {
-    return S.getInstance().propagateTransaction(tx);
+    console.info(
+      `[TRANSACTION - SENDING] - network.propagateTransaction called signature=${tx.signature}`
+    );
+    const result = await this.app.core.network.propagateTransaction(tx);
+    console.info(
+      `[TRANSACTION - SENDING] - network.propagateTransaction completed signature=${tx.signature}`
+    );
+    return result;
   }
 
   public async getPeers(): Promise<Array<Peer>> {
-    return S.getInstance().getPeers();
+    return this.app.core.network.getPeers();
   }
 
-  public async getPeer(index: bigint): Promise<Peer> {
-    return S.getInstance().getPeer(index);
+  public async getPeer(publicKey: string): Promise<Peer> {
+    return this.app.core.network.getPeer(publicKey);
+  }
+
+  public async getPeerByPeerId(peer_id: bigint): Promise<Peer> {
+    return this.app.core.network.getPeerByPeerId(peer_id);
   }
 
   public async sendRequest(
@@ -36,11 +47,11 @@ export default class Network {
     signature_required = false
   ) {
     let buffer = Buffer.from(JSON.stringify(data), 'utf-8');
-    return S.getInstance().sendRequest(
+    return this.app.core.network.sendRequest(
       message,
       data,
       callback,
-      peer ? peer.peerIndex : undefined,
+      peer ? peer.publicKey : undefined,
       signature_required
     );
   }
@@ -51,9 +62,9 @@ export default class Network {
   public async sendTransactionWithCallback(
     transaction: Transaction,
     callback?: any,
-    peerIndex?: bigint
+    publicKey?: string
   ) {
-    return S.getInstance().sendTransactionWithCallback(transaction, callback, peerIndex);
+    return this.app.core.network.sendTransactionWithCallback(transaction, callback, publicKey);
   }
 
   /*
@@ -64,10 +75,16 @@ export default class Network {
     message: string,
     data: any = '',
     callback?: any,
-    peerIndex?: bigint,
+    publicKey?: string,
     signature_required?: boolean
   ) {
-    return S.getInstance().sendRequest(message, data, callback, peerIndex, signature_required);
+    return this.app.core.network.sendRequest(
+      message,
+      data,
+      callback,
+      publicKey,
+      signature_required
+    );
   }
 
   public close() {}

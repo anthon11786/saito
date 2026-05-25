@@ -31,6 +31,7 @@ class Archive extends ModTemplate {
 
 		this.name = 'Archive';
 		this.slug = 'archive';
+		this.dependencies = ['Scripting'];
 		this.description = 'Supports the saving and serving of network transactions';
 		this.categories = 'Utilities Core';
 		this.class = 'utility';
@@ -50,8 +51,8 @@ class Archive extends ModTemplate {
 		// limitations like a private archive node that wants to limit
 		// usage of privately-uploaded data.
 		//
-		this.access_hash = 0;
-		//this.access_hash = 1; // don't serve txs with access_hash restrictions
+		//this.access_hash = 0; // ignore access_hash
+		this.access_hash = 1; // don't serve txs with access_hash restrictions
 
 		this.schema = [
 			'id',
@@ -192,12 +193,6 @@ class Archive extends ModTemplate {
 		};
 
 		var isDbCreated = await this.localDB.initDb(db);
-
-		/*if (isDbCreated) {
-			console.log('ARCHIVE: Db Created & connection is opened');
-		} else {
-			console.log('ARCHIVE: Connection is opened');
-		}*/
 	}
 
 	async render() {
@@ -294,6 +289,7 @@ class Archive extends ModTemplate {
 		if (this.app.BROWSER == 0) {
 			services.push(new PeerService(null, 'archive'));
 		}
+		console.log('archive services', services);
 		return services;
 	}
 
@@ -319,14 +315,23 @@ class Archive extends ModTemplate {
 				return;
 			}
 
+			let obj = { block_id, block_hash };
+
+			if (tx.type == 8) {
+				console.log('ARCHIVE saving an NFT!!!');
+				obj.field4 = this.app.wallet.computeNFTIdFromTx(tx);
+				obj.field1 = txmsg.module || 'NFT';
+				obj.preserve = 1;
+			}
+
 			setTimeout(async () => {
 				let txs = await this.loadTransactions({
 					signature: tx.signature
 				});
 				if (txs?.length > 0) {
-					this.updateTransaction(tx, { block_id, block_hash });
+					this.updateTransaction(tx, obj);
 				} else {
-					this.app.storage.saveTransaction(tx, { block_id, block_hash }, 'localhost');
+					this.app.storage.saveTransaction(tx, obj, 'localhost');
 				}
 			}, 10000);
 		}
@@ -351,10 +356,27 @@ class Archive extends ModTemplate {
 				let ts1 = Date.now();
 
 				//
+				// add REQUESTER and TS to submitted object
+				//
+				// over-write any existing information / vars in order to
+				// avoid users submitting with correct information inappropriately
+				//
+				if (req.data) {
+					if (typeof req.data === 'object' && req.data !== null && !Array.isArray(req.data)) {
+						if (peer && peer.publicKey) {
+							req.data.REQUESTER = peer.publicKey;
+							req.data.NOW = new Date().getTime();
+						} else {
+							req.data.REQUESTER = '';
+							req.data.NOW = new Date().getTime();
+						}
+					}
+				}
+
+				//
 				//Duplicates loadTransactionsWithCallback, but that's fine
 				//
 				let txs = await this.loadTransactions(req.data);
-
 				if (mycallback) {
 					mycallback(txs);
 					return 1;
@@ -427,12 +449,12 @@ class Archive extends ModTemplate {
 			});
 
 			if (numRows) {
-				console.log(
-					'Local Archive index successfully inserted: ',
-					JSON.parse(JSON.stringify(newObj))
-				);
+				console.debug('Local Archive index successfully inserted.');
+				//					'Local Archive index successfully inserted: ',
+				//					JSON.parse(JSON.stringify(newObj))
+				//				);
 			} else {
-				console.log('Local Archive index not inserted...');
+				console.debug('Local Archive index not inserted...');
 			}
 		} else {
 			//
@@ -494,11 +516,9 @@ class Archive extends ModTemplate {
 			};
 
 			if (newObj.tx_size > 50000) {
-				console.log('Save large tx: ', tx.length);
 				const fs = this.app?.storage?.returnFileSystem();
 				if (fs) {
 					let filename = `${__dirname}/../../data/archive/${newObj.sig}`;
-					console.log(filename);
 					fs.writeFileSync(filename, newObj.tx);
 					params['$tx'] = '';
 				}
@@ -538,7 +558,7 @@ class Archive extends ModTemplate {
 		newObj.tx_size = newObj.tx.length;
 
 		if (!tx_to_update) {
-			console.error('No tx signature for archive update:', tx);
+			// console.error('No tx signature for archive update:', tx);
 			return 0;
 		}
 
@@ -579,8 +599,6 @@ class Archive extends ModTemplate {
 				}
 			});
 		} else {
-			//console.log(sql, params, tx.optional);
-
 			if (newObj.tx_size > 50000) {
 				const fs = this.app?.storage?.returnFileSystem();
 				if (fs) {
@@ -736,7 +754,6 @@ class Archive extends ModTemplate {
 		let rows = await this.app.storage.queryDatabase(sql, params, 'archive');
 
 		if (this.app.BROWSER && !rows?.length) {
-			//console.log('archive checkpoint');
 			rows = await this.localDB.select({
 				from: 'archives',
 				where: where_obj,
@@ -750,7 +767,6 @@ class Archive extends ModTemplate {
 			} else {
 				for (let r of rows) {
 					if (!r.tx) {
-						//console.log('Read tx from disk: ', r.sig);
 						let filename = `${__dirname}/../../data/archive/${r.sig}`;
 						if (fs.existsSync(filename)) {
 							r.tx = fs.readFileSync(filename, { encoding: 'UTF-8' });
@@ -778,9 +794,6 @@ class Archive extends ModTemplate {
 		// access_script and access_witness.
 		//
 		if (this.access_hash == 1) {
-			console.log('*****************');
-			console.log('ACCESS HASH CHECK');
-			console.log('*****************');
 			let altered_rows = [];
 
 			for (let r of rows) {
@@ -790,37 +803,49 @@ class Archive extends ModTemplate {
 				// a specific network item in order to access.
 				//
 				if (r.owner) {
-					//
-					//
-					//
-					if (!obj.access_script || !obj.access_witness) {
-						//
-						// no script / witness remove row
-						//
-					} else {
-						//
-						// otherwise evaluate...
-						//
-						if (obj.access_hash === r.owner) {
-							//let peers = await this.app.network.getPeers();
-							//for (let peer of peers) {
-							//	console.log('PEER: ' + JSON.stringify(peer));
-							//}
+					let access_script = obj.access_script || null;
+					let access_hash = obj.access_hash || null;
+					if (!access_script && obj.access_witness) {
+						try {
+							let tx = new Transaction();
+							tx.deserialize_from_web(this.app, r.tx);
 
+							let txmsg = tx.returnMessage();
+
+							if (txmsg.access_script) {
+								access_script = txmsg.access_script;
+							}
+							if (txmsg.access_hash) {
+								access_hash = txmsg.access_hash;
+							}
+						} catch (err) {
+							// malformed tx, deny
+							continue;
+						}
+					}
+
+					if (!access_script && !obj.access_witness) {
+						//
+						// no script but witness provided...
+						//
+						continue;
+					} else {
+						if (access_hash === r.owner) {
 							let include_row = false;
 							let scripting_mod = this.app.modules.returnModule('Scripting');
 							if (scripting_mod) {
 								if (
-									scripting_mod.evaluate(
-										obj.access_hash,
-										obj.access_script,
+									await scripting_mod.evaluate(
+										access_hash,
+										access_script,
 										obj.access_witness,
-										{},
+										obj,
 										request_tx,
 										null
 									)
 								) {
 									include_row = true;
+								} else {
 								}
 							}
 							if (include_row) {
@@ -828,11 +853,12 @@ class Archive extends ModTemplate {
 							}
 						}
 					}
+				} else {
+					altered_rows.push(r);
 				}
 			}
 
 			rows = altered_rows;
-			console.log('ROWS RETURNING: ' + JSON.stringify(rows));
 		}
 
 		return rows;
@@ -883,7 +909,6 @@ class Archive extends ModTemplate {
 
 		// Check if transaction exists
 		if (!existing_rows || existing_rows.length === 0) {
-			console.log('Transaction not found in archive, cannot delete');
 			return false;
 		}
 
@@ -899,7 +924,6 @@ class Archive extends ModTemplate {
 			console.log('*****************');
 			console.log('DELETE ACCESS HASH CHECK');
 			console.log('*****************');
-			console.log('Transaction owner:', existing_row.owner);
 
 			// Check if access credentials are provided
 			if (!obj.access_script || !obj.access_witness) {
@@ -1189,10 +1213,6 @@ class Archive extends ModTemplate {
 			for (let r of rows) {
 				await this.deleteTransaction(r.sig);
 			}
-
-			sql = 'SELECT COUNT(*) FROM archives';
-			rows = await this.app.storage.queryDatabase(sql, {}, 'archive');
-			console.log(rows);
 		}
 
 		this.archive.last_prune = now;

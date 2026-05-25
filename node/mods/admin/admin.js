@@ -1,30 +1,34 @@
 const saito = require('../../lib/saito/saito');
 const ModTemplate = require('../../lib/templates/modtemplate');
-const ConfigTemplate = require('./lib/config.template.js');
+const AdminMain = require('./lib/ui/main');
 const AdminHome = require('./index');
 const jsonTree = require('json-tree-viewer');
 
 class Admin extends ModTemplate {
+
   constructor(app) {
     super(app);
-
     this.name = 'Admin';
     this.slug = 'admin';
     this.description = 'Admin module for Saito application management';
     this.categories = 'Admin utilities';
+
+    this.server_publickey = null;
+    this.server_info = null;
+
   }
 
   async initialize(app) {
+
     await super.initialize(app);
-    console.log('initializing admin in saito.js');
+
+    this.main = new AdminMain(app, this);
+
   }
 
   async render() {
-    if (!document.querySelector('body')) {
-      console.error('No body');
-      return;
-    }
 
+/****
     console.log('Admin module rendering');
 
     let error = true;
@@ -36,75 +40,30 @@ class Admin extends ModTemplate {
     }
 
     if (error) {
-      document.getElementById('page-header').innerHTML = 'Warning!';
-      document.querySelector('.more-info').innerHTML =
-        'You need to enable SSL in order for the whole Javascript stack to work, though in the meantime you can do local development work.';
+      this.main.render();
+      this.main.updateHeader('Warning!');
+      this.main.updateInfo('You need to enable SSL in order for the whole Javascript stack to work, though in the meantime you can do local development work.');
       return;
     }
+****/
 
-    this.peerKey = document.getElementById('node-publickey').dataset['publickey'];
+    this.server_publickey = server_publickey;
+    this.main.render();
 
-    if (window.need_to_set_key) {
-      this.setAdminKey();
-    }
+
   }
 
-  /**
-   *  GUI for setting the administrator key on initial set up of node
-   */
-  setAdminKey() {
-    this.app.browser.addElementToDom(`
-      <hr>
-      <h2>Set Trusted Admin Key</h2>
-      <p>The node does not have an admin. Please enter the public key you will use to act as admin. Every browser that connects to the node will automatically generate one.</p>
-      <input type="text" id="admin-public-key" value="${this.publicKey}"/>
-      <button id="submit-button" type="submit">Submit and Download Backup</button>`);
 
-    document.getElementById('submit-button').onclick = async (e) => {
-      let publicKey = document.getElementById('admin-public-key')?.value;
 
-      console.log(publicKey);
-      if (!this.app.crypto.isValidPublicKey(publicKey)) {
-        salert('Not a valid Saito public key!');
-        return;
-      }
-
-      e.currentTarget.onclick = null;
-
-      let tx = await this.app.wallet.createUnsignedTransactionWithDefaultFee(this.peerKey);
-      tx.msg = {
-        module: 'Admin',
-        request: 'set-admin-key',
-        key: publicKey
-      };
-      await tx.sign();
-
-      this.app.network.sendTransactionWithCallback(tx, (res_tx) => {
-        let res = res_tx.returnMessage();
-        if (res?.err) {
-          salert(res.err);
-        } else {
-          this.app.wallet.backupWallet();
-          siteMessage('admin key successfully set, downloaded copy! reloading page...');
-          reloadWindow(3000);
-        }
-      });
-    };
-  }
-
-  /**
-   * Wait until connected to network to check admin credentials (to return the node info)
-   */
   async onPeerHandshakeComplete(app, peer) {
-    //
-    // we don't care about this if we aren't looking at the admin module
-    //
+
     if (!this.browser_active) {
       return;
     }
 
-    if (app.BROWSER && !window.need_to_set_key) {
-      let tx = await this.app.wallet.createUnsignedTransactionWithDefaultFee(this.peerKey);
+    if (app.BROWSER && !need_to_set_key) {
+
+      let tx = await this.app.wallet.createUnsignedTransactionWithDefaultFee(this.server_publickey);
       tx.msg = {
         module: 'Admin',
         request: 'validate-admin-key',
@@ -113,14 +72,12 @@ class Admin extends ModTemplate {
       await tx.sign();
 
       await this.app.network.sendTransactionWithCallback(tx, (res_tx) => {
-        console.log(res_tx);
         let res = res_tx.returnMessage();
-        console.log(res);
-        if (res?.err) {
+        if (this.res?.err) {
           salert(res.err);
         } else {
-          document.getElementById('page-header').innerHTML = 'Welcome Back, Saito Admin!';
-          this.renderConfig(res);
+	  this.server_info = res;
+	  this.main.render();
         }
       });
     }
@@ -130,35 +87,109 @@ class Admin extends ModTemplate {
    * Admin communicates to the node through off-chain transactions
    */
   async handlePeerTransaction(app, tx = null, peer, mycallback) {
+
     if (this.app.BROWSER) {
-      return;
+      return 0;
     }
 
     if (!tx.isTo(this.publicKey)) {
-      return;
+      return 0;
     }
 
+    let validated = true;
+
     if (app.options.admin?.length) {
-      let validated = false;
+      validated = false;
       for (let a of app.options.admin) {
         if (tx.isFrom(a)) {
           validated = true;
         }
       }
+    }
 
+    let txmsg = tx.returnMessage();
+
+    const accepted_requests = ['list-databases', 'list-database-tables', 'list-peers', 'run-sql-query', 'set-admin-key', 'validate-admin-key', 'update-options'];
+
+    if (accepted_requests.includes(txmsg.request)) {
       if (!validated) {
         console.error('Unauthorized access!');
         if (mycallback) {
           mycallback({ err: 'Unauthorized access' });
         }
-
-        return;
+        return 0;
       }
     }
 
-    let txmsg = tx.returnMessage();
+    if (txmsg.request == 'list-databases') {
+      console.log("=== MODULE DEBUG START ===");
+      for (let m of this.app.modules.mods || []) {
+        console.log("Module:", m.name);
+        console.log("Properties:", Object.keys(m));
+      }
+      console.log("=== MODULE DEBUG END ===");
+      const arr = [];
+      for (const m of this.app.modules.mods || []) {
+        if (m.db_tables && m.db_tables.length > 0) {
+          const dbname = m.dbname ? m.dbname : m.returnSlug();
+          arr.push(dbname);
+        }
+      }
+      const databasesArray = [...new Set(arr)];
+      if (mycallback) mycallback({ result: databasesArray });
+      return 1;
+    }
+
+    if (txmsg.request == 'list-database-tables') {
+      const db = txmsg.data?.db;
+      if (!db) {
+        if (mycallback) mycallback({ err: 'No database specified' });
+        return 1;
+      }
+      try {
+        const rows = await this.app.storage.queryDatabase("SELECT name FROM sqlite_master WHERE type='table'", [], db);
+        if (mycallback) mycallback({ result: rows });
+      } catch (err) {
+        if (mycallback) mycallback({ err: err.message });
+      }
+      return 1;
+    }
+
+    if (txmsg.request == 'run-sql-query') {
+      const db = txmsg.data?.db;
+      const query = txmsg.data?.query;
+      const params = txmsg.data?.params || [];
+      try {
+        const result = await this.app.storage.queryDatabase(query, params, db);
+        if (mycallback) mycallback({ result });
+      } catch (err) {
+        if (mycallback) mycallback({ err: err.message });
+      }
+      return 1;
+    }
+
+    if (txmsg.request === 'list-peers') {
+      try {
+        const peers = await this.app.network.getPeers();
+        const snapshot = peers.map((p) => {
+          const keys = Object.getOwnPropertyNames(Object.getPrototypeOf(p));
+          return {
+            publicKey: p.publicKey || p.public_key || null,
+            host: p.host || null,
+            port: p.port || null,
+            services: p.services || null,
+            rawKeys: keys
+          };
+        });
+        if (mycallback) mycallback({ result: snapshot });
+      } catch (err) {
+        if (mycallback) mycallback({ err: err.message });
+      }
+      return 1;
+    }
 
     if (txmsg.request == 'set-admin-key') {
+
       if (!this.app.options.admin) {
         this.app.options.admin = [];
       }
@@ -195,13 +226,14 @@ class Admin extends ModTemplate {
     return super.handlePeerTransaction(app, tx, peer, mycallback);
   }
 
+
   /**
    * Read config/options files from node directory and return summary to administrator
    */
   getOptions() {
+
     const path = this.app.storage.returnPath();
     const fs = this.app.storage.returnFileSystem();
-
     const node_info = {};
 
     if (fs && path) {
@@ -215,15 +247,13 @@ class Admin extends ModTemplate {
       }
 
       if (fs.existsSync(config_dir)) {
+        let mcf;
         try {
-          let mcf = fs.readFileSync(`${config_dir}/modules.config.js`, { encoding: 'UTF-8' });
 
-          ///////
-          // Process the file into parsable json
-          //
+          mcf = fs.readFileSync(`${config_dir}/modules.config.js`, { encoding: 'UTF-8' });
           // remove white space
-          // remove comments
           mcf = mcf.replace(/\s*\/\/.*/g, '');
+          // remove comments
           mcf = mcf.replace(/\s/g, '').replace(/'/g, `"`);
           // change quotation marks
           mcf = mcf.replace('core', `"core"`).replace('lite', `"lite"`);
@@ -232,7 +262,8 @@ class Admin extends ModTemplate {
           //cut out the wrapping
           mcf = mcf.substring(1, mcf.length - 1);
 
-          node_info.module_config = JSON.parse(mcf);
+          this.module_config = JSON.parse(mcf);
+
         } catch (err) {
           console.error(err);
           console.log(mcf);
@@ -242,7 +273,19 @@ class Admin extends ModTemplate {
       console.warn('no path or filesystem available');
     }
 
+    node_info.module_config = this.module_config;
     node_info.options = this.app.options;
+
+    node_info.databases = [];
+    for (let m of this.app.modules.mods) {
+      if (m.db_tables && m.db_tables.length > 0) {
+        node_info.databases.push({
+          module: m.name,
+          dbname: m.dbname ? m.dbname : m.returnSlug(),
+          tables: m.db_tables
+        });
+      }
+    }
 
     return node_info;
   }
@@ -268,115 +311,9 @@ class Admin extends ModTemplate {
     }
   }
 
-  renderConfig(config_obj) {
-    if (!document.getElementById('node-config')) {
-      this.app.browser.addElementToDom(ConfigTemplate(config_obj));
-    } else {
-      this.app.browser.replaceElementById(ConfigTemplate(config_obj), 'node-config');
-    }
-
-    if (config_obj?.options) {
-      try {
-        let el = document.getElementById('node-options');
-        let optjson = JSON.parse(
-          JSON.stringify(
-            config_obj.options,
-            (key, value) => (typeof value === 'bigint' ? value.toString() : value) // return everything else unchanged
-          )
-        );
-        var tree = jsonTree.create(optjson, el);
-      } catch (err) {
-        console.log('error creating jsonTree: ' + err);
-      }
-
-      // Inject button to toggle block production
-      let p_html = '';
-      if (config_obj.options.consensus.disable_block_production) {
-        p_html = `<button class="block-toggle" id="produce-blocks">Enable block production</button>`;
-      } else {
-        p_html = `<button class="block-toggle" id="stop-blocks">Disable block production</button>`;
-      }
-
-      if (document.querySelector('.block-toggle')) {
-        this.app.browser.replaceElementBySelector(p_html, '.block-toggle');
-      } else {
-        this.app.browser.addElementToSelector(p_html, '.node-info');
-      }
-
-      if (document.getElementById('produce-blocks')) {
-        document.getElementById('produce-blocks').onclick = (e) => {
-          e.currentTarget.remove();
-          this.toggleBlockProduction(false);
-        };
-      }
-
-      if (document.getElementById('stop-blocks')) {
-        document.getElementById('stop-blocks').onclick = (e) => {
-          e.currentTarget.remove();
-          this.toggleBlockProduction(true);
-        };
-      }
-    }
-
-    // Attach events
-
-    if (document.getElementById('modconfig-button')) {
-      Array.from(document.querySelectorAll('.mod-config-table input')).forEach((input) => {
-        input.onchange = (e) => {
-          document.getElementById('modconfig-button').removeAttribute('disabled');
-        };
-      });
-
-      document.getElementById('modconfig-button').onclick = async (e) => {
-        const inputs = document.querySelectorAll('.mod-config-table input');
-        let new_mod_config = { lite: [], core: [] };
-
-        Array.from(inputs).forEach((element) => {
-          if (element.checked) {
-            new_mod_config.lite.push(`${element.name}/${element.name}.js`);
-            new_mod_config.core.push(`${element.name}/${element.name}.js`);
-          }
-        });
-
-        console.log('New config: ');
-        console.log(new_mod_config);
-
-        let tx = await this.app.wallet.createUnsignedTransactionWithDefaultFee(this.peerKey);
-        tx.msg = {
-          module: 'Admin',
-          request: 'update-modules-config',
-          config: JSON.stringify(new_mod_config)
-        };
-        await tx.sign();
-
-        this.app.network.sendTransactionWithCallback(tx, (res_tx) => {
-          let res = res_tx.returnMessage();
-          if (res?.err) {
-            salert(res.err);
-          } else {
-            siteMessage('Modules updated');
-          }
-        });
-      };
-    }
-
-    if (document.getElementById('show-modules')) {
-      document.getElementById('show-modules').onclick = (e) => {
-        e.currentTarget.classList.toggle('toggled');
-        document.querySelector('.mod-config-table').classList.toggle('minimize');
-      };
-    }
-
-    if (document.getElementById('show-options')) {
-      document.getElementById('show-options').onclick = (e) => {
-        e.currentTarget.classList.toggle('toggled');
-        document.querySelector('.node-options').classList.toggle('minimize');
-      };
-    }
-  }
 
   async toggleBlockProduction(setValue) {
-    let tx = await this.app.wallet.createUnsignedTransactionWithDefaultFee(this.peerKey);
+    let tx = await this.app.wallet.createUnsignedTransactionWithDefaultFee(this.server_publickey);
     tx.msg = {
       module: 'Admin',
       request: 'update-options',
@@ -409,10 +346,9 @@ class Admin extends ModTemplate {
           this.app.options[a] = options[a];
         }
       } else {
-        console.error(`${a} does not exist in options`);
+	this.app.options[a] = options[a];
       }
     }
-
     this.app.storage.saveOptions();
     this.writeOptions(options);
   }
@@ -423,7 +359,7 @@ class Admin extends ModTemplate {
     if (fs && path) {
       const config_dir = path.normalize(`${__dirname}/../../config`);
       if (fs.existsSync(config_dir)) {
-        let optFile = fs.readFileSync(`${config_dir}/options.conf`, { encoding: 'UTF-8' });
+        let optFile = fs.readFileSync(`${config_dir}/options`, { encoding: 'UTF-8' });
 
         // Process the file into parsable json
         optFile = optFile.replace(/\s/g, '').replace(/'/g, `"`);
@@ -437,19 +373,23 @@ class Admin extends ModTemplate {
           }
         }
 
-        fs.writeFileSync(`${config_dir}/options.conf`, JSON.stringify(optFile, null, 2));
+        fs.writeFileSync(`${config_dir}/options`, JSON.stringify(optFile, null, 2));
       }
     }
   }
 
+
+
+
   webServer(app, expressapp, express, alternative_slug = null) {
+
     const webdir = `${__dirname}/web`;
     const uri = alternative_slug || '/' + encodeURI(this.returnSlug());
     const admin_self = this;
 
     const serverFn = async (req, res) => {
       let reqBaseURL = req.protocol + '://' + req.headers.host + '/';
-      let html = await AdminHome(app, admin_self, app.build_number);
+      let html = await AdminHome(app, admin_self, app.build_number, this.publicKey);
       if (!res.finished) {
         res.setHeader('Content-type', 'text/html');
         res.charset = 'UTF-8';
@@ -461,6 +401,23 @@ class Admin extends ModTemplate {
     expressapp.get(uri, serverFn);
     expressapp.use(uri, express.static(webdir));
   }
+
+
+  returnDefaultModules() {
+    return [
+      "admin",
+      "arcade",
+      "archive",
+      "blog",
+      "chat",
+      "chess",
+      "crypto",
+      "devtools",
+      "encrypt",
+      "disburse"
+    ];
+  }
+
 }
 
 module.exports = Admin;
