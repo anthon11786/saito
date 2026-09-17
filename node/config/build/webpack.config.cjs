@@ -21,6 +21,18 @@ webpack(
     },
     optimization: {
       minimize: minimize,
+      // webpack5 defaults this to false under mode: 'production' (always
+      // set below, dev builds included -- only minimize/devtool toggle on
+      // the "dev" arg). That means ANY compilation error anywhere in the
+      // default module set -- e.g. arcade/lib/ui/overlays/game-info.js
+      // importing league/lib/leaderboard, which isn't in this build's
+      // module list -- silently skips emitting output entirely: no
+      // saito.js, no error surfaced beyond the console dump below, no
+      // non-zero exit code. Confirmed by instrumenting compiler.hooks.emit/
+      // afterEmit directly: they never fired without this, and did once it
+      // was set. A single unrelated module's resolution error should never
+      // make the whole build silently produce nothing.
+      emitOnErrors: true,
       minimizer: [
         new TerserPlugin({
           parallel: true,
