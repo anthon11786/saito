@@ -1,9 +1,12 @@
 import type { Saito } from '../../lib/saito/app';
+import { returnOrCreatePeerConfig, type RelayPeer } from './lib/peer-config';
 
 const ModTemplate = require('../../lib/templates/modtemplate');
 const HomePage = require('./index');
 
 class RelayPwa extends ModTemplate {
+  peers: RelayPeer[];
+
   constructor(app: Saito) {
     super(app);
 
@@ -14,6 +17,13 @@ class RelayPwa extends ModTemplate {
     this.categories = 'Messaging Wallet Communications';
 
     this.styles = ['/relaypwa/style.css'];
+
+    this.peers = [];
+  }
+
+  async initialize(app: Saito) {
+    await super.initialize(app);
+    this.peers = returnOrCreatePeerConfig(app);
   }
 
   webServer(app: Saito, expressapp, express) {
