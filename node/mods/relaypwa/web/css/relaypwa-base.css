@@ -277,6 +277,12 @@
   border-radius: var(--saito-radius);
   background: var(--saito-card);
   border: 1px solid var(--saito-border);
+  cursor: pointer;
+  transition: background 0.16s ease;
+}
+
+.relaypwa-contact:hover {
+  background: var(--saito-accent);
 }
 
 .relaypwa-contact-avatar {
@@ -300,29 +306,135 @@
   flex-direction: row;
   align-items: center;
   gap: var(--saito-space-sm);
-}
-
-.relaypwa-send-form select.relaypwa-input {
-  width: auto;
-  flex: 0 0 auto;
-  max-width: 12rem;
+  margin-bottom: 0;
 }
 
 .relaypwa-message-input {
   flex: 1;
 }
 
+/* ------------------------------------------------------------
+   Conversation view (chat tab, contact selected)
+   ------------------------------------------------------------ */
+
+.relaypwa-conversation,
+.relaypwa-send-form-screen,
+.relaypwa-send-confirm {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: calc(100vh - 12rem);
+}
+
+.relaypwa-conversation-header {
+  display: flex;
+  align-items: center;
+  gap: var(--saito-space-sm);
+  padding-bottom: var(--saito-space-md);
+  margin-bottom: var(--saito-space-md);
+  border-bottom: 1px solid var(--saito-border);
+}
+
+.relaypwa-back {
+  background: none;
+  border: none;
+  color: var(--saito-foreground);
+  font-size: 2rem;
+  line-height: 1;
+  cursor: pointer;
+  padding: var(--saito-space-xs);
+}
+
+.relaypwa-conversation-name {
+  font-family: var(--saito-font-medium);
+  font-size: 1.7rem;
+}
+
+.relaypwa-message-list {
+  flex: 1;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: var(--saito-space-xs);
+  padding-bottom: var(--saito-space-md);
+}
+
+.relaypwa-message {
+  display: flex;
+}
+
+.relaypwa-message-mine {
+  justify-content: flex-end;
+}
+
+.relaypwa-message-theirs {
+  justify-content: flex-start;
+}
+
+.relaypwa-message-bubble {
+  max-width: 75%;
+  padding: var(--saito-space-sm) var(--saito-space-md);
+  border-radius: var(--saito-radius-lg);
+  font-size: 1.5rem;
+  line-height: 1.4;
+  word-break: break-word;
+}
+
+.relaypwa-message-mine .relaypwa-message-bubble {
+  background: var(--saito-primary);
+  color: var(--saito-primary-foreground);
+  border-bottom-right-radius: var(--saito-radius-sm);
+}
+
+.relaypwa-message-theirs .relaypwa-message-bubble {
+  background: var(--saito-card);
+  border: 1px solid var(--saito-border);
+  border-bottom-left-radius: var(--saito-radius-sm);
+}
+
+/* ------------------------------------------------------------
+   Send flow (wallet tab)
+   ------------------------------------------------------------ */
+
+.relaypwa-send-open {
+  width: 100%;
+  max-width: 40rem;
+  min-width: 0;
+}
+
+.relaypwa-confirm-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: var(--saito-space-md);
+  padding: var(--saito-space-sm) 0;
+  border-bottom: 1px solid var(--saito-border);
+  font-size: 1.5rem;
+}
+
+.relaypwa-confirm-row .relaypwa-pubkey {
+  margin: 0;
+  padding: 0;
+  border: none;
+  background: none;
+  text-align: right;
+  font-size: 1.3rem;
+  max-width: 60%;
+}
+
+.relaypwa-dust-warning {
+  background: color-mix(in srgb, var(--saito-destructive) 15%, transparent);
+  border: 1px solid var(--saito-destructive);
+  border-radius: var(--saito-radius);
+  color: var(--saito-foreground);
+  font-size: 1.4rem;
+  line-height: 1.5;
+  padding: var(--saito-space-md);
+  margin: var(--saito-space-md) 0;
+}
+
 @media screen and (max-width: 600px) {
   .relaypwa-onboarding-card {
     padding: var(--saito-space-xl) var(--saito-space-md);
-  }
-
-  .relaypwa-send-form {
-    flex-wrap: wrap;
-  }
-
-  .relaypwa-send-form select.relaypwa-input {
-    max-width: 100%;
-    flex: 1 1 100%;
   }
 }

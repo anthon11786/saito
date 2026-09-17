@@ -52,12 +52,30 @@ export interface GroupRecordStore {
   set(groupId: string, messages: StoredMessage[]): Promise<void>;
 }
 
-export async function saveGroupSnapshot(store: GroupRecordStore, group: RelayChatGroup): Promise<void> {
-  const existing = (await store.get(group.id)) ?? [];
-  const merged = mergeGroupSnapshot(existing, group.txs);
-  await store.set(group.id, merged);
+/**
+ * Storage is keyed by the OTHER member's public key, not chat.js's own
+ * group.id. Relay's UI is contact-centric (a conversation is "with
+ * Alice"), and a contact only ever knows the other person's public key --
+ * never chat.js's internal group id, which is assigned however chat.js
+ * assigns it and isn't otherwise exposed. Only defined for genuine 1:1
+ * conversations (exactly two members): Relay's MVP scope explicitly
+ * excludes group chat, and there's no single "other member" to key by
+ * once a group has more than one.
+ */
+export function resolveContactKey(group: RelayChatGroup, ownPublicKey: string): string | null {
+  if (group.members.length !== 2) {
+    return null;
+  }
+  const other = group.members.find((publicKey) => publicKey !== ownPublicKey);
+  return other ?? null;
 }
 
-export async function getGroupMessages(store: GroupRecordStore, groupId: string): Promise<StoredMessage[]> {
-  return (await store.get(groupId)) ?? [];
+export async function saveGroupSnapshot(store: GroupRecordStore, key: string, txs: StoredMessage[]): Promise<void> {
+  const existing = (await store.get(key)) ?? [];
+  const merged = mergeGroupSnapshot(existing, txs);
+  await store.set(key, merged);
+}
+
+export async function getGroupMessages(store: GroupRecordStore, key: string): Promise<StoredMessage[]> {
+  return (await store.get(key)) ?? [];
 }

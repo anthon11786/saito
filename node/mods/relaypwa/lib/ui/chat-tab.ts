@@ -2,17 +2,11 @@ import { escapeHtml } from './onboarding-screen';
 import type { RelayContact } from '../contacts';
 
 /**
- * Contacts + a send form. Deliberately doesn't render conversation history
- * yet: message-store.ts keys stored history by chat.js's own group.id, and
- * resolving "this contact's public key" -> "their group.id" needs the
- * group.members list chat.js hands over on 'chat-popup-render-request' --
- * real plumbing, but scoped out of this pass rather than rushed.
+ * The contact list -- clicking a contact (wired in relaypwa.ts) opens
+ * lib/ui/conversation.ts's per-contact thread view, where messages are
+ * actually sent from. This view is just contacts + adding one.
  */
 export function renderChatTab(contacts: RelayContact[]): string {
-  const contactOptions = contacts
-    .map((c) => `<option value="${escapeHtml(c.publicKey)}">${escapeHtml(c.identifier)}</option>`)
-    .join('');
-
   const contactItems = contacts
     .map(
       (c) => `
@@ -37,16 +31,7 @@ export function renderChatTab(contacts: RelayContact[]): string {
 
       ${
         contacts.length > 0
-          ? `
-      <ul class="relaypwa-contact-list">${contactItems}</ul>
-
-      <form id="relaypwa-send-message-form" class="relaypwa-form relaypwa-send-form">
-        <select id="relaypwa-send-to" class="relaypwa-input">${contactOptions}</select>
-        <input type="text" id="relaypwa-message-text" class="relaypwa-input relaypwa-message-input" placeholder="Message" />
-        <button type="submit" class="saito-button-primary">Send</button>
-      </form>
-      <div id="relaypwa-send-error" class="relaypwa-error" hidden></div>
-      `
+          ? `<ul class="relaypwa-contact-list">${contactItems}</ul>`
           : `<p class="relaypwa-empty-state">Add a contact to start chatting.</p>`
       }
     </div>

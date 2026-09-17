@@ -2,6 +2,7 @@ import {
   mergeGroupSnapshot,
   saveGroupSnapshot,
   getGroupMessages,
+  resolveContactKey,
   type StoredMessage,
   type GroupRecordStore
 } from '../../../mods/relaypwa/lib/message-store';
@@ -45,15 +46,37 @@ describe('saveGroupSnapshot / getGroupMessages', () => {
   it('round-trips through a store, merging on repeated saves', async () => {
     const store = makeFakeStore();
 
-    await saveGroupSnapshot(store, { id: 'group1', members: ['a', 'b'], txs: [m1] });
-    expect(await getGroupMessages(store, 'group1')).toEqual([m1]);
+    await saveGroupSnapshot(store, 'contact-b', [m1]);
+    expect(await getGroupMessages(store, 'contact-b')).toEqual([m1]);
 
-    await saveGroupSnapshot(store, { id: 'group1', members: ['a', 'b'], txs: [m2] });
-    expect(await getGroupMessages(store, 'group1')).toEqual([m1, m2]);
+    await saveGroupSnapshot(store, 'contact-b', [m2]);
+    expect(await getGroupMessages(store, 'contact-b')).toEqual([m1, m2]);
   });
 
-  it('returns an empty array for a group that was never saved', async () => {
+  it('returns an empty array for a key that was never saved', async () => {
     const store = makeFakeStore();
-    expect(await getGroupMessages(store, 'nonexistent-group')).toEqual([]);
+    expect(await getGroupMessages(store, 'nonexistent-contact')).toEqual([]);
+  });
+});
+
+describe('resolveContactKey', () => {
+  it('returns the other member of a genuine 1:1 conversation', () => {
+    const group = { id: 'group1', members: ['me', 'alice'], txs: [] };
+    expect(resolveContactKey(group, 'me')).toBe('alice');
+  });
+
+  it('works regardless of member order', () => {
+    const group = { id: 'group1', members: ['alice', 'me'], txs: [] };
+    expect(resolveContactKey(group, 'me')).toBe('alice');
+  });
+
+  it('returns null for a group chat (more than two members)', () => {
+    const group = { id: 'group1', members: ['me', 'alice', 'bob'], txs: [] };
+    expect(resolveContactKey(group, 'me')).toBeNull();
+  });
+
+  it('returns null for a group of one (e.g. a self-only or malformed group)', () => {
+    const group = { id: 'group1', members: ['me'], txs: [] };
+    expect(resolveContactKey(group, 'me')).toBeNull();
   });
 });
