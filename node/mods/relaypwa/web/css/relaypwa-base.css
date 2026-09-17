@@ -233,6 +233,71 @@
   margin-bottom: var(--saito-space-md);
 }
 
+.relaypwa-history {
+  width: 100%;
+  max-width: 40rem;
+}
+
+.relaypwa-history-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--saito-space-xs);
+}
+
+.relaypwa-history-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--saito-space-md);
+  padding: var(--saito-space-sm) var(--saito-space-md);
+  border-radius: var(--saito-radius);
+  background: var(--saito-card);
+  border: 1px solid var(--saito-border);
+}
+
+.relaypwa-history-main {
+  display: flex;
+  align-items: center;
+  gap: var(--saito-space-sm);
+  min-width: 0;
+}
+
+.relaypwa-history-counterparty {
+  font-family: var(--saito-font-monospace);
+  font-size: 1.3rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.relaypwa-history-pending {
+  flex-shrink: 0;
+  font-size: 1.1rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--saito-muted-foreground);
+  background: var(--saito-muted);
+  border-radius: var(--saito-radius-sm);
+  padding: 0.1rem 0.5rem;
+}
+
+.relaypwa-history-amount {
+  font-family: var(--saito-font-medium);
+  font-size: 1.4rem;
+  white-space: nowrap;
+}
+
+.relaypwa-history-sent {
+  color: var(--saito-foreground);
+}
+
+.relaypwa-history-received {
+  color: var(--saito-success, var(--saito-primary));
+}
+
 /* ------------------------------------------------------------
    Chat tab
    ------------------------------------------------------------ */

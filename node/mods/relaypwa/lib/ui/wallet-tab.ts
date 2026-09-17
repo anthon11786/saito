@@ -3,6 +3,7 @@ import { escapeHtml } from './onboarding-screen';
 export interface WalletTabData {
   publicKey: string;
   balanceDisplay: string; // already converted to SAITO by the caller (app.wallet.convertNolanToSaito)
+  historyHtml: string; // pre-rendered by renderTransactionHistory() -- kept as a template here rather than data, since history.ts already knows how to lay out a row
 }
 
 export function renderWalletTab(data: WalletTabData): string {
@@ -19,6 +20,11 @@ export function renderWalletTab(data: WalletTabData): string {
         <div class="relaypwa-label">Your address</div>
         <div class="relaypwa-pubkey">${escapeHtml(data.publicKey)}</div>
         <button type="button" id="relaypwa-copy-pubkey-wallet" class="saito-button-secondary">Copy</button>
+      </div>
+
+      <div class="relaypwa-history">
+        <div class="relaypwa-label">Transaction history</div>
+        ${data.historyHtml}
       </div>
     </div>
   `;

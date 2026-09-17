@@ -92,6 +92,14 @@ export async function sendFromPreview(app: any, preview: SendPreview): Promise<T
     tx.addToSlip(changeSlip);
   }
 
+  // Transaction.sign() calls packData() internally, which serializes
+  // tx.msg into tx.data (confirmed in saito-js/lib/transaction.js) -- so
+  // tagging just needs to happen before sign(), nothing further. The tag
+  // is what lets onConfirmation dispatch reach a module at all (core only
+  // fires it for a module whose .name matches tx.msg.module -- confirmed
+  // in lib/saito/modules.ts's shouldAffixCallbackToModule dispatch), which
+  // relaypwa.ts's transaction-history recording depends on.
+  tx.msg = { module: 'RelayPWA', request: 'payment' };
   tx.timestamp = Date.now();
   await tx.sign();
 

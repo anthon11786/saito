@@ -5,6 +5,7 @@ import { renderSendConfirm } from '../../../mods/relaypwa/lib/ui/send-confirm';
 import { renderChatTab } from '../../../mods/relaypwa/lib/ui/chat-tab';
 import { renderCallsTab } from '../../../mods/relaypwa/lib/ui/calls-tab';
 import { renderConversation } from '../../../mods/relaypwa/lib/ui/conversation';
+import { renderTransactionHistory } from '../../../mods/relaypwa/lib/ui/history';
 
 describe('escapeHtml', () => {
   it('escapes all five HTML-significant characters', () => {
@@ -44,15 +45,24 @@ describe('renderShell', () => {
 
 describe('renderWalletTab', () => {
   it('shows the balance and public key', () => {
-    const html = renderWalletTab({ publicKey: 'myPubKey', balanceDisplay: '12.5' });
+    const html = renderWalletTab({ publicKey: 'myPubKey', balanceDisplay: '12.5', historyHtml: '' });
     expect(html).toContain('myPubKey');
     expect(html).toContain('12.5');
     expect(html).toContain('SAITO');
   });
 
   it('includes a send button', () => {
-    const html = renderWalletTab({ publicKey: 'myPubKey', balanceDisplay: '0' });
+    const html = renderWalletTab({ publicKey: 'myPubKey', balanceDisplay: '0', historyHtml: '' });
     expect(html).toContain('id="relaypwa-send-open"');
+  });
+
+  it('embeds the pre-rendered history HTML', () => {
+    const html = renderWalletTab({
+      publicKey: 'myPubKey',
+      balanceDisplay: '0',
+      historyHtml: '<div class="marker-from-history">hi</div>'
+    });
+    expect(html).toContain('marker-from-history');
   });
 });
 
@@ -174,5 +184,64 @@ describe('renderConversation', () => {
 describe('renderCallsTab', () => {
   it('renders a coming-soon placeholder', () => {
     expect(renderCallsTab()).toContain('coming soon');
+  });
+});
+
+describe('renderTransactionHistory', () => {
+  it('shows an empty state when there are no transactions', () => {
+    const html = renderTransactionHistory([]);
+    expect(html).toContain('No transactions yet');
+  });
+
+  it('shows a minus-prefixed amount for a sent transaction', () => {
+    const html = renderTransactionHistory([
+      { signature: 'sig1', direction: 'sent', counterparty: 'bob-pubkey', amountDisplay: '5', confirmed: true }
+    ]);
+    expect(html).toMatch(/-5/);
+    expect(html).toContain('bob-pubkey');
+  });
+
+  it('shows a plus-prefixed amount for a received transaction', () => {
+    const html = renderTransactionHistory([
+      { signature: 'sig1', direction: 'received', counterparty: 'bob-pubkey', amountDisplay: '5', confirmed: true }
+    ]);
+    expect(html).toMatch(/\+5/);
+  });
+
+  it('shows a pending badge for an unconfirmed transaction', () => {
+    const html = renderTransactionHistory([
+      { signature: 'sig1', direction: 'sent', counterparty: 'bob-pubkey', amountDisplay: '5', confirmed: false }
+    ]);
+    expect(html).toContain('relaypwa-history-pending');
+    expect(html).toContain('Pending');
+  });
+
+  it('does not show a pending badge for a confirmed transaction', () => {
+    const html = renderTransactionHistory([
+      { signature: 'sig1', direction: 'sent', counterparty: 'bob-pubkey', amountDisplay: '5', confirmed: true }
+    ]);
+    expect(html).not.toContain('relaypwa-history-pending');
+  });
+
+  it('truncates a long counterparty key', () => {
+    const longKey = 'a'.repeat(44);
+    const html = renderTransactionHistory([
+      { signature: 'sig1', direction: 'sent', counterparty: longKey, amountDisplay: '5', confirmed: true }
+    ]);
+    expect(html).not.toContain(longKey);
+    expect(html).toContain('…');
+  });
+
+  it('escapes a hostile counterparty key', () => {
+    const html = renderTransactionHistory([
+      {
+        signature: 'sig1',
+        direction: 'sent',
+        counterparty: '<script>alert(1)</script>',
+        amountDisplay: '5',
+        confirmed: true
+      }
+    ]);
+    expect(html).not.toContain('<script>alert(1)</script>');
   });
 });

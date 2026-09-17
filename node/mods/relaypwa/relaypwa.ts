@@ -8,6 +8,14 @@ import {
   type RelayChatGroup
 } from './lib/message-store';
 import { IndexedDbGroupStore } from './lib/indexeddb-store';
+import { IndexedDbTransactionHistoryStore } from './lib/indexeddb-tx-history-store';
+import {
+  upsertTransaction,
+  markConfirmed,
+  listTransactions,
+  sumSlipsToKey,
+  type TransactionHistoryStore
+} from './lib/transaction-history';
 import { hasCompletedOnboarding, markOnboardingComplete, importWalletKey } from './lib/onboarding';
 import { addContact, listContacts, InvalidPublicKeyError } from './lib/contacts';
 import { sendRelayChatMessage } from './lib/send-chat-message';
@@ -16,6 +24,7 @@ import { renderOnboardingScreen } from './lib/ui/onboarding-screen';
 import { renderShell, type RelayTab } from './lib/ui/shell';
 import { renderWalletTab, renderSendForm } from './lib/ui/wallet-tab';
 import { renderSendConfirm } from './lib/ui/send-confirm';
+import { renderTransactionHistory } from './lib/ui/history';
 import { renderChatTab } from './lib/ui/chat-tab';
 import { renderConversation } from './lib/ui/conversation';
 import { renderCallsTab } from './lib/ui/calls-tab';
@@ -39,6 +48,7 @@ type WalletView = 'default' | 'send-form' | 'send-confirm';
 class RelayPwa extends ModTemplate {
   peers: RelayPeer[];
   messageStore: GroupRecordStore | null;
+  historyStore: TransactionHistoryStore | null;
   activeTab: RelayTab;
   selectedContactKey: string | null;
   walletView: WalletView;
@@ -67,6 +77,7 @@ class RelayPwa extends ModTemplate {
 
     this.peers = [];
     this.messageStore = null;
+    this.historyStore = null;
     this.activeTab = 'chat';
     this.selectedContactKey = null;
     this.walletView = 'default';
@@ -79,6 +90,7 @@ class RelayPwa extends ModTemplate {
 
     if (app.BROWSER) {
       this.messageStore = new IndexedDbGroupStore();
+      this.historyStore = new IndexedDbTransactionHistoryStore();
 
       app.connection.on('chat-popup-render-request', async (group: RelayChatGroup) => {
         if (!this.messageStore) {
@@ -103,6 +115,76 @@ class RelayPwa extends ModTemplate {
           console.error('Relay: failed to persist chat history for group', group?.id, err);
         }
       });
+    }
+  }
+
+  /**
+   * Core only fires onConfirmation automatically for the module named in
+   * tx.msg.module -- which covers our own Relay-tagged payments -- but the
+   * wallet balance shown in the wallet tab isn't just Relay payments, it's
+   * every UTXO this key controls. Without this override, a payment sent to
+   * us from outside Relay (another wallet, another module) would move the
+   * balance but never appear in the history list. Subscribing to anything
+   * that is From or To our own key keeps history in sync with what the
+   * balance actually reflects.
+   */
+  shouldAffixCallbackToModule(modname: string, tx?: any): number {
+    if (modname === this.name) {
+      return 1;
+    }
+    if (tx && (tx.isFrom(this.publicKey) || tx.isTo(this.publicKey))) {
+      return 1;
+    }
+    return 0;
+  }
+
+  /**
+   * Only acts on a transaction's first confirmation -- upsertTransaction/
+   * markConfirmed are idempotent (keyed by signature), so re-running on
+   * every subsequent confirmation would just be wasted IndexedDB writes.
+   *
+   * A tx we sent (isFrom our key): the pending record was already written
+   * with the real amount at send time (see the wallet send-confirm handler
+   * below) since that's known from the SendPreview -- this just flips it to
+   * confirmed.
+   *
+   * A tx we received (isTo our key, not from us): there is no earlier
+   * pending record, since receipt is only ever discovered here. The amount
+   * that's ours is only the slips addressed to us -- not the sender's
+   * change -- hence sumSlipsToKey rather than the transaction's full value.
+   */
+  async onConfirmation(blk: any, tx: any, confnum: number) {
+    if (confnum !== 1 || !this.historyStore) {
+      return;
+    }
+
+    try {
+      if (tx.isFrom(this.publicKey)) {
+        await markConfirmed(this.historyStore, tx.signature);
+        return;
+      }
+
+      if (tx.isTo(this.publicKey)) {
+        const toSlips = tx.to.map((s: any) => s.toJson());
+        const amount = sumSlipsToKey(
+          toSlips.map((s: any) => ({ publicKey: s.publicKey, amount: BigInt(s.amount) })),
+          this.publicKey
+        );
+        if (amount <= BigInt(0)) {
+          return;
+        }
+        const fromSlips = tx.from.map((s: any) => s.toJson());
+        await upsertTransaction(this.historyStore, {
+          signature: tx.signature,
+          timestamp: tx.timestamp,
+          direction: 'received',
+          counterparty: fromSlips[0]?.publicKey ?? '',
+          amount,
+          confirmed: true
+        });
+      }
+    } catch (err) {
+      console.error('Relay: failed to record transaction history', err);
     }
   }
 
@@ -320,7 +402,21 @@ class RelayPwa extends ModTemplate {
       content.querySelector('#relaypwa-send-confirm')?.addEventListener('click', async () => {
         const errorBox = content.querySelector<HTMLElement>('#relaypwa-send-confirm-error');
         try {
-          await sendFromPreview(app, preview);
+          const tx = await sendFromPreview(app, preview);
+          if (this.historyStore) {
+            // Recorded as pending here -- the amount is already known from
+            // the preview, no need to wait for onConfirmation. It flips to
+            // confirmed there once the transaction's first confirmation
+            // fires (see onConfirmation above).
+            await upsertTransaction(this.historyStore, {
+              signature: tx.signature,
+              timestamp: tx.timestamp,
+              direction: 'sent',
+              counterparty: preview.recipientPublicKey,
+              amount: preview.amount,
+              confirmed: false
+            });
+          }
           this.sendPreview = null;
           this.walletView = 'default';
           this.renderActiveTab(app, root);
@@ -337,9 +433,20 @@ class RelayPwa extends ModTemplate {
     // default
     const publicKey = await app.wallet.getPublicKey();
     const balance = await app.wallet.getBalance('SAITO');
+    const history = this.historyStore ? await listTransactions(this.historyStore) : [];
+    const historyHtml = renderTransactionHistory(
+      history.map((record) => ({
+        signature: record.signature,
+        direction: record.direction,
+        counterparty: record.counterparty,
+        amountDisplay: app.wallet.convertNolanToSaito(record.amount),
+        confirmed: record.confirmed
+      }))
+    );
     content.innerHTML = renderWalletTab({
       publicKey,
-      balanceDisplay: app.wallet.convertNolanToSaito(balance)
+      balanceDisplay: app.wallet.convertNolanToSaito(balance),
+      historyHtml
     });
     content.querySelector('#relaypwa-copy-pubkey-wallet')?.addEventListener('click', () => {
       navigator.clipboard?.writeText(publicKey).catch(() => {});
