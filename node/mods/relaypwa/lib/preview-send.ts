@@ -1,3 +1,5 @@
+import Slip from 'saito-js/lib/slip';
+import Transaction from 'saito-js/lib/transaction';
 import { selectCoinsForSend, type SpendableSlip, type CoinSelectionResult } from './coin-selection';
 import { InvalidPublicKeyError } from './contacts';
 
@@ -47,28 +49,53 @@ export async function previewSend(
 }
 
 /**
- * NOT YET IMPLEMENTED: building, signing and broadcasting the actual
- * transaction from a SendPreview's chosen inputs.
+ * Builds, signs and broadcasts the transaction planned by previewSend().
  *
- * What's verified so far (standalone, offline, against the real
- * saito-wasm/saito-js packages): Slip.fromUtxoKey(existingUtxokey)
- * correctly reconstructs a spendable input slip byte-for-byte (checked
- * against the Rust core's own get_utxoset_key() byte layout in
- * rust/saito-core/src/core/consensus/slip.rs), and a new output Slip only
- * needs publicKey + amount set.
+ * Verified inside a real, fully-initialized app (not a standalone script --
+ * Transaction.sign() needs S.getInstance().factory, which only exists after
+ * the real saito-js bootstrap that app.ts's constructor performs): booted a
+ * genuine local node via the same sequence scripts/cli.ts uses, and
+ * constructed + signed a real transaction from a Slip.fromUtxoKey() input
+ * end to end. That run surfaced a real use-after-free gotcha this function
+ * is written to avoid: addFromSlip(slip) frees the underlying wasm slip
+ * object, so reading any of its fields afterward throws "null pointer
+ * passed to rust". Every value this function needs from an input slip
+ * (its amount, via SpendableSlip -- already plain data from
+ * coin-selection.ts, never re-read off a Slip instance) is captured before
+ * that slip is ever handed to addFromSlip.
  *
- * What's NOT verified: Transaction.sign() and anything reading
- * tx.from/tx.to require a fully initialized S.getInstance().factory,
- * which only exists after the real app bootstrap
- * (saito-js/index.node.js's initialize(), called from app.ts's
- * constructor with live network config) -- not something a standalone
- * script in this sandbox can safely replicate. This is money-moving
- * code; shipping a sign/broadcast path I couldn't actually exercise
- * end-to-end felt like the wrong tradeoff versus shipping the tested
- * planning half and leaving this as an explicit gap.
+ * Does not itself decide what to do about preview.dustWarning -- by the
+ * time a preview reaches here the caller has already decided to proceed
+ * (see previewSend()'s docs on why that's a UI decision, not this
+ * plumbing's).
  */
-export async function sendFromPreview(_app: any, _preview: SendPreview): Promise<never> {
-  throw new Error(
-    'Relay: sendFromPreview is not implemented yet -- verify the sign/broadcast path inside a running app first'
-  );
+export async function sendFromPreview(app: any, preview: SendPreview): Promise<Transaction> {
+  const tx = new Transaction();
+
+  for (const input of preview.inputs) {
+    const fromSlip = Slip.fromUtxoKey(input.utxokey);
+    if (!fromSlip) {
+      throw new Error(`Relay: could not reconstruct slip from utxokey ${input.utxokey}`);
+    }
+    tx.addFromSlip(fromSlip);
+  }
+
+  const toSlip = new Slip();
+  toSlip.publicKey = preview.recipientPublicKey;
+  toSlip.amount = preview.amount;
+  tx.addToSlip(toSlip);
+
+  if (preview.changeAmount > BigInt(0)) {
+    const changeSlip = new Slip();
+    changeSlip.publicKey = await app.wallet.getPublicKey();
+    changeSlip.amount = preview.changeAmount;
+    tx.addToSlip(changeSlip);
+  }
+
+  tx.timestamp = Date.now();
+  await tx.sign();
+
+  await app.network.sendTransactionWithCallback(tx);
+
+  return tx;
 }
