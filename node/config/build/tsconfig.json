@@ -22,5 +22,5 @@
     "../../dist/bundler",
     "../../lib/saito/ui/**/*"
   ],
-  "include": ["../../lib/**/*.ts", "../../scripts/start.ts"]
+  "include": ["../../lib/**/*.ts", "../../scripts/start.ts", "../../mods/relaypwa/**/*.ts"]
 }
