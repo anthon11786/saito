@@ -1,11 +1,14 @@
 import type { Saito } from '../../lib/saito/app';
 import { returnOrCreatePeerConfig, type RelayPeer } from './lib/peer-config';
+import { saveGroupSnapshot, type GroupRecordStore, type RelayChatGroup } from './lib/message-store';
+import { IndexedDbGroupStore } from './lib/indexeddb-store';
 
 const ModTemplate = require('../../lib/templates/modtemplate');
 const HomePage = require('./index');
 
 class RelayPwa extends ModTemplate {
   peers: RelayPeer[];
+  messageStore: GroupRecordStore | null;
 
   constructor(app: Saito) {
     super(app);
@@ -19,11 +22,25 @@ class RelayPwa extends ModTemplate {
     this.styles = ['/relaypwa/style.css'];
 
     this.peers = [];
+    this.messageStore = null;
   }
 
   async initialize(app: Saito) {
     await super.initialize(app);
     this.peers = returnOrCreatePeerConfig(app);
+
+    if (app.BROWSER) {
+      this.messageStore = new IndexedDbGroupStore();
+
+      app.connection.on('chat-popup-render-request', (group: RelayChatGroup) => {
+        if (!this.messageStore) {
+          return;
+        }
+        saveGroupSnapshot(this.messageStore, group).catch((err) => {
+          console.error('Relay: failed to persist chat history for group', group?.id, err);
+        });
+      });
+    }
   }
 
   webServer(app: Saito, expressapp, express) {
