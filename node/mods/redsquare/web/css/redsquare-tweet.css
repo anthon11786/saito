@@ -1,421 +1,531 @@
-.tweet.has-reply {
+/* Namespace: .tweet — internal layout + hierarchy */
+
+.tweet {
+  position: relative;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  column-gap: var(--saito-space-md);
+  align-items: start;
+  padding: var(--saito-space-md);
+  border-bottom: 1px solid var(--saito-border);
+  cursor: pointer;
+}
+
+/* Connector continues into the next tweet — no divider between them. */
+.tweet.chain-next {
   border-bottom: none;
 }
 
-.tweet.has-reply::after,
-.tweet.has-reply-disconnected:not(.highlight-tweet)::after {
+.tweet.slot {
+  padding-top: 0;
+  cursor: inherit;
+}
+
+.tweet .avatar {
+  align-self: start;
+  z-index: 1;
+}
+
+/* Thread connector — centered on the avatar column */
+.tweet .chain {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: var(--saito-space-md);
+  width: 3.5rem;
+  pointer-events: none;
+}
+
+.tweet .chain::before,
+.tweet .chain::after {
   content: '';
   position: absolute;
-  width: 0rem;
-  height: 100%;
-  top: 5.5rem;
-  left: 3.9rem;
-  z-index: 3;
-  border-left: 2px dashed #718695;
+  left: 50%;
+  width: 2px;
+  transform: translateX(-50%);
+  background: var(--saito-border);
+  opacity: 0;
 }
 
-.tweet.highlight-tweet {
-  background-color: var(--saito-highlight);
+.tweet.chain-prev .chain::before {
+  top: 0;
+  bottom: calc(100% - var(--saito-space-md));
+  opacity: 1;
 }
 
-.tweet.highlight-tweet:hover {
-  background-color: var(--saito-highlight-heavy);
+.tweet.chain-next .chain::after {
+  top: calc(var(--saito-space-md) + 3.5rem);
+  bottom: 0;
+  opacity: 1;
 }
 
-/* Parallel Replies */
-.tweet.highlight-tweet:has(+ .is-reply) {
-  border-bottom-width: 2px;
+.tweet .content {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  min-width: 0;
 }
 
-.tweet:not(.is-reply):has(+ .is-reply):after {
-  content: '';
-  position: absolute;
-  width: 2rem;
-  height: calc(100% - 3rem);
-  top: 3rem;
-  left: 3.9rem;
-  z-index: 3;
-  border-left: 2px dotted #718695;
-}
-
-.tweet.is-reply {
-  padding: 1.2rem;
-  margin-left: 4rem;
-}
-
-.tweet.is-reply::before {
-  content: '';
-  position: absolute;
-  width: 2rem;
-  height: 3.25rem;
-  top: -0.25rem;
-  left: -1px;
-  z-index: 3;
-  border-left: 2px dotted #718695;
-  border-bottom: 2px dotted #718695;
-}
-
-.tweet.is-reply:has(+ .is-reply)::after {
-  content: '';
-  position: absolute;
-  width: 2rem;
-  height: calc(100% - 3rem);
-  left: -1px;
-  top: 3rem;
-  z-index: 3;
-  border-left: 2px dotted #718695;
-}
-
-.tweet.is-reply .tweet-avatar {
-  width: 4rem;
-  height: 4rem;
-}
-
-.tweet-text {
-  padding: 0.5rem 0;
-  font-size: 1.5rem;
-  line-height: 2rem;
-  min-height: 2rem;
-  max-height: 19rem;
-  max-width: 100%;
-  margin-bottom: 1rem;
-  transition: max-height 0.2s ease;
+/* Identity — compact is one scan line; expanded is a two-row identity block */
+.tweet .header {
+  display: flex;
+  align-items: baseline;
+  min-width: 0;
+  width: 100%;
+  min-height: 0;
+  padding: 0;
+  line-height: 1.2;
   overflow: hidden;
+}
+
+.tweet .header.compact {
+  gap: var(--saito-space-xs);
+}
+
+/*
+ * Detail identity owns its own grid:
+ *   [ Username .............. Timestamp ]
+ *   [ Public key                        ]
+ * Time is a grid cell on row 1 — not a flex sibling that can wrap under content.
+ */
+.tweet .header.expanded {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-rows: auto auto;
+  column-gap: var(--saito-space-sm);
+  row-gap: 0;
+  align-items: baseline;
+}
+
+.tweet .header.compose {
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--saito-space-xs);
+}
+
+.tweet .primary {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--saito-font-medium);
+}
+
+.tweet .header.expanded .primary {
+  grid-column: 1;
+  grid-row: 1;
+  min-width: 0;
+}
+
+.tweet .handle {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--saito-muted-foreground);
+}
+
+.tweet .header.expanded .handle {
+  grid-column: 1 / -1;
+  grid-row: 2;
+  font-family: var(--saito-font);
+  font-weight: normal;
+  line-height: 1.2;
+}
+
+.tweet .header.compose .primary,
+.tweet .header.compose .secondary {
+  flex: none;
+  max-width: 100%;
+}
+
+.tweet .header.compose .secondary {
+  color: var(--saito-muted-foreground);
+}
+
+.tweet .sep,
+.tweet .time {
+  flex: 0 0 auto;
+  white-space: nowrap;
+  color: var(--saito-muted-foreground);
+}
+
+.tweet .header.expanded .time {
+  grid-column: 2;
+  grid-row: 1;
+  justify-self: end;
+}
+
+/* Body starts immediately under the identity block */
+.tweet .header + .body {
+  margin-top: var(--saito-space-xs);
+}
+
+.tweet .body {
+  overflow-wrap: anywhere;
+  white-space: normal;
+  line-height: 1.5;
+}
+
+.tweet .header + .gallery,
+.tweet .header + .embed,
+.tweet .header + .link-preview,
+.tweet .header + .youtube-embed,
+.tweet .body + .gallery,
+.tweet .body + .embed,
+.tweet .body + .link-preview,
+.tweet .body + .youtube-embed,
+.tweet .gallery + .embed,
+.tweet .gallery + .link-preview,
+.tweet .gallery + .youtube-embed,
+.tweet .youtube-embed + .embed,
+.tweet .link-preview + .embed {
+  margin-top: var(--saito-space-sm);
+}
+
+.tweet .youtube-embed {
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  border: 0;
+  border-radius: var(--saito-radius);
+}
+
+.tweet .link-preview {
+  min-width: 0;
+}
+
+.tweet .footer {
+  margin-top: var(--saito-space-sm);
+}
+
+/* Compact Markdown hierarchy for published tweet content. */
+.tweet .body :is(h1, h2, h3, h4, h5, h6) {
+  margin: 0;
+  font-family: var(--saito-font-medium);
+  font-weight: normal;
+  line-height: 1.25;
+}
+
+.tweet .body h1 {
+  font-size: 1.5em;
+}
+
+.tweet .body h2 {
+  font-size: 1.35em;
+}
+
+.tweet .body h3 {
+  font-size: 1.2em;
+}
+
+.tweet .body :is(h4, h5, h6) {
+  font-size: 1em;
+}
+
+.tweet .body :is(strong, b) {
+  font-family: var(--saito-font-medium);
+  font-weight: normal;
+}
+
+.tweet .body :is(p, blockquote, pre, ul, ol, table, hr) {
+  margin: 0;
+}
+
+/*
+ * Paragraph gaps: the margin:0 reset above out-specifies `.tweet .body > * + *`,
+ * so adjacent <p>s got no spacing. Explicit p + p (same pattern as notifications).
+ * Single-newline <br> lines stay inside one <p> and are unaffected.
+ */
+.tweet .body p + p {
+  margin-top: var(--saito-space-md);
+}
+
+.tweet .body > * + * {
+  margin-top: var(--saito-space-sm);
+}
+
+.tweet .body > * + :is(h1, h2, h3, h4, h5, h6) {
+  margin-top: var(--saito-space-md);
+}
+
+.tweet .body > :is(h1, h2, h3, h4, h5, h6) + * {
+  margin-top: var(--saito-space-xs);
+}
+
+.tweet .body blockquote {
+  padding-left: var(--saito-space-sm);
+  border-left: 2px solid var(--saito-border);
+  color: var(--saito-muted-foreground);
+}
+
+.tweet .body :is(ul, ol) {
+  padding-left: 1.4em;
+}
+
+/* Cancel sibling block gap before lists; keep item rhythm via li + li below */
+.tweet .body > :is(p, blockquote, pre, table, hr, ul, ol) + :is(ul, ol) {
+  margin-top: 0;
+}
+
+.tweet .body li {
+  margin-top: 0;
+  margin-bottom: 0;
+}
+
+.tweet .body li + li,
+.tweet .body li > :is(ul, ol) {
+  margin-top: var(--saito-space-xs);
+}
+
+.tweet .body :is(pre, code) {
+  font-size: inherit;
+  font-family: inherit;
+  line-height: inherit;
+}
+
+.tweet .body pre {
+  max-width: 100%;
+  overflow-wrap: anywhere;
   white-space: pre-wrap;
+}
+
+.tweet .body table {
+  display: block;
+  width: 100%;
+  max-width: 100%;
+  overflow-x: auto;
+  border-collapse: collapse;
+  font-size: inherit;
+  line-height: inherit;
+}
+
+.tweet .body :is(th, td) {
+  padding: var(--saito-space-xs) var(--saito-space-sm);
+  border-bottom: 1px solid var(--saito-border);
+  text-align: left;
+  vertical-align: top;
+}
+
+.tweet .body th {
+  font-family: var(--saito-font-medium);
+  font-weight: normal;
+}
+
+.tweet .body a {
+  color: inherit;
+  font-weight: inherit;
+  text-decoration: underline;
+  text-underline-offset: 0.15em;
   overflow-wrap: anywhere;
 }
 
-/* prevent scroll bars */
-.tweet-text p {
-  overflow: visible;
-}
-
-/* prevent line-break */
-.tweet-text p a {
-  display: inline;
-}
-
-.tweet-text .saito-mention.saito-address.treated {
-  font-size: inherit;
-  margin: 0rem !important;
-  font-style: normal;
-}
-
-.tweet-body ul li {
-  list-style-position: inside;
-  line-height: 2rem;
-  list-style-type: disc;
-  text-indent: -16px;
-  padding-left: 22px;
-}
-
-.tweet-body ol li {
-  list-style-position: inside;
-  line-height: 2rem;
-  list-style-type: decimal;
-  text-indent: -16px;
-  padding-left: 22px;
-}
-
-.tweet-body h1,
-.tweet-body h2,
-.tweet-body h3,
-.tweet-body h4,
-.tweet-body h5,
-.tweet-body h6 {
-  margin-bottom: 0rem;
-  line-height: 2rem;
-}
-
-.tweet-controls {
-  display: flex;
-  gap: 4px;
-  justify-content: space-between;
-
-  font-size: 14px;
-  color: #718695;
-  padding-bottom: unset;
-  margin-bottom: unset;
-
-  -webkit-user-select: none; /* Safari */
-  -ms-user-select: none; /* IE 10 and IE 11 */
-  user-select: none; /* Standard syntax */
-}
-
-.tweet-controls > div.tweet-tool {
-  position: relative;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 1rem 0;
-  min-width: 45px;
-  border-radius: 1rem;
-}
-
-.tweet-controls > div.tweet-tool.tweet-tool-more.activated-dot-menu {
-  transform: rotate(90deg);
-}
-
-.tweet-controls span {
-  display: inline-block;
-  z-index: 1;
-}
-
-.tweet-controls i {
-  font-size: 1.5rem;
-  margin: 0 0.5rem;
-  text-align: center;
-  color: inherit;
-}
-
-.tweet-menu {
-  position: absolute;
-  width: 28rem;
-  padding: 1rem;
-  border: 1px solid var(--saito-border-color); /* testing, not sure where */
-  background: var(--saito-background-color);
-  z-index: 1;
-  font-size: 1.8rem;
-}
-
-.tweet-menu {
-  display: flex;
-  flex-direction: column;
-  justify-content: space-between;
-}
-
-.tweet-menu-list-item {
-  display: grid;
-  grid-template-columns: 2.4rem 1fr;
-  grid-gap: 1.5rem;
-  padding: 1rem 0.5rem;
-  align-items: center;
-  cursor: pointer;
-}
-
-.tweet-menu-list-item i {
-  justify-self: center;
-  min-width: 2.4rem;
-}
-
-.tweet-tool-like-count.liked {
-  color: var(--saito-red);
-}
-
-.tweet-tool-like .heart-icon {
-  background: var(--saito-heart-animation);
-  cursor: pointer;
-  position: absolute;
-  width: 50px;
-  height: 50px;
-  background-size: cover;
-}
-
-.tweet-tool-like .heart-icon.liked {
-  animation: like-anim 0s steps(28) forwards;
-}
-
-.tweet-tool-like .heart-icon.likes {
-  animation: like-anim 1.2s steps(28) forwards;
-}
-
-@keyframes like-anim {
-  to {
-    background-position: right;
-  }
-}
-
-.tweet-tool-like .heart-bg {
-  background: rgba(255, 192, 200, 0);
-  border-radius: 50%;
-  width: 35px;
-  display: flex;
-  margin-left: -4px;
-  align-items: center;
-  justify-content: center;
-  transition: all 100ms ease;
-}
-
-.tweet-tool-like .heart-bg:hover {
-  background: rgba(255, 192, 200, 0.7);
-}
-
-.tweet td {
-  text-align: center;
-}
-
-.tweet td,
-.tweet th,
-.tweet table {
-  border: 1px solid var(--saito-border-color);
-  border-collapse: collapse;
-}
-
-.tweet td,
-.tweet th {
-  padding: 4px min(16px, 1vw);
-  white-space: nowrap;
-}
-
-.tweet-body iframe {
-  display: block;
-  width: 100%;
-  aspect-ratio: 16 / 9;
+.tweet .body img {
+  max-width: 100%;
   height: auto;
-  border-radius: var(--saito-border-radius);
 }
 
-/*
-  overrides
-*/
-
-.tweet-body {
-  display: block;
+.tweet .controls {
+  display: flex;
+  user-select: none;
+  justify-content: space-between;
 }
 
-.tweet-header .saito-user .saito-address {
-  font-size: 15px;
-  color: var(--saito-font-color-heavy);
-  width: fit-content;
+.tweet .controls .tool {
+  display: flex;
+  flex: 1 1 0;
+  align-items: center;
+  justify-content: center;
+  min-width: 0;
+  max-width: 3rem;
+  padding: var(--saito-space-xs) 0;
+  cursor: pointer;
+  color: var(--saito-muted-foreground);
 }
 
-.tweet-retweet .tweet-header .saito-user .saito-address {
-  color: var(--saito-font-color);
+.tweet .controls .tool i {
+  font-size: 1.2rem;
 }
 
-.tweet-header .saito-user .saito-userline {
-  font-weight: normal;
-  color: var(--saito-font-color-secondary);
-  font-size: 1.4rem;
+.tweet .controls .count {
+  margin-right: var(--saito-space-xs);
 }
 
-.tweet {
-  border-top: 0px;
-}
-
-/* For overly long tweets, we crop and show that it can be expanded */
-
-.tweet-text.preview {
-  position: relative;
-  isolation: isolate;
-  padding-right: 2rem;
-}
-
-.tweet-text.preview > * {
-  position: relative;
-  z-index: 0;
-}
-
-.tweet-text.preview::before {
-  content: '';
-  position: absolute;
-  bottom: 0;
-  left: 0;
-  height: 10rem;
-  width: 100%;
-  background: linear-gradient(
-    180deg,
-    rgba(0,0,0,0),
-    var(--saito-background-color)
-  );
-  pointer-events: none;
-  z-index: 1;
-}
-
-.tweet-text.preview::after {
-  font-family: FontAwesome;
-  content: '\f0d7';
-  position: absolute;
-  bottom: 4rem;
-  left: 50%;
-  transform: translateX(-50%);
-  font-size: 5rem;
-  color: var(--font-color-post-downward-arrow);
-  opacity: 0;
-  pointer-events: none;
-  z-index: 2;
-  transition: opacity 120ms ease;
-}
-
-.tweet-text.preview:hover::after {
-  opacity: 1;
-}
-
-.tweet-text.expanded {
-  max-height: 50rem;
-  overflow-y: scroll;
-  padding-right: 2rem;
-}
-
-.tweet-text a {
-  display: inherit;
-}
-
-/*.tweet .saito-treated-link[data-link='local_link'] .link-info {
+.tweet .show-more {
   display: none;
-}*/
-
-.tweet .saito-treated-link[data-link='local_link'] .link-img.has-picture {
-  max-height: 15rem;
 }
 
-.tweet .saito-treated-link[data-link='local_link'] .link-container {
-  border-radius: var(--saito-border-radius);
+.tweet.focused {
+  cursor: default;
+}
+
+.tweet .gallery {
+  min-width: 0;
+}
+
+.tweet .grid {
+  display: grid;
+  gap: 0.2rem;
+  overflow: hidden;
+  border-radius: var(--saito-radius);
+}
+
+.tweet .item {
+  min-width: 0;
   overflow: hidden;
 }
 
-/*
-
-RS notifications
-
-*/
-
-.tweet.tweet-notification,
-.tweet-container.active-curation .tweet-notification[data-curated='1'],
-.tweet-container.active-curation .tweet-notification[data-curated='0'] {
-  display: flex;
-  flex-direction: column;
-  position: relative;
+.tweet .item img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  cursor: pointer;
 }
 
-.tweet-notification:last-child {
-  border: none;
+.tweet .gallery.count-1 .grid {
+  display: block;
 }
 
-.tweet-notification .tweet-preview {
-  border: 1px solid var(--saito-border-color);
-  border-radius: 12px;
-  margin-top: 1rem;
+.tweet .gallery.count-1 .item {
+  max-height: 30rem;
 }
 
-.tweet-notification .tweet-preview .tweet {
+.tweet .gallery.count-1 .item img {
+  width: auto;
+  max-width: 100%;
+  height: auto;
+  max-height: 30rem;
+  margin-inline: auto;
+  object-fit: contain;
+}
+
+.tweet .gallery.count-2 .grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  aspect-ratio: 16 / 9;
+}
+
+.tweet .gallery.count-3 .grid,
+.tweet .gallery.count-4 .grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-rows: repeat(2, minmax(0, 1fr));
+  aspect-ratio: 16 / 9;
+}
+
+.tweet .gallery.count-3 .item:first-child {
+  grid-row: 1 / 3;
+}
+
+.tweet.focused .gallery.count-1 .item {
+  max-height: 36rem;
+}
+
+.tweet.focused .gallery.count-1 .item img {
+  max-height: 36rem;
+}
+
+.tweet .embed {
+  min-width: 0;
+}
+
+.tweet .embed > .tweet.embedded {
+  column-gap: var(--saito-space-sm);
+  padding: var(--saito-space-md);
+  border: 1px solid var(--saito-border);
+  border-radius: var(--saito-radius);
+}
+
+.tweet.embedded {
   border-bottom: none;
 }
 
-.tweet-notification .timestamp {
-  position: absolute;
-  right: 0px;
+.tweet.embedded .chain,
+.tweet.embedded .footer,
+.tweet.embedded .embed {
+  display: none;
 }
 
-.tweet-notification > .tweet-header .saito-user {
-  position: relative;
+.tweet.embedded .body {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 5;
+  overflow: hidden;
 }
 
-.tweet-notification > .tweet-header .saito-user .saito-identicon-box {
-  display: block;
-  width: 48px;
-  height: 48px;
-  border-radius: 50%;
+.tweet.embedded .gallery.count-1 .item {
+  max-height: 18rem;
 }
 
-.tweet-notification > .tweet-header .saito-user .saito-identicon-box img {
-  opacity: 1;
+.tweet.embedded .gallery.count-1 .item img {
+  max-height: 18rem;
 }
 
 @media (max-width: 600px) {
-  .tweet.has-reply:not(.highlight-tweet)::after,
-  .tweet.has-reply-disconnected:not(.highlight-tweet)::after {
-    top: 2.5rem;
-    left: 3.5rem;
+  .tweet {
+    padding: 0.9rem var(--saito-space-sm);
+    column-gap: var(--saito-space-sm);
   }
+
+  .tweet .body {
+    line-height: 1.5;
+  }
+
+  .tweet .embed > .tweet.embedded {
+    padding: var(--saito-space-sm);
+  }
+
+  .tweet .footer {
+    margin-top: var(--saito-space-xs);
+  }
+
+  .tweet .controls .tool {
+    min-height: 2.8rem;
+    padding-block: 0.25rem;
+  }
+
+  .tweet .chain {
+    left: var(--saito-space-sm);
+  }
+
+  .tweet.chain-prev .chain::before {
+    bottom: calc(100% - 0.9rem);
+  }
+
+  .tweet.chain-next .chain::after {
+    top: calc(0.9rem + 3.5rem);
+  }
+}
+
+/* Moderated tweet mask — overlay keeps layout/scroll; reveal is presentation-only */
+.tweet.moderated .content {
+  filter: blur(6px);
+  opacity: 0.45;
+  pointer-events: none;
+  user-select: none;
+}
+
+.tweet .moderation-mask {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--saito-space-md);
+  background: color-mix(in srgb, var(--saito-background) 55%, transparent);
+  cursor: default;
+}
+
+.tweet .moderation-mask .moderation-message {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--saito-space-sm);
+  text-align: center;
+  max-width: 24rem;
+}
+
+.tweet .moderation-mask .text {
+  color: var(--saito-font-color);
+  font-family: var(--saito-font-medium);
 }

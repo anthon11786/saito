@@ -1,0 +1,276 @@
+/*
+ * .rs-command-bar — footer toolbar
+ */
+
+.rs-command-bar {
+  flex: 0 0 auto;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  align-items: center;
+  gap: var(--saito-space-lg);
+  min-height: 5.6rem;
+  padding: var(--saito-space-sm) var(--saito-space-lg);
+  position: relative;
+  z-index: 4;
+  background: linear-gradient(180deg, #151515 0%, #101010 100%);
+  border-top: 1px solid #333;
+  box-shadow: 0 -4px 18px rgba(0, 0, 0, 0.3);
+}
+
+.rs-command-bar-left,
+.rs-command-bar-center,
+.rs-command-bar-right {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+}
+
+.rs-command-bar-left {
+  justify-content: flex-start;
+  gap: var(--saito-space-md);
+  min-width: 12rem;
+}
+
+.rs-command-bar-center {
+  justify-content: center;
+}
+
+.rs-command-bar-right {
+  justify-content: flex-end;
+  gap: var(--saito-space-md);
+}
+
+.rs-publish-slot {
+  display: none;
+}
+
+.rs-publish-slot.is-visible {
+  display: block;
+}
+
+.rs-cmd-btn {
+  height: var(--rs-control-height);
+  padding: 0 var(--saito-space-xl);
+  font-size: 1.5rem;
+  line-height: 1;
+  letter-spacing: 0.04em;
+  border-radius: 4px;
+  font-weight: 400;
+  text-transform: uppercase;
+  transition:
+    border-color 0.15s,
+    background 0.15s,
+    color 0.15s;
+}
+
+.rs-cmd-secondary {
+  border: 1px solid #4a4a4a;
+  background: #222;
+  color: #e0e0e0;
+}
+
+.rs-cmd-secondary:hover {
+  border-color: #646464;
+  background: #2a2a2a;
+  color: #fff;
+}
+
+.rs-cmd-primary {
+  border: 1px solid #3f8a4c;
+  background: linear-gradient(180deg, #3f8f4c 0%, #2a5e34 100%);
+  color: #f0fff2;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08);
+}
+
+.rs-cmd-primary:hover {
+  border-color: #52a860;
+  background: linear-gradient(180deg, #4ca85a 0%, #327040 100%);
+  color: #fff;
+}
+
+main.rustscript.rs-workflow-unlock .rs-publish-script {
+  min-width: 0;
+  padding: 0 1.8rem;
+  font-size: 1.35rem;
+  letter-spacing: 0.03em;
+  white-space: nowrap;
+}
+
+.rs-progress-track {
+  display: flex;
+  align-items: center;
+  padding: var(--saito-space-xs) var(--saito-space-md);
+  pointer-events: none;
+  border: 1px solid #383838;
+  border-radius: 4px;
+  background: #161616;
+}
+
+.rs-progress-step {
+  display: flex;
+  align-items: center;
+  gap: var(--saito-space-sm);
+  padding: 0.15rem var(--saito-space-xs);
+  white-space: nowrap;
+}
+
+.rs-progress-dot {
+  width: 0.85rem;
+  height: 0.85rem;
+  flex-shrink: 0;
+  border-radius: 50%;
+  background: #4a4a4a;
+  border: 1px solid #666;
+  transition:
+    background 0.2s,
+    border-color 0.2s;
+}
+
+.rs-progress-label {
+  font-size: var(--font-size-medium);
+  letter-spacing: 0.01em;
+  line-height: 1.2;
+  font-weight: 400;
+  color: #b8b8b8;
+  transition: color 0.2s;
+}
+
+.rs-progress-connector {
+  display: block;
+  width: 3rem;
+  height: 0.15rem;
+  margin: 0 var(--saito-space-xs);
+  flex-shrink: 0;
+  position: relative;
+  background: #4a4a4a;
+  border-radius: 1px;
+}
+
+.rs-progress-connector::after {
+  content: '';
+  position: absolute;
+  right: -0.15rem;
+  top: 50%;
+  transform: translateY(-50%);
+  border: 4px solid transparent;
+  border-left-color: #5a5a5a;
+}
+
+.rs-progress-step[data-state='idle'] .rs-progress-dot,
+.rs-progress-step[data-state='inactive'] .rs-progress-dot {
+  background: #333;
+  border-color: #505050;
+}
+
+.rs-progress-step[data-state='idle'] .rs-progress-label,
+.rs-progress-step[data-state='inactive'] .rs-progress-label {
+  color: #888;
+}
+
+.rs-progress-step[data-state='warn'] .rs-progress-dot {
+  background: #b87818;
+  border-color: #d09030;
+}
+
+.rs-progress-step[data-state='warn'] .rs-progress-label {
+  color: #d8a848;
+}
+
+.rs-progress-step[data-state='ready'] .rs-progress-dot {
+  background: #3f8f4c;
+  border-color: #52a860;
+}
+
+.rs-progress-step[data-state='ready'] .rs-progress-label {
+  color: #8fd49a;
+}
+
+.rs-progress-connector[data-state='ready'] {
+  background: #3a6a44;
+}
+
+.rs-progress-connector[data-state='ready']::after {
+  border-left-color: #4a8a54;
+}
+
+.rs-mode-switch {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.25rem;
+  pointer-events: auto;
+  border: 1px solid #3a3a3a;
+  border-radius: 4px;
+  background: #121212;
+}
+
+.rs-mode-sep {
+  display: none;
+}
+
+.rs-mode-btn {
+  padding: var(--saito-space-xs) var(--saito-space-md);
+  font-size: var(--font-size-tiny);
+  letter-spacing: 0.03em;
+  line-height: 1.2;
+  border: 1px solid transparent;
+  border-radius: 3px;
+  background: transparent;
+  color: #808080;
+  font-family: var(--rustscript-font-mono);
+  font-weight: 400;
+  text-transform: none;
+  transition:
+    color 0.12s,
+    background 0.12s,
+    border-color 0.12s;
+}
+
+.rs-mode-btn:hover:not(.is-active) {
+  color: #c0c0c0;
+  background: #1a1a1a;
+  border-color: #444;
+}
+
+.rs-mode-btn.is-active {
+  color: #c8e0cc;
+  font-weight: 500;
+  background: #16201c;
+  border-color: #3a6a44;
+}
+
+.rs-mode-btn:focus-visible {
+  outline: 2px solid #555;
+  outline-offset: 2px;
+}
+
+/* Unlock workflow is not a script-authoring mode — hide Guided/Expert */
+main.rustscript.rs-workflow-unlock .rs-mode-switch {
+  display: none;
+}
+
+.rs-status-valid.is-actionable {
+  pointer-events: auto;
+  cursor: pointer;
+}
+
+@media (max-width: 900px) {
+  .rs-command-bar {
+    grid-template-columns: 1fr;
+    gap: var(--saito-space-md);
+  }
+
+  .rs-command-bar-left,
+  .rs-command-bar-center,
+  .rs-command-bar-right {
+    justify-content: center;
+    min-width: 0;
+  }
+
+  .rs-progress-label {
+    display: none;
+  }
+
+  .rs-progress-connector {
+    width: 2rem;
+  }
+}

@@ -1,224 +1,269 @@
 /**
  * Publish Settings Overlay Template
- * 
- * Complete rewrite - three-card layout for the moment of publishing.
+ *
+ * Guided publishing flow: access selector (left) + step content (right).
+ * Private / Subscription open a lightweight wizard; Public publishes in one click.
+ * Distribution options (profile link, RedSquare tweet) are identical for all access levels.
  */
-module.exports = (app, mod, postState = {}) => {
-  const titleInput = document.querySelector('#stack-post-title-input');
-  const title = titleInput ? titleInput.value || 'Untitled' : 'Untitled';
-  
-  // Check if post is published (from postState or create_post_ui.isPublished)
-  const isPublished = postState.published || (mod.create_post_ui && mod.create_post_ui.isPublished) || false;
-  // PART 3 — BUTTON LABEL LOGIC: Use parent_id to determine button text
-  // parent_id === null → "Publish" (new post or draft)
-  // parent_id !== null → "Update" (editing published post)
-  const parent_id = mod.create_post_ui && mod.create_post_ui.parent_id ? mod.create_post_ui.parent_id : null;
-  const buttonText = parent_id ? 'Update' : 'Publish';
-  const accessLevel = postState.accessLevel || 'public';
-  
-  // Get content for size calculation (using DOM-based serialization if available)
-  const editor = document.querySelector('#stack-post-body-editor');
-  let content = '';
-  if (editor && mod.create_post_ui && mod.create_post_ui.serializeDOMToMarkdown) {
-    content = mod.create_post_ui.serializeDOMToMarkdown();
-  }
-  
-  // Calculate content size
-  const contentSize = new Blob([content]).size;
-  const contentSizeKB = (contentSize / 1024).toFixed(1);
-  
-  // Get timestamps
-  const now = new Date();
-  const createdDate = postState.createdAt ? new Date(postState.createdAt) : now;
-  const updatedDate = postState.updatedAt ? new Date(postState.updatedAt) : now;
-  
-  const formatDate = (date) => {
-    return date.toLocaleDateString('en-US', { 
-      year: 'numeric', 
-      month: 'short', 
-      day: 'numeric',
-      hour: '2-digit',
-      minute: '2-digit'
-    });
-  };
+module.exports = (app, mod, postState = {}, wizardState = {}) => {
+	const parent_id =
+		mod.create_post_ui && mod.create_post_ui.parent_id ? mod.create_post_ui.parent_id : null;
+	const publishButtonText = parent_id ? 'Update' : 'Publish';
+	const accessLevel = postState.accessLevel || 'public';
+	const step = wizardState.step || 1;
 
-  // Map internal access levels to display
-  // 'public' -> 'public', 'private' -> 'private', 'subscription' -> 'subscription'
-  const isPublic = accessLevel === 'public';
-  const isPrivate = accessLevel === 'private';
-  const isSubscription = accessLevel === 'subscription';
-  
-  // Get access mode for private posts (default to 'transferable' - Flexible)
-  const accessMode = postState.accessMode || 'transferable';
-  const isNonTransferable = accessMode === 'non-transferable';
-  const isTransferable = accessMode === 'transferable';
+	const isPublic = accessLevel === 'public';
+	const isPrivate = accessLevel === 'private';
+	const isSubscription = accessLevel === 'subscription';
+	const isRestricted = isPrivate || isSubscription;
 
-  // Determine educational content based on current access level
-  let educationalContent = '';
-  if (isPublic) {
-    educationalContent = 'This post will be visible to anyone with the link and may be shared freely.\nIf you later restrict access, copies may still exist.';
-  } else if (isPrivate) {
-    educationalContent = 'This post will only be readable by people you explicitly grant access to.\nYou control who can see it.';
-  } else if (isSubscription) {
-    educationalContent = 'This post will only be readable by people with an active subscription.\nThis option is under development.';
-  } else {
-    // Default to public
-    educationalContent = 'This post will be visible to anyone with the link and may be shared freely.\nIf you later restrict access, copies may still exist.';
-  }
+	const keyLabel = isSubscription ? 'Subscription Key' : 'Access Key';
+	const keysLabel = isSubscription ? 'Subscription Keys' : 'Access Keys';
+	const hasAccessKey =
+		wizardState.hasAccessKey === true || wizardState.createNftStatus === 'confirmed';
+	const isConfirmed = wizardState.createNftStatus === 'confirmed';
+	const isListedInStore = wizardState.isListedInStore === true;
 
-  return `
-    <div class="stack-publish-overlay">
-      <div class="stack-publish-content">
-        <!-- Three-Column Layout -->
-        <div class="stack-publish-cards">
-          
-          <!-- LEFT COLUMN: ACCESS DECISION -->
-          <div class="stack-publish-card stack-publish-card-access">
-            <h3 class="stack-publish-card-title">Who can read this post?</h3>
-            <div class="stack-publish-access-cards">
-              <label class="stack-publish-access-card ${isPublic ? 'stack-publish-access-card-active' : ''}" data-access="public">
-                <input 
-                  type="checkbox" 
-                  name="stack-publish-access" 
-                  value="public" 
+	const profileLinkChecked = wizardState.linkToProfile !== false;
+	const tweetOnPublishChecked = wizardState.tweetOnPublish !== false;
+
+	const distributionHtml = `
+    <div class="distribution">
+      <label class="option">
+        <input
+          type="checkbox"
+          class="saito-checkbox"
+          data-action="toggle-profile-link"
+          ${profileLinkChecked ? 'checked' : ''}
+        />
+        <span>Add my Stack to my profile</span>
+      </label>
+      <label class="option">
+        <input
+          type="checkbox"
+          class="saito-checkbox"
+          data-action="toggle-tweet-on-publish"
+          ${tweetOnPublishChecked ? 'checked' : ''}
+        />
+        <span>Tweet this article on publish</span>
+      </label>
+    </div>
+  `;
+
+	const getStepContent = () => {
+		if (step === 1) {
+			let accessSummary = 'Anyone can read.';
+			if (isPrivate) {
+				accessSummary = 'Readers must have an Access Key.';
+			} else if (isSubscription) {
+				accessSummary = 'Readers must have an Active Subscription.';
+			}
+
+			return {
+				body: `
+          <div class="option-copy">
+            <p class="heading">${accessSummary}</p>
+            ${distributionHtml}
+          </div>
+        `
+			};
+		}
+
+		if (step === 2 && (isPrivate || isSubscription)) {
+			const checklistHtml = `
+          <div class="checklist matrix">
+            <div class="check-row complete">
+              <span class="mark">✓</span>
+              <span>Blog Post Created</span>
+            </div>
+            <div class="check-row${hasAccessKey ? ' complete' : ''}">
+              <span class="mark">${hasAccessKey ? '✓' : '○'}</span>
+              <span>${keysLabel} Created</span>
+            </div>
+            ${
+							isListedInStore
+								? `
+            <div class="check-row complete">
+              <span class="mark">✓</span>
+              <span>${keysLabel} Listed</span>
+            </div>
+                `
+								: ''
+						}
+          </div>
+        `;
+
+			if (isListedInStore) {
+				return {
+					body: `
+              ${checklistHtml}
+              <div class="followup">
+                <p class="guidance">Everything is Ready. Go ahead and publish your post.</p>
+              </div>
+            `
+				};
+			}
+
+			if (isConfirmed || hasAccessKey) {
+				return {
+					body: `
+              ${checklistHtml}
+              <div class="followup">
+                <p class="guidance">Would you like to list some ${keysLabel} for sale?</p>
+                <p class="guidance">
+                  <span id="stack-list-access-key-link" class="saito-text-link">▸ click here to upload to the Saito Store</span>
+                </p>
+              </div>
+            `
+				};
+			}
+
+			if (wizardState.createNftStatus === 'cancelled') {
+				return {
+					body: `
+            ${checklistHtml}
+            <div class="followup">
+              <p class="guidance">You can publish now without creating ${keysLabel}, or create Stack ${keyLabel} NFTs later from your wallet.</p>
+            </div>
+          `
+				};
+			}
+
+			return {
+				body: `
+            ${checklistHtml}
+            <div class="followup">
+              <p class="guidance">Your wallet does not have any ${keysLabel}.</p>
+              <p class="guidance">
+                <span id="stack-create-access-key-link" class="saito-text-link">▸ click here to mint some now</span>
+              </p>
+            </div>
+          `
+			};
+		}
+
+		return {
+			body: `
+          <p class="guidance">You'll need a ${keyLabel} for this post. We'll help you create one.</p>
+        `
+		};
+	};
+
+	const stepContent = getStepContent();
+
+	let primaryLabel = publishButtonText;
+	let primaryAction = 'publish';
+	if (isRestricted) {
+		if (step < 2) {
+			primaryLabel = 'Next →';
+			primaryAction = 'next';
+		} else {
+			primaryLabel = publishButtonText;
+			primaryAction = 'publish';
+		}
+	}
+
+	const showBack = isRestricted && step > 1;
+	const showPublishImmediately = isRestricted && step === 1;
+
+	const leftActionHtml = (() => {
+		if (showBack) {
+			return `
+        <button id="stack-publish-back-btn" class="saito-button-square" type="button" aria-label="Back">
+          <i class="fa-solid fa-arrow-left" aria-hidden="true"></i>
+        </button>
+      `;
+		}
+		if (showPublishImmediately) {
+			return `
+        <span id="stack-publish-immediately" class="saito-text-link immediately" role="button" tabindex="0">or skip access controls and publish immediately...</span>
+      `;
+		}
+		return `<div class="spacer"></div>`;
+	})();
+
+	return `
+    <div class="publish">
+      <div class="content">
+        <div class="header">
+          <h3 class="title">who can read this post?</h3>
+          <button
+            type="button"
+            id="stack-publish-delete-draft-btn"
+            class="saito-icon-button"
+            title="Delete Draft"
+            aria-label="Delete Draft"
+          >
+            <i class="fa-solid fa-trash" aria-hidden="true"></i>
+          </button>
+        </div>
+
+        <div class="cards">
+
+          <div class="card card access">
+            <div class="access-list">
+              <label class="access-card ${isPublic ? 'active' : ''}" data-access="public">
+                <input
+                  type="checkbox"
+                  name="stack-publish-access"
+                  value="public"
                   ${isPublic ? 'checked' : ''}
-                  class="stack-publish-access-checkbox"
+                  class="saito-checkbox access-checkbox"
                 />
-                <div class="stack-publish-access-card-content">
-                  <div class="stack-publish-access-card-label">Public</div>
-                  <div class="stack-publish-access-card-description">Anyone can read this post.</div>
+                <div class="card-body">
+                  <div class="label">Public</div>
                 </div>
               </label>
 
-              <label class="stack-publish-access-card ${isPrivate ? 'stack-publish-access-card-active' : ''}" data-access="private">
-                <input 
-                  type="checkbox" 
-                  name="stack-publish-access" 
-                  value="private" 
+              <label class="access-card ${isPrivate ? 'active' : ''}" data-access="private">
+                <input
+                  type="checkbox"
+                  name="stack-publish-access"
+                  value="private"
                   ${isPrivate ? 'checked' : ''}
-                  class="stack-publish-access-checkbox"
+                  class="saito-checkbox access-checkbox"
                 />
-                <div class="stack-publish-access-card-content">
-                  <div class="stack-publish-access-card-label">Private</div>
-                  <div class="stack-publish-access-card-description">Only people you give access to can read this post.</div>
+                <div class="card-body">
+                  <div class="label">Private</div>
                 </div>
               </label>
 
-              <label class="stack-publish-access-card stack-publish-access-card-disabled ${isSubscription ? 'stack-publish-access-card-active' : ''}" data-access="subscription">
-                <input 
-                  type="checkbox" 
-                  name="stack-publish-access" 
-                  value="subscription" 
+              <label class="access-card ${isSubscription ? 'active' : ''}" data-access="subscription">
+                <input
+                  type="checkbox"
+                  name="stack-publish-access"
+                  value="subscription"
                   ${isSubscription ? 'checked' : ''}
-                  class="stack-publish-access-checkbox"
+                  class="saito-checkbox access-checkbox"
                 />
-                <div class="stack-publish-access-card-content">
-                  <div class="stack-publish-access-card-label">Subscription</div>
-                  <div class="stack-publish-access-card-description">Only people with valid subscription have access.</div>
+                <div class="card-body">
+                  <div class="label">Subscription</div>
                 </div>
               </label>
             </div>
           </div>
 
-          <!-- MIDDLE COLUMN: CONTEXTUAL EXPLANATION -->
-          <div class="stack-publish-card stack-publish-card-educational">
-            <div id="stack-publish-educational-content" class="stack-publish-educational-content">
-              ${educationalContent.split('\n').map(line => `<p>${line}</p>`).join('')}
-            </div>
-            
-            <!-- Access type selector (only shown when Private is selected) -->
-            ${isPrivate ? `
-              <div class="stack-publish-access-type-selector">
-                <div class="stack-publish-access-type-label">Access type:</div>
-                <div class="stack-publish-access-type-options">
-                  <label class="stack-publish-access-type-option">
-                    <input 
-                      type="radio" 
-                      name="stack-publish-access-type" 
-                      value="transferable"
-                      ${isTransferable ? 'checked' : ''}
-                      class="stack-publish-access-type-radio"
-                    />
-                    <span class="stack-publish-access-type-option-label">Flexible (transferable)</span>
-                  </label>
-                  <label class="stack-publish-access-type-option">
-                    <input 
-                      type="radio" 
-                      name="stack-publish-access-type" 
-                      value="non-transferable"
-                      ${isNonTransferable ? 'checked' : ''}
-                      class="stack-publish-access-type-radio"
-                    />
-                    <span class="stack-publish-access-type-option-label">Non-transferable (stricter)</span>
-                  </label>
-                </div>
-              </div>
-            ` : ''}
-
-            <!-- Access type selector (only shown when Private is selected) -->
-            ${isSubscription ? `
-              <div class="stack-publish-access-type-selector">
-                <div class="stack-publish-access-type-label">Access type:</div>
-                <div class="stack-publish-access-type-options">
-                  <label class="stack-publish-access-type-option">
-                    <input 
-                      type="radio" 
-                      name="stack-publish-access-type" 
-                      value="transferable"
-                      ${isTransferable ? 'checked' : ''}
-                      class="stack-publish-access-type-radio"
-                    />
-                    <span class="stack-publish-access-type-option-label">Flexible (transferable)</span>
-                  </label>
-                  <label class="stack-publish-access-type-option">
-                    <input 
-                      type="radio" 
-                      name="stack-publish-access-type" 
-                      value="non-transferable"
-                      ${isNonTransferable ? 'checked' : ''}
-                      class="stack-publish-access-type-radio"
-                    />
-                    <span class="stack-publish-access-type-option-label">Non-transferable (stricter)</span>
-                  </label>
-                </div>
-              </div>
-            ` : ''}
-          </div>
-
-          <!-- RIGHT COLUMN: METADATA + DESTRUCTIVE ACTION -->
-          <div class="stack-publish-card stack-publish-card-metadata">
-            <div class="stack-publish-metadata-header">
-              <h3 class="stack-publish-card-title">Metadata</h3>
-              <button id="stack-publish-delete-draft-btn" class="stack-publish-delete-draft-icon" title="Delete Draft">
-                <i class="fa-solid fa-trash"></i>
-              </button>
-            </div>
-            <div class="stack-publish-metadata-list">
-              <div class="stack-publish-metadata-row">
-                <span class="stack-publish-metadata-label">Status</span>
-                <span class="stack-publish-metadata-value">${isPublished ? 'Published' : 'Draft'}</span>
-              </div>
-              <div class="stack-publish-metadata-row">
-                <span class="stack-publish-metadata-label">Created</span>
-                <span class="stack-publish-metadata-value">${formatDate(createdDate)}</span>
-              </div>
-              <div class="stack-publish-metadata-row">
-                <span class="stack-publish-metadata-label">Last updated</span>
-                <span class="stack-publish-metadata-value">${formatDate(updatedDate)}</span>
-              </div>
-              <div class="stack-publish-metadata-row">
-                <span class="stack-publish-metadata-label">Size</span>
-                <span class="stack-publish-metadata-value">${contentSizeKB} KB</span>
+          <div class="card card main">
+            <div id="stack-publish-step-panel" class="step" data-step="${step}">
+              <div class="edu">
+                ${stepContent.body}
               </div>
             </div>
           </div>
 
         </div>
-        
-        <!-- GLOBAL PUBLISH ACTION - Bottom-right of overlay -->
-        <div class="stack-publish-global-action">
-          <button id="stack-publish-primary-btn" class="stack-publish-primary-action-btn">
-            ${buttonText}
+
+        <div class="actions">
+          <div class="actions-left">
+            ${leftActionHtml}
+          </div>
+          <button
+            id="stack-publish-primary-btn"
+            class="saito-button-primary"
+            type="button"
+            data-action="${primaryAction}"
+          >
+            ${primaryLabel}
           </button>
         </div>
       </div>

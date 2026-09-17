@@ -1,54 +1,93 @@
-
-.vault-file-access {
-  width: 55rem !important;
-  margin-top: 1rem;
+.vault-nfts .send-nft-list {
+  align-content: flex-start;
+  align-items: stretch;
+  justify-content: flex-start;
+  width: 100%;
+  max-width: 100%;
+  padding: 0.5rem;
 }
 
-
-.vault-nft-item {
-  width: 22rem;
-  border: 1px solid #e2e2e2;
-  border-radius: 0.75rem;
-  padding: 1rem;
+.vault-nfts .vault-nft-item {
   display: flex;
+  flex: 0 0 22rem;
   flex-direction: column;
   gap: 1.5rem;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.06);
+  width: 22rem;
+  height: auto;
+  overflow: hidden;
+  padding: 1rem;
+  box-sizing: border-box;
+  background: var(--saito-card-wash);
+  border: 1px solid var(--saito-border);
+  border-radius: var(--saito-radius);
+  box-shadow: 0 4px 12px #0000000f;
+  cursor: pointer;
+  transition:
+    border-color 0.16s ease,
+    transform 0.16s ease;
 }
 
-.vault-nft-img {
-  width: 100%;
-  height: auto;
-  border-radius: 0.5rem;
+.vault-nfts .vault-nft-item:hover {
+  border-color: var(--saito-primary);
+  transform: translate(-1px, -1px);
+}
+
+.vault-nfts .vault-nft-img {
+  display: block;
   align-self: center;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  height: auto;
+  border-radius: calc(var(--saito-radius) - 0.25rem);
   object-fit: cover;
 }
 
-/* bottom row: truncated text + button */
-.vault-nft-footer {
+.vault-nfts .vault-nft-footer {
   display: flex;
   flex-direction: column;
   align-items: center;
   gap: 0.5rem;
+  width: 100%;
+  min-width: 0;
 }
 
-.vault-nft-hash {
-    width: 90%;
-  flex: 1;
-  font-size: 1.5rem;
-  white-space: nowrap;
+.vault-nfts .vault-nft-hash {
+  width: 90%;
+  min-width: 0;
   overflow: hidden;
+  font-size: 1.5rem;
   text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-/* Download button */
-.vault-nft-download-btn {
-  border: none;
+.vault-nfts .vault-nft-download-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  box-sizing: border-box;
   padding: 0.4rem 0.75rem;
-  border-radius: 0.5rem;
-  color: #fff;
+  color: var(--saito-button-primary-foreground);
+  background: var(--saito-button-primary-background);
+  border: 1px solid var(--saito-border);
+  border-radius: var(--saito-radius);
   font-size: 1.5rem;
   font-weight: 600;
-  cursor: pointer;
   white-space: nowrap;
+}
+
+.vault-nfts .vault-nft-download-btn:hover {
+  color: var(--saito-primary-foreground);
+  background: var(--saito-button-primary-background-hover);
+}
+
+.vault-nfts .vault-nft-download-btn:focus-visible {
+  box-shadow: var(--saito-focus-ring);
+}
+
+@media (max-width: 768px) {
+  .vault-nfts .send-nft-list {
+    width: 100%;
+  }
 }

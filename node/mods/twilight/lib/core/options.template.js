@@ -1,10 +1,8 @@
 module.exports = () => {
-	let html = `
+  let html = `
+        <label for="deckselect">Deck:</label>
         <div class="overlay-input">
-
-
-          <label for="deck">Deck:</label>
-          <select name="deck" id="deckselect" onchange='
+          <select class="saito-form-select" name="deck" id="deckselect" onchange='
             if ($("#deckselect").val() == "saito") {
               $(".saito_edition").prop("checked",true);
               try {
@@ -33,5 +31,5 @@ module.exports = () => {
           </select>
         </div>
           `;
-	return html;
+  return html;
 };

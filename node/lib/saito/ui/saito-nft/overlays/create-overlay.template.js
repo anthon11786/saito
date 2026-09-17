@@ -1,85 +1,117 @@
-let ProvideMetaDataOverlayTemplate = require('./create-overlay-metadata.template');
-
 module.exports = (app, mod) => {
-  let html = `
-<div class="create-nft-container">
-   
-      <div class="saito-overlay-form-header">
-         <div class="saito-overlay-form-header-title">
-            <div>
-               Create Non-Fungible Token (NFT)
-            </div>
-         </div>
-      </div>
+  const saitoItems = [
+    'Vintage Collectable',
+    'Classic Saito NFT',
+    'Genesis Collectable',
+    'Saito Heritage Item',
+    'Unique Item',
+    'Historical Saito Mint',
+    'Provenance Edition',
+    'Founders Edition',
+    'NFT Collectable',
+    'Unique Item',
+    'Saito Legacy',
+    'Rare Saito Artifact',
+    'Limited Saito Release',
+    'Archival Series',
+    'Original Chain Relic',
+    'Timeless Collectable',
+    'Retro Blockchain Piece',
+    'Immutable Classic',
+    'Chain Memory Artifact',
+    'Saito Vault Item',
+    'Eternal Collectable'
+  ];
+  const title = saitoItems[Math.floor(Math.random() * saitoItems.length)];
 
-      <div class="nft-creator-overlay panels">
-          <div class="nft-creator saito-nft-panel">
-                <div class="dropdown-cont">
+  return `
+<div class="saito-nft-create">
+  <header class="saito-overlay-form-header">
+    <h2 class="saito-overlay-form-header-title" id="create-nft-overlay-title">Create NFT</h2>
+  </header>
 
-            <div class="withdraw-info-cont">
-                  <div class="withdraw-info-title">NFT Type</div>
-                  <select class="create-nft-type-dropdown" id="create-nft-type-dropdown" style="padding: 1rem 1.5rem; font-size: 1.6rem;">
-                     <option value="image">Image</option>
-                     <option value="token">Token</option>
-                     <option value="text">Text</option>
-                     <option value="css">CSS</option>
-                     <option value="json">JSON</option>
-                     <option value="js">Javascript</option>
-                  </select>
-                </div>
-
-                <div class="withdraw-info-cont">
-                  <span class="withdraw-info-title">Quantity</span> 
-                <!--
-                  <div class="withdraw-info-value create-nft-amount" id="create-nft-amount">1</div>
-                -->
-
-                   <input
-                     type="text"
-                     inputmode="numeric"
-                     pattern="\d*"
-                     oninput="this.value = this.value.replace(/\D+/g, '')"
-                     class="create-nft-amount" id="create-nft-amount" 
-                     value="1"
-                   />
-
-                </div>
-                
-
-                <div class="withdraw-info-cont">
-                  <span class="withdraw-info-title">Deposit</span> 
-                   <input
-                     type="text"
-                     inputmode="numeric"
-                     pattern="\d*"
-                     placeholder="1"
-                     oninput="this.value = this.value.replace(/\D+/g, '')"
-                     class="create-nft-amount" id="create-nft-deposit" 
-                     value="1"
-                   />
-                  
-                </div>
-              </div>
-
-             <div class="textarea-container">
-                <div class="saito-app-upload active-tab paste_event" id="nft-image-upload">
-                   <i class="fa-solid fa-file-image"></i>
-                   <div class="nft-upload-text">drag-and-drop image to upload</div>
-                </div>
-                <textarea class="create-nft-textarea" id="create-nft-textarea"></textarea>
-             </div>
-
-            <div class="saito-button-row">
-                <div class="saito-anchor" id="create-nft-help-link"><span>need help?</span></div>    
-                 <div class="get-saito-tokens"></div>
-                 <button id="next-step">Next Step</button>
-            </div>
+  <div class="body">
+    <section class="primary">
+      <div class="field-row">
+        <div class="field field-type">
+          <label class="label" for="create-nft-type-dropdown">nft type</label>
+          <select id="create-nft-type-dropdown" class="saito-form-select">
+            <option value="image">Image</option>
+            <option value="token">Token</option>
+            <option value="text">Text</option>
+            <option value="css">CSS</option>
+            <option value="json">JSON</option>
+            <option value="js">Javascript</option>
+          </select>
+        </div>
+        <div class="field">
+          <label class="label" for="create-nft-amount">quantity</label>
+          <input class="saito-input"
+            type="text"
+            inputmode="numeric"
+            pattern="\\d*"
+            oninput="this.value = this.value.replace(/\\D+/g, '')"
+            id="create-nft-amount"
+            value="1"
+          />
+        </div>
+        <div class="field">
+          <label class="label" for="create-nft-deposit">deposit</label>
+          <div class="create-nft-deposit-wrap is-locked" id="create-nft-deposit-wrap">
+            <input class="saito-input"
+              type="text"
+              inputmode="numeric"
+              pattern="\\d*"
+              placeholder="1"
+              oninput="this.value = this.value.replace(/\\D+/g, '')"
+              id="create-nft-deposit"
+              value="1"
+              readonly
+              aria-describedby="create-nft-deposit-lock"
+            />
+            <i class="fa-solid fa-lock create-nft-deposit-lock" id="create-nft-deposit-lock" aria-hidden="true" title="Default deposit"></i>
           </div>
-
-          ${ProvideMetaDataOverlayTemplate()}
+        </div>
       </div>
 
+      <div class="upload">
+        <div class="saito-app-upload active-tab paste_event" id="nft-image-upload">
+          <i class="fa-solid fa-file-image" aria-hidden="true"></i>
+          <div class="upload-hint">drag-and-drop image to upload</div>
+        </div>
+        <textarea id="create-nft-textarea" class="saito-textarea"></textarea>
+        <button type="button" class="create-nft-thumbnail-picker" aria-label="add thumbnail">
+          <span>add thumbnail</span>
+        </button>
+      </div>
+
+      <footer class="footer">
+        <div class="get-saito-tokens"></div>
+        <div class="actions"></div>
+        <button type="button" id="next-step" class="saito-button-primary">Next</button>
+      </footer>
+    </section>
+
+    <section class="secondary">
+      <div class="create-nft-fields">
+        <label class="label" for="create-nft-title">title</label>
+        <input type="text" id="create-nft-title" class="title saito-input" placeholder="${title}" />
+
+        <label class="label ticker" for="create-nft-ticker">ticker</label>
+        <input type="text" id="create-nft-ticker" class="ticker saito-input" placeholder="optional" />
+
+        <label class="label" for="create-nft-description">description</label>
+        <textarea id="create-nft-description" class="description saito-textarea" rows="4" placeholder="description (optional)"></textarea>
+      </div>
+
+      <footer class="footer">
+        <button type="button" id="back-btn" class="saito-button-square" aria-label="Back">
+          <i class="fa-solid fa-arrow-left" aria-hidden="true"></i>
+        </button>
+        <button type="button" id="create_nft" class="saito-button-primary">Confirm</button>
+      </footer>
+    </section>
+  </div>
 </div>
 `;
-  return html;
 };

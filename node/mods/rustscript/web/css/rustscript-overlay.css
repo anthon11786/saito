@@ -1,0 +1,483 @@
+/*
+ * .rustscript-overlay — shared modal shell + RS buttons
+ */
+
+.saito-overlay:has(> .rustscript-overlay) {
+  border: none;
+  background: transparent;
+  overflow: visible;
+  box-shadow: none;
+}
+
+.rustscript-overlay {
+  display: flex;
+  flex-direction: column;
+  gap: var(--saito-space-lg);
+  padding: var(--saito-space-xl);
+  width: min(82rem, 94vw);
+  max-width: 94vw;
+  overflow: hidden;
+  pointer-events: auto;
+  position: relative;
+  font-size: var(--font-size-medium);
+  line-height: 1.45;
+  font-weight: 400;
+  background: #1a1a1a;
+  color: #ececec;
+  border: 1px solid #4a4a4a;
+  border-radius: 6px;
+  box-shadow:
+    0 24px 64px rgba(0, 0, 0, 0.72),
+    0 0 0 1px rgba(255, 255, 255, 0.04);
+}
+
+.rustscript-overlay.rs-overlay-prompt {
+  width: min(52rem, 94vw);
+}
+
+.rustscript-overlay.rs-overlay-wide {
+  width: min(86rem, 94vw);
+  max-height: 88vh;
+}
+
+.rustscript-overlay.rs-overlay-modal {
+  width: min(92vw, 64rem);
+  max-height: min(88vh, 54rem);
+  height: auto;
+  flex: 0 1 auto;
+}
+
+.rustscript-overlay.rs-overlay-workspace {
+  width: min(94vw, 148rem);
+  height: min(88vh, calc(100dvh - 2.5rem));
+  max-height: min(88vh, calc(100dvh - 2.5rem));
+  flex: 0 1 auto;
+  padding: 0;
+  gap: 0;
+}
+
+.rs-overlay-status .rs-overlay-body {
+  align-items: center;
+  text-align: center;
+  width: 100%;
+}
+
+.rs-overlay-status .rs-overlay-title {
+  text-align: center;
+  padding-right: 0;
+  width: 100%;
+}
+
+.rs-overlay-status .rs-overlay-title-loading {
+  text-align: center;
+  width: 100%;
+  padding-right: 0;
+  margin-left: auto;
+  margin-right: auto;
+}
+
+.rs-overlay-title,
+.rustscript-overlay > h2 {
+  flex-shrink: 0;
+  margin: 0;
+  padding-right: 3.6rem;
+  font-size: var(--font-size-large);
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  line-height: 1.3;
+  text-transform: none;
+  color: #f0f0f0;
+}
+
+.rs-overlay-title-hero {
+  font-size: 2.4rem;
+  letter-spacing: normal;
+}
+
+.rs-overlay-title-choice {
+  font-size: 2.4rem;
+  letter-spacing: normal;
+  line-height: 1.25;
+}
+
+.rs-overlay-title-loading {
+  font-size: 2rem;
+  letter-spacing: normal;
+  text-align: center;
+  padding-right: 0;
+  width: 100%;
+}
+
+.rs-overlay-head {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--saito-space-lg);
+}
+
+.rs-overlay-head .rs-overlay-title {
+  flex: 1;
+  min-width: 0;
+  padding-right: 0;
+}
+
+.rs-overlay-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--saito-space-md);
+}
+
+.rs-overlay-workspace > .rs-overlay-body {
+  height: 100%;
+  gap: 0;
+}
+
+.rs-overlay-lead {
+  margin: 0;
+  line-height: 1.5;
+  color: #a8a8a8;
+}
+
+.rs-overlay-label {
+  display: block;
+  margin-bottom: var(--saito-space-xs);
+  font-size: var(--font-size-tiny);
+  font-weight: 500;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  line-height: 1.35;
+  color: #a0a0a0;
+}
+
+.rs-overlay-actions {
+  flex-shrink: 0;
+  display: flex;
+  width: 100%;
+  gap: var(--saito-space-md);
+  align-items: center;
+  margin-top: var(--saito-space-xs);
+}
+
+.rs-overlay-actions-end {
+  justify-content: flex-end;
+}
+
+.rs-overlay-actions-split {
+  justify-content: space-between;
+  align-items: stretch;
+}
+
+.rs-overlay-actions-wrap {
+  flex-wrap: wrap;
+  justify-content: flex-start;
+}
+
+.rs-overlay-actions-split .rs-btn-secondary {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.rs-overlay-actions-split .rs-btn-primary {
+  flex: 0 0 auto;
+}
+
+.rs-overlay-actions-wrap > .rs-btn {
+  flex: 1 1 20rem;
+}
+
+.rs-btn {
+  border-radius: 4px;
+  line-height: 1;
+  text-align: center;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  font-weight: 400;
+  transition:
+    border-color 0.15s,
+    background 0.15s,
+    color 0.15s,
+    box-shadow 0.15s;
+}
+
+.rs-btn-primary {
+  height: var(--rs-control-height);
+  min-width: 14rem;
+  padding: 0 var(--saito-space-xl);
+  font-size: 1.5rem;
+  border: 1px solid #3f8a4c;
+  background: linear-gradient(180deg, #3f8f4c 0%, #2a5e34 100%);
+  color: #f0fff2;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08);
+}
+
+.rs-btn-primary:hover:not(:disabled) {
+  border-color: #52a860;
+  background: linear-gradient(180deg, #4ca85a 0%, #327040 100%);
+  color: #fff;
+}
+
+.rs-btn-primary:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.rs-btn-secondary {
+  height: var(--rs-control-height);
+  min-width: 11rem;
+  padding: 0 var(--saito-space-lg);
+  font-size: var(--font-size-medium);
+  border: 1px solid #4a4a4a;
+  background: #222;
+  color: #e0e0e0;
+}
+
+.rs-btn-secondary:hover:not(:disabled) {
+  border-color: #646464;
+  background: #2a2a2a;
+  color: #fff;
+}
+
+.rs-btn:focus-visible {
+  outline: 2px solid #666;
+  outline-offset: 2px;
+}
+
+.rs-btn-card {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  width: 100%;
+  min-height: 14rem;
+  padding: 0;
+  overflow: hidden;
+  border: 1px solid #444;
+  background: #101010;
+  color: #f0f0f0;
+  text-transform: none;
+  letter-spacing: normal;
+  transition:
+    border-color 0.15s,
+    background 0.15s,
+    transform 0.12s,
+    box-shadow 0.15s;
+}
+
+.rs-btn-card:hover:not(:disabled):not(.is-disabled) {
+  border-color: #686868;
+  background: #161616;
+  transform: translateY(-1px);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.35);
+}
+
+.rs-btn-card:focus-visible {
+  border-color: #777;
+}
+
+.rs-btn-card.is-disabled,
+.rs-btn-card:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  transform: none;
+  box-shadow: none;
+}
+
+/* Attached copy control — pair with input/output in a stretch row */
+.rs-copy-btn {
+  flex: 0 0 var(--rs-control-height);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  align-self: stretch;
+  min-height: var(--rs-control-height);
+  height: auto;
+  padding: 0;
+  border: 1px solid #4a4a4a;
+  border-left: none;
+  border-radius: 0 4px 4px 0;
+  background: #1a1a1a;
+  color: #d0d0d0;
+  transition:
+    border-color 0.12s,
+    background 0.12s,
+    color 0.12s;
+}
+
+.rs-copy-btn:hover {
+  color: #fff;
+  border-color: #666;
+  background: #242424;
+}
+
+body.rustscript [id^='saito-overlay-backdrop']:not(.rs-onboarding-overlay-backdrop),
+body.rustscript .saito-overlay.rs-publish-overlay-backdrop,
+body.rustscript [id^='saito-overlay-backdrop'].rs-publish-overlay-backdrop {
+  background: rgba(6, 6, 8, 0.92) !important;
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+}
+
+body.rustscript [id^='saito-overlay-backdrop'].rs-onboarding-overlay-backdrop {
+  background: rgba(14, 16, 20, 0.96) !important;
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+}
+
+body.rustscript .saito-overlay:has(> .rustscript-overlay):not(.rs-onboarding-overlay) {
+  z-index: 100002;
+}
+
+/* Spend / transfer output prompts */
+.rustscript-overlay.rs-spend-output {
+  gap: var(--saito-space-lg);
+}
+
+.rustscript-overlay.rs-spend-output .rs-spend-title {
+  font-size: 2rem;
+  letter-spacing: normal;
+  line-height: 1.25;
+  padding-right: 3.6rem;
+}
+
+.rustscript-overlay.rs-spend-output .rs-overlay-body {
+  gap: var(--saito-space-lg);
+}
+
+.rustscript-overlay.rs-spend-output .rs-spend-available {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  padding-bottom: var(--saito-space-sm);
+  border-bottom: 1px solid #2a2a2a;
+}
+
+.rustscript-overlay.rs-spend-output .rs-spend-available-value {
+  color: #d8e0c8;
+  font-size: 1.55em;
+  font-weight: 500;
+  letter-spacing: 0.01em;
+  line-height: 1.3;
+}
+
+.rustscript-overlay.rs-spend-output .rs-spend-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+  margin: 0;
+}
+
+.rustscript-overlay.rs-spend-output .rs-spend-field-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--saito-space-md);
+  min-width: 0;
+}
+
+.rustscript-overlay.rs-spend-output .rs-spend-field .rs-overlay-label {
+  margin-bottom: 0;
+}
+
+.rustscript-overlay.rs-spend-output .rs-spend-use-mine {
+  margin: 0;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: var(--saito-muted-foreground);
+  font-size: var(--font-size-tiny);
+  font-weight: 400;
+  letter-spacing: 0.01em;
+  line-height: 1.35;
+  text-transform: none;
+  text-decoration: underline dashed;
+  text-decoration-thickness: from-font;
+  text-underline-offset: 0.15em;
+  cursor: pointer;
+}
+
+.rustscript-overlay.rs-spend-output .rs-spend-use-mine:hover {
+  color: var(--saito-foreground);
+}
+
+.rustscript-overlay.rs-spend-output .rs-spend-amount-row {
+  display: flex;
+  gap: 0;
+  align-items: stretch;
+}
+
+.rustscript-overlay.rs-spend-output .rs-spend-amount-row .rs-spend-amount {
+  flex: 1 1 auto;
+  min-width: 0;
+  border-top-right-radius: 0;
+  border-bottom-right-radius: 0;
+}
+
+.rustscript-overlay.rs-spend-output .rs-spend-amount-row .rs-spend-max-btn {
+  flex: 0 0 auto;
+  align-self: stretch;
+  min-width: 6rem;
+  height: auto;
+  min-height: var(--rs-control-height);
+  padding: 0 var(--saito-space-md);
+  border-radius: 0 4px 4px 0;
+  border-left: none;
+  letter-spacing: 0.06em;
+}
+
+.rustscript-overlay.rs-spend-output .rs-spend-error {
+  margin: 0;
+}
+
+.rustscript-overlay.rs-spend-output .rs-overlay-actions {
+  margin-top: var(--saito-space-sm);
+}
+
+/* Unlock fee overlay */
+.rustscript-overlay.rs-unlock-fee-overlay .rs-unlock-fee-lead {
+  margin: 0 0 var(--saito-space-md);
+}
+
+.rustscript-overlay.rs-unlock-fee-overlay .rs-unlock-fee-note {
+  margin: var(--saito-space-sm) 0 0;
+  color: #8a8a8a;
+  font-size: 0.92em;
+  line-height: 1.45;
+}
+
+.rustscript-overlay.rs-unlock-fee-overlay .rs-unlock-fee-error {
+  margin-top: var(--saito-space-sm);
+}
+
+/* Unlock broadcast confirm */
+.rustscript-overlay.rs-unlock-solution .rs-unlock-confirm-meta {
+  margin: var(--saito-space-md) 0 0;
+  padding: 0;
+}
+
+.rustscript-overlay.rs-unlock-solution .rs-unlock-confirm-row {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--saito-space-md);
+  padding: 0.55rem 0;
+  border-top: 1px solid rgba(80, 80, 80, 0.45);
+}
+
+.rustscript-overlay.rs-unlock-solution .rs-unlock-confirm-row:last-child {
+  border-bottom: 1px solid rgba(80, 80, 80, 0.45);
+}
+
+.rustscript-overlay.rs-unlock-solution .rs-unlock-confirm-row dt {
+  margin: 0;
+  color: #8a8a8a;
+  font-weight: 400;
+}
+
+.rustscript-overlay.rs-unlock-solution .rs-unlock-confirm-row dd {
+  margin: 0;
+  color: #d8d8d8;
+  text-align: right;
+}
+

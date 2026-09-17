@@ -3,6 +3,7 @@ const MixinModule = require('./lib/mixinmodule');
 const ModTemplate = require('../../lib/templates/modtemplate');
 const fetch = require('node-fetch');
 const axios = require('axios');
+const Decimal = require('decimal.js');
 const JSON = require('json-bigint');
 const PeerService = require('saito-js/lib/peer_service').default;
 const {
@@ -21,6 +22,75 @@ const {
   blake3Hash
 } = require('@mixin.dev/mixin-node-sdk');
 const { v4 } = require('uuid');
+
+function createMixinCredentials(account = {}) {
+  const keystore = {
+    app_id: account.user_id,
+    session_id: account.session_id,
+    pin_token_base64: account.tip_key_base64 || account.pin_token_base64,
+    session_private_key: account.session_seed || account.session_private_key
+  };
+  const spend_private_key = account.spend_private_key;
+
+  const missing = [];
+  for (const [name, value] of Object.entries({ ...keystore, spend_private_key })) {
+    if (!value) {
+      missing.push(name);
+    }
+  }
+
+  if (missing.length) {
+    throw new Error(`Mixin account configuration is incomplete (missing: ${missing.join(', ')})`);
+  }
+
+  return {
+    keystore,
+    spend_private_key,
+    user_id: keystore.app_id
+  };
+}
+
+function createMixinMemo(memo = '') {
+  if (Buffer.isBuffer(memo)) {
+    return memo;
+  }
+  return Buffer.from(String(memo), 'utf8');
+}
+
+function calculatePendingBalance(balance, ...deductions) {
+  let pending = new Decimal(balance);
+  for (const deduction of deductions) {
+    pending = pending.minus(deduction);
+  }
+  return Number(pending.toFixed(8));
+}
+
+function selectWithdrawalFee(feeResponse, assetId, chainAssetId) {
+  const fees = Array.isArray(feeResponse) ? feeResponse : feeResponse ? [feeResponse] : [];
+  const assetFee = fees.find((fee) => fee.asset_id === assetId);
+  const chainFee = fees.find((fee) => fee.asset_id === chainAssetId);
+
+  return assetFee ?? chainFee ?? (fees.length === 1 ? fees[0] : null);
+}
+
+function formatMixinError(err) {
+  const apiError = err?.response?.data?.error;
+  if (apiError?.description || apiError?.code) {
+    return [apiError.code, apiError.description].filter(Boolean).join(': ');
+  }
+  if (err instanceof Error) {
+    return err.message;
+  }
+  if (typeof err === 'string') {
+    return err;
+  }
+  try {
+    const serialized = JSON.stringify(err);
+    return serialized === undefined ? String(err) : serialized;
+  } catch (jsonError) {
+    return String(err);
+  }
+}
 
 //
 // Mixin Module
@@ -68,6 +138,7 @@ class Mixin extends ModTemplate {
     this.mixin_peer = null;
     this.bot = null;
     this.account_created = 0;
+    this.account_creation_promise = null;
     this.crypto_mods = [];
   }
 
@@ -150,24 +221,11 @@ class Mixin extends ModTemplate {
     }
 
     //
-    // sendPayment, returnWithdrawalFeeForAddress
+    // sendPayment, returnWithdrawalFeeForAddress, getMixinAddress
     //
-    if (message.request === 'mixin fetch user by address') {
-      return await this.receiveFetchUserByAddressTransaction(app, tx, peer, mycallback);
-    }
-
-    //
-    // getMixinAddress
-    //
-    if (message.request === 'mixin fetch user by publickey by asset_id') {
-      return await this.receiveFetchUserByPublickeyByAssetIdTransaction(app, tx, peer, mycallback);
-    }
-
-    //
-    // returnHistory
-    //
-    if (message.request === 'mixin fetch address by user id by asset_id') {
-      return await this.receiveFetchAddressByUserIdByAssetIdTransaction(app, tx, peer, mycallback);
+    if (message.request === 'mixin fetch user') {
+      await this.receiveFetchUserTransaction(app, tx, peer, mycallback);
+      return 1;
     }
 
     //
@@ -228,7 +286,6 @@ class Mixin extends ModTemplate {
     let rtModules = this.app.modules.respondTo('mixin-crypto');
 
     for (let i = 0; i < rtModules.length; i++) {
-      // these are the responding Modules, not the returned object of the respondTo
       let crypto_module = new MixinModule(
         this.app,
         mixin_self,
@@ -260,32 +317,27 @@ class Mixin extends ModTemplate {
       this.crypto_mods.push(crypto_module);
       this.app.modules.mods.push(crypto_module);
 
-      /////////////////////////////////////////////////////////////////
-      // Have a slight asynchronous delay to hit up the Mixin server
-      // so we don't slow down saito initialization
-      /////////////////////////////////////////////////////////////////
       setTimeout(async () => {
-        // Will update confirmations, usd_price, etc
-        await crypto_module.returnNetworkInfo();
+        if (typeof crypto_module?.returnMixinNetworkInfo === 'function') {
+          await crypto_module.returnMixinNetworkInfo();
+        }
+
+        //
+        // necessary for module functionality
+        //
         await crypto_module.installModule(mixin_self.app);
 
-        // Do an initial balance check if we are able to
         if (mixin_self.account_created) {
-          if (crypto_module.isActivated()) {
-            await crypto_module.checkBalance();
-          } else if (crypto_module.address) {
-            crypto_module.activate();
+          // We don't want to activate every crypto in the wallet, only
+          // the ones that users have already manually activated
+          if (crypto_module.isActivated() || crypto_module.address) {
+            await crypto_module.activate();
           }
         }
       }, 250);
     }
   }
 
-  //
-  // QUESTION -- dl Nov-1-2025
-  //
-  // why does this fun
-  //
   async onPeerServiceUp(app, peer, service = {}) {
     if (service.service === 'mixin') {
       console.info('Mixin Module: API online!');
@@ -326,28 +378,74 @@ class Mixin extends ModTemplate {
   // fetchUtxo()
   // fetchSafeSnapshots()
   // fetchPendingDeposits()
-  // returnNetworkInfo()
+  // returnMixinNetworkInfo()
   // returnWithdrawalFee()
   // sendInNetworkTransferRequest()
   // sendExternalNetworkTransferRequest()
-  // sendFetchUserByAddressTransaction()
-  // sendFetchUserByPublicKeyByAssetIdTransaction()
-  // sendFetchAddressByUserIdTransaction()
+  // sendFetchUserTransaction()
   // ---------------------
   //
 
   async createAccount(callback = null, force_new = false) {
-    if (this.account_created == 0 || force_new) {
-      const mixin_self = this;
-      const privateKey = await this.app.wallet.getPrivateKey();
-      const callback2 = (res) => {
-        console.log(res);
-        if (typeof res == 'object' && res?.res) {
-          // Unencrypt
-          const buf1 = Buffer.from(res.res, 'base64');
-          const buf2 = mixin_self.app.crypto.decryptWithPrivateKey(buf1, privateKey);
+    let result;
 
-          res.keys = JSON.parse(buf2.toString('utf8'));
+    if (this.account_created && !force_new) {
+      console.warn('You already have a Mixin Account created...');
+      result = { keys: this.mixin, existing: true };
+    } else if (!force_new && this.account_creation_promise) {
+      result = await this.account_creation_promise;
+    } else {
+      const createAccount = async () => {
+        const privateKey = await this.app.wallet.getPrivateKey();
+        let response;
+
+        if (this.mixin_peer) {
+          console.log(
+            'Request remote node to create Mixin User Account',
+            this.mixin_peer.publicKey
+          );
+
+          response = await new Promise((resolve) => {
+            let settled = false;
+            const finish = (res) => {
+              if (!settled) {
+                settled = true;
+                clearTimeout(timeout);
+                resolve(res);
+              }
+              return res;
+            };
+            const timeout = setTimeout(
+              () => finish({ err: 'Mixin account service timed out' }),
+              30000
+            );
+
+            try {
+              Promise.resolve(this.sendCreateAccountTransaction(finish, force_new)).catch((err) =>
+                finish({ err: formatMixinError(err) })
+              );
+            } catch (err) {
+              finish({ err: formatMixinError(err) });
+            }
+          });
+        } else if (this.app.BROWSER) {
+          response = { err: 'Mixin account service is unavailable' };
+        } else {
+          console.log('==> Create Mixin User Account on Same Node as API Keys');
+          response = await this.createMixinUserAccount(this.publicKey, null, force_new);
+        }
+
+        if (typeof response !== 'object' || !response?.res) {
+          const error = response?.err || 'Mixin account service returned no account';
+          console.error('Mixin Account Error:', error);
+          return { err: error };
+        }
+
+        try {
+          const res = { ...response };
+          const encrypted = Buffer.from(res.res, 'base64');
+          const decrypted = this.app.crypto.decryptWithPrivateKey(encrypted, privateKey);
+          res.keys = JSON.parse(decrypted.toString('utf8'));
 
           if (res.restored) {
             console.log('Successfully Restored Mixin Account!');
@@ -355,30 +453,38 @@ class Mixin extends ModTemplate {
             console.log('Successfully Created Mixin Account!');
           }
 
-          // Skip save step if we are creating multiple accounts on the same public key
+          // Skip save step if we are creating multiple accounts on the same public key.
           if (!force_new) {
-            mixin_self.mixin = res.keys;
-            mixin_self.account_created = 1;
-            mixin_self.save();
+            this.mixin = res.keys;
+            this.account_created = 1;
+            this.save();
           }
-        } else {
-          console.error('Mixin Account Error:', res?.err);
-        }
-        if (callback) {
-          return callback(res);
+
+          return res;
+        } catch (err) {
+          const error = `Unable to decrypt Mixin account: ${formatMixinError(err)}`;
+          console.error(error);
+          return { err: error };
         }
       };
 
-      if (this.mixin_peer) {
-        console.log('Request remote node to create Mixin User Account', this.mixin_peer.publicKey);
-        await this.sendCreateAccountTransaction(callback2, force_new);
+      if (force_new) {
+        result = await createAccount();
       } else {
-        console.log('==> Create Mixin User Account on Same Node as API Keys');
-        await this.createMixinUserAccount(this.publicKey, callback2, force_new);
+        this.account_creation_promise = createAccount();
+        try {
+          result = await this.account_creation_promise;
+        } finally {
+          this.account_creation_promise = null;
+        }
       }
-    } else {
-      console.warn('You already have a Mixin Account created...');
     }
+
+    if (callback) {
+      await callback(result);
+    }
+
+    return result;
   }
 
   sendCreateAccountTransaction(callback = null, force_new = false) {
@@ -389,7 +495,7 @@ class Mixin extends ModTemplate {
       'mixin create account',
       data,
       callback,
-      mixin_self.mixin_peer?.peerIndex
+      mixin_self.mixin_peer?.publicKey
     );
   }
 
@@ -502,61 +608,55 @@ class Mixin extends ModTemplate {
   }
 
   async createDepositAddress(asset_id, chain_id, alt_keys = null) {
-    let keystore;
-
-    if (alt_keys) {
-      keystore = {
-        app_id: alt_keys.user_id,
-        session_id: alt_keys.session_id,
-        pin_token_base64: alt_keys.tip_key_base64,
-        session_private_key: alt_keys.session_seed
-      };
-    } else {
-      keystore = {
-        app_id: this.mixin.user_id,
-        session_id: this.mixin.session_id,
-        pin_token_base64: this.mixin.tip_key_base64,
-        session_private_key: this.mixin.session_seed
-      };
-    }
-
-    let user = MixinApi({ keystore });
-
-    let address = await user.safe.createDeposit(chain_id);
-
-    console.log('New MIXIN deposit address:', address);
-
-    if (!address[0]?.destination) {
-      console.error('ERROR: Mixin error create deposit address: Deposit Address undefined!');
+    if (!chain_id) {
+      console.error('ERROR: Cannot create Mixin deposit address without a chain ID');
       return false;
     }
 
-    if (!alt_keys) {
-      for (let i = 0; i < this.crypto_mods.length; i++) {
-        if (this.crypto_mods[i].asset_id === asset_id) {
-          this.crypto_mods[i].address = address[0].destination;
-          this.crypto_mods[i].save();
+    try {
+      const account = alt_keys || this.mixin;
+      const { keystore } = createMixinCredentials(account);
+      const user = MixinApi({ keystore });
+      const address = await user.safe.createDeposit(chain_id);
+      const destination = address?.[0]?.destination;
 
-          if (this.app.BROWSER) {
-            this.app.network.sendRequestAsTransaction(
-              'mixin save new deposit address',
-              {
-                user_id: this.mixin.user_id,
-                asset_id: asset_id,
-                address: address[0].destination,
-                publickey: this.publicKey
-              },
-              function (res) {
-                console.log('Callback for sendSaveUserTransaction request: ', res);
-              },
-              this.mixin_peer?.peerIndex
-            );
+      console.log('New MIXIN deposit address:', address);
+
+      if (!destination) {
+        console.error('ERROR: Mixin error create deposit address: Deposit Address undefined!');
+        return false;
+      }
+
+      if (!alt_keys) {
+        for (let i = 0; i < this.crypto_mods.length; i++) {
+          if (this.crypto_mods[i].asset_id === asset_id) {
+            this.crypto_mods[i].address = destination;
+            this.crypto_mods[i].save();
+
+            if (this.app.BROWSER) {
+              this.app.network.sendRequestAsTransaction(
+                'mixin save new deposit address',
+                {
+                  user_id: this.mixin.user_id,
+                  asset_id: asset_id,
+                  address: destination,
+                  publickey: this.publicKey
+                },
+                function (res) {
+                  console.log('Callback for sendSaveUserTransaction request: ', res);
+                },
+                this.mixin_peer?.publicKey
+              );
+            }
           }
         }
       }
-    }
 
-    return address[0].destination;
+      return destination;
+    } catch (err) {
+      console.error('ERROR: Mixin error create deposit address: ' + formatMixinError(err));
+      return false;
+    }
   }
 
   async fetchSafeUtxoBalance(asset_id) {
@@ -619,19 +719,21 @@ class Mixin extends ModTemplate {
       offset = offset.substring(0, offset.length - 1);
       offset = offset + '000000Z';
 
-      console.log(created_at, offset);
-
       let snapshots = await user.safe.fetchSafeSnapshots({
         asset: asset_id,
-        limit: 100,
+        limit: 500,
         offset
       });
 
       if (callback) {
-        return callback(snapshots);
+        callback(snapshots);
       }
+      return snapshots;
     } catch (err) {
       console.error('ERROR: Mixin error fetch safe snapshots: ' + err);
+      if (callback) {
+        callback(false);
+      }
       return false;
     }
   }
@@ -763,7 +865,7 @@ class Mixin extends ModTemplate {
     }
   }
 
-  async returnNetworkInfo(asset_id) {
+  async returnMixinNetworkInfo(asset_id) {
     try {
       let user = MixinApi({
         keystore: {
@@ -797,38 +899,42 @@ class Mixin extends ModTemplate {
       const asset = await user.safe.fetchAsset(asset_id);
       const chain =
         asset.chain_id === asset.asset_id ? asset : await user.safe.fetchAsset(asset.chain_id);
-      const fees = await user.safe.fetchFee(asset.asset_id, recipient);
-      const assetFee = fees.find((f) => f.asset_id === asset.asset_id);
-      const chainFee = fees.find((f) => f.asset_id === chain.asset_id);
-      const fee = assetFee ?? chainFee;
+      const feeResponse = await user.safe.fetchFee(asset.asset_id, recipient);
+      const fee = selectWithdrawalFee(feeResponse, asset.asset_id, chain.asset_id);
 
-      return fee.amount;
+      if (!fee?.asset_id || fee.amount == null) {
+        throw new Error(`No withdrawal fee available for ${asset_id}`);
+      }
+
+      const feeAsset =
+        fee.asset_id === asset.asset_id
+          ? asset
+          : fee.asset_id === chain.asset_id
+            ? chain
+            : await user.safe.fetchAsset(fee.asset_id);
+
+      return {
+        ...fee,
+        ticker: feeAsset.display_symbol || feeAsset.symbol
+      };
     } catch (err) {
       console.error('ERROR: Mixin error check withdrawl fee: ' + err);
       return false;
     }
   }
 
-  async sendInNetworkTransferRequest(asset_id, destination, amount, alt_keys = null) {
+  async sendInNetworkTransferRequest(asset_id, destination, amount, memo = '', alt_keys = null) {
     try {
-      let spend_private_key = this.mixin.spend_private_key;
-      let keystore = {
-        app_id: this.mixin.user_id,
-        session_id: this.mixin.session_id,
-        pin_token_base64: this.mixin.tip_key_base64,
-        session_private_key: this.mixin.session_seed
-      };
-
-      if (alt_keys) {
-        keystore = {
-          app_id: alt_keys.user_id,
-          session_id: alt_keys.session_id,
-          pin_token_base64: alt_keys.pin_token_base64,
-          session_private_key: alt_keys.session_private_key
-        };
+      // Preserve the existing alternate-account call signature used by BuySaito.
+      if (memo && typeof memo === 'object' && !Buffer.isBuffer(memo)) {
+        alt_keys = memo;
+        memo = '';
       }
 
-      let client = MixinApi({ keystore });
+      const { keystore, spend_private_key, user_id } = createMixinCredentials(
+        alt_keys || this.mixin
+      );
+      const client = MixinApi({ keystore });
 
       // destination
       const members = [destination];
@@ -837,14 +943,14 @@ class Mixin extends ModTemplate {
 
       // get unspent utxos
       const outputs = await client.utxo.safeOutputs({
-        members: [this.mixin.user_id],
+        members: [user_id],
         threshold: 1,
         asset: asset_id,
         state: 'unspent'
       });
       console.log('outputs: ', outputs);
       const balance = await client.utxo.safeAssetBalance({
-        members: [this.mixin.user_id],
+        members: [user_id],
         threshold: 1,
         asset: asset_id,
         state: 'unspent'
@@ -871,9 +977,16 @@ class Mixin extends ModTemplate {
       console.log('ghosts: ', ghosts);
 
       // build safe transaction raw
-      const tx = buildSafeTransaction(utxos, recipients, ghosts, 'test-memo');
+      const tx = buildSafeTransaction(utxos, recipients, ghosts, createMixinMemo(memo));
       console.log('tx: ', tx);
-      const raw = encodeSafeTransaction(tx);
+      let raw;
+      try {
+        raw = encodeSafeTransaction(tx);
+      } catch (err) {
+        throw new Error(
+          `Unable to encode Mixin Safe transaction (${tx.inputs.length} input(s), ${tx.outputs.length} output(s), asset ${tx.asset}): ${formatMixinError(err)}`
+        );
+      }
       console.log('raw: ', raw);
 
       // verify safe transaction
@@ -896,32 +1009,63 @@ class Mixin extends ModTemplate {
       ]);
 
       console.log('sendedTx: ', sendedTx);
-      return { status: 200, message: sendedTx };
+      return {
+        status: 200,
+        message: sendedTx,
+        pending_balance: calculatePendingBalance(balance, amount)
+      };
     } catch (err) {
-      return { status: 400, message: err };
+      const message = formatMixinError(err);
+      console.error('Mixin internal transfer failed:', message);
+      return { status: 400, message };
     }
   }
 
-  async sendExternalNetworkTransferRequest(asset_id, destination, amount) {
+  async sendExternalNetworkTransferRequest(asset_id, destination, amount, memo = '') {
     try {
-      let spend_private_key = this.mixin.spend_private_key;
-      let user = MixinApi({
-        keystore: {
-          app_id: this.mixin.user_id,
-          session_id: this.mixin.session_id,
-          pin_token_base64: this.mixin.tip_key_base64,
-          session_private_key: this.mixin.session_seed
-        }
+      const { keystore, spend_private_key, user_id } = createMixinCredentials(this.mixin);
+      const user = MixinApi({ keystore });
+      const balance = await user.utxo.safeAssetBalance({
+        members: [user_id],
+        threshold: 1,
+        asset: asset_id,
+        state: 'unspent'
       });
 
       const asset = await user.safe.fetchAsset(asset_id);
       const chain =
         asset.chain_id === asset.asset_id ? asset : await user.safe.fetchAsset(asset.chain_id);
-      const fees = await user.safe.fetchFee(asset.asset_id, destination);
-      const assetFee = fees.find((f) => f.asset_id === asset.asset_id);
-      const chainFee = fees.find((f) => f.asset_id === chain.asset_id);
-      const fee = assetFee ?? chainFee;
+      const feeResponse = await user.safe.fetchFee(asset.asset_id, destination);
+      const fee = selectWithdrawalFee(feeResponse, asset.asset_id, chain.asset_id);
+      if (!fee?.asset_id || fee.amount == null) {
+        throw new Error(`No withdrawal fee available for ${asset_id}`);
+      }
+      const assetTicker =
+        this.crypto_mods.find((crypto_module) => crypto_module.asset_id === asset.asset_id)
+          ?.ticker ||
+        asset.display_symbol ||
+        asset.symbol;
+      const feeAsset =
+        fee.asset_id === asset.asset_id
+          ? asset
+          : fee.asset_id === chain.asset_id
+            ? chain
+            : await user.safe.fetchAsset(fee.asset_id);
+      const feeTicker =
+        this.crypto_mods.find((crypto_module) => crypto_module.asset_id === fee.asset_id)?.ticker ||
+        feeAsset.display_symbol ||
+        feeAsset.symbol;
+      const assetRequired = new Decimal(amount).plus(
+        fee.asset_id === asset.asset_id ? fee.amount : 0
+      );
+
+      if (new Decimal(balance).lessThan(assetRequired)) {
+        throw new Error(
+          `Insufficient ${assetTicker} balance: ${assetRequired.toString()} required, ${balance} available.`
+        );
+      }
       console.log('fee', fee);
+      console.log('balance: ', balance);
 
       // withdrawal with chain asset as fee
       if (fee.asset_id !== asset.asset_id) {
@@ -933,6 +1077,19 @@ class Mixin extends ModTemplate {
           asset: fee.asset_id,
           state: 'unspent'
         });
+        const feeBalance = await user.utxo.safeAssetBalance({
+          members: [user_id],
+          threshold: 1,
+          asset: fee.asset_id,
+          state: 'unspent'
+        });
+
+        if (new Decimal(feeBalance).lessThan(fee.amount)) {
+          throw new Error(
+            `A ${feeTicker} balance is required to withdraw ${assetTicker}. ` +
+              `The network fee is ${fee.amount} ${feeTicker}, but only ${feeBalance} ${feeTicker} is available.`
+          );
+        }
         console.log('outputs: ', outputs, 'feeOutputs: ', feeOutputs);
 
         let recipients = [
@@ -956,15 +1113,10 @@ class Mixin extends ModTemplate {
 
         // get ghost key to send tx
         const txId = v4();
-        const ghosts = await client.utxo.ghostKey(recipients, txId, spend_private_key);
+        const ghosts = await user.utxo.ghostKey(recipients, txId, spend_private_key);
 
-        // spare the 0 inedx for withdrawal output, withdrawal output doesnt need ghost key
-        const tx = buildSafeTransaction(
-          utxos,
-          recipients,
-          [undefined, ...ghosts],
-          'withdrawal-memo'
-        );
+        // ghostKey already leaves the withdrawal entry undefined and index-aligned.
+        const tx = buildSafeTransaction(utxos, recipients, ghosts, createMixinMemo(memo));
         console.log('tx: ', tx);
         const raw = encodeSafeTransaction(tx);
         const ref = blake3Hash(Buffer.from(raw, 'hex')).toString('hex');
@@ -988,14 +1140,10 @@ class Mixin extends ModTemplate {
           );
         }
         const feeId = v4();
-        const feeGhosts = await client.utxo.ghostKey(feeRecipients, feeId, spendPrivateKey);
-        const feeTx = buildSafeTransaction(
-          feeUtxos,
-          feeRecipients,
-          feeGhosts,
-          'withdrawal-fee-memo',
-          [ref]
-        );
+        const feeGhosts = await user.utxo.ghostKey(feeRecipients, feeId, spend_private_key);
+        const feeTx = buildSafeTransaction(feeUtxos, feeRecipients, feeGhosts, createMixinMemo(), [
+          ref
+        ]);
         console.log('feeTx: ', feeTx);
         const feeRaw = encodeSafeTransaction(feeTx);
         console.log('feeRaw: ', feeRaw);
@@ -1026,7 +1174,11 @@ class Mixin extends ModTemplate {
         ]);
 
         console.log('res: ', res);
-        return { status: 200, message: res };
+        return {
+          status: 200,
+          message: res,
+          pending_balance: calculatePendingBalance(balance, amount)
+        };
       } else {
         // withdrawal with asset as fee
         const outputs = await user.utxo.safeOutputs({
@@ -1058,17 +1210,9 @@ class Mixin extends ModTemplate {
 
         console.log('mixin checkpoint');
 
-        // the index of ghost keys must be the same with the index of outputs
-        // but withdrawal output doesnt need ghost key, so index + 1
         const request_id = v4();
-        const ghosts = await client.utxo.ghostKey(recipients, request_id, spendPrivateKey);
-        // spare the 0 inedx for withdrawal output, withdrawal output doesnt need ghost key
-        const tx = buildSafeTransaction(
-          utxos,
-          recipients,
-          [undefined, ...ghosts],
-          'withdrawal-memo'
-        );
+        const ghosts = await user.utxo.ghostKey(recipients, request_id, spend_private_key);
+        const tx = buildSafeTransaction(utxos, recipients, ghosts, createMixinMemo(memo));
         console.log('tx: ', tx);
         const raw = encodeSafeTransaction(tx);
 
@@ -1088,13 +1232,24 @@ class Mixin extends ModTemplate {
           }
         ]);
         console.log('res: ', res);
-        return { status: 200, message: res };
+        return {
+          status: 200,
+          message: res,
+          pending_balance: calculatePendingBalance(balance, amount, fee.amount)
+        };
       }
     } catch (err) {
-      return { status: 400, message: err };
+      const message = formatMixinError(err);
+      console.error('Mixin external transfer failed:', message);
+      return { status: 400, message };
     }
   }
 
+  /**
+   *
+   * TODO -- we want a uniqueness constraint so we don't make duplicate entries
+   * everytime a user ports their key and "recovers" their mixin credentials
+   */
   async receiveSaveUserTransaction(app, tx, peer, callback) {
     let message = tx.returnMessage();
 
@@ -1160,101 +1315,62 @@ class Mixin extends ModTemplate {
     return result;
   }
 
-  async sendFetchUserByAddressTransaction(params = {}, callback) {
-    let data = params;
+  async sendFetchUserTransaction(params = {}, callback = null) {
     return this.app.network.sendRequestAsTransaction(
-      'mixin fetch user by address',
-      data,
-      function (res) {
-        console.log('Callback for sendFetchUserByAddressTransaction request: ', res);
-        return callback(res);
-      },
-      this.mixin_peer?.peerIndex
-    );
-  }
-
-  async receiveFetchUserByAddressTransaction(app, tx, peer, callback = null) {
-    let message = tx.returnMessage();
-    let address = message.data.address;
-    let sql = `SELECT * FROM mixin_users 
-               WHERE address = $address;`;
-    let params = {
-      $address: address
-    };
-
-    let result = await this.app.storage.queryDatabase(sql, params, 'mixin');
-    if (result.length > 0) {
-      return callback(result[0]);
-    }
-
-    return callback(false);
-  }
-
-  // Get MixinAddress -> returnAddressFromPublicKey
-  async sendFetchUserByPublicKeyByAssetIdTransaction(params = {}, callback) {
-    return await this.app.network.sendRequestAsTransaction(
-      'mixin fetch user by publickey by asset_id',
+      'mixin fetch user',
       params,
-      callback,
-      this.mixin_peer?.peerIndex
+      function (res) {
+        console.log('Callback for sendFetchUser: ', params, res);
+        if (callback) {
+          callback(res);
+        }
+        return res;
+      },
+      this.mixin_peer?.publicKey
     );
   }
 
-  async receiveFetchUserByPublickeyByAssetIdTransaction(app, tx, peer, callback = null) {
-    let message = tx.returnMessage();
-    let publicKey = message.data.publicKey;
-    let asset_id = message.data.asset_id;
-    let sql = `SELECT * FROM mixin_users 
-               WHERE publickey = $publicKey AND asset_id = $asset_id ORDER BY created_at DESC;`;
-    let params = {
-      $publicKey: publicKey,
-      $asset_id: asset_id
-    };
-    let result = await this.app.storage.queryDatabase(sql, params, 'mixin');
-    if (result.length > 0) {
-      return callback(result);
+  async receiveFetchUserTransaction(app, tx, peer, callback = null) {
+    let data = tx.returnMessage().data;
+    let filters = [];
+    let params = {};
+
+    if (!data?.asset_id) {
+      return callback?.([]);
     }
 
-    return callback(false);
-  }
-
-  //Return History
-  async sendFetchAddressByUserIdTransaction(asset_id, user_id) {
-    if (this.mixin_peer?.peerIndex) {
-      return await this.app.network.sendRequestAsTransaction(
-        'mixin fetch address by user id',
-        { asset_id, user_id },
-        function (res) {
-          if (res.length > 0) {
-            return res[0];
-          }
-          return null;
-        },
-        this.mixin_peer.peerIndex
-      );
-    } else {
-      return null;
-    }
-  }
-
-  async receiveFetchAddressByUserIdTransaction(app, tx, peer, callback = null) {
-    console.log('tx:', tx);
-    let message = tx.returnMessage();
-    let user_id = message.data.user_id;
-    let asset_id = message.data.asset_id;
-    let sql = `SELECT * FROM mixin_users 
-               WHERE user_id = $user_id AND asset_id = $asset_id ORDER BY created_at DESC;`;
-    let params = {
-      $user_id: user_id,
-      $asset_id: asset_id
-    };
-    let result = await this.app.storage.queryDatabase(sql, params, 'mixin');
-    console.log('result:', result);
-    if (result.length > 0) {
-      return callback(result);
+    if (data?.address) {
+      filters.push('address = $address');
+      params['$address'] = data.address;
     }
 
-    return callback(false);
+    if (data?.publicKey) {
+      filters.push('publickey = $publickey');
+      params['$publickey'] = data.publicKey;
+    }
+
+    if (data?.user_id) {
+      filters.push('user_id = $user_id');
+      params['$user_id'] = data.user_id;
+    }
+
+    if (!filters.length) {
+      return callback?.([]);
+    }
+
+    filters.push('asset_id = $asset_id');
+    params['$asset_id'] = data.asset_id;
+    const sql = `SELECT * FROM mixin_users WHERE ${filters.join(' AND ')} ORDER BY created_at DESC`;
+
+    console.log('*****', sql, params);
+
+    try {
+      let result = await this.app.storage.queryDatabase(sql, params, 'mixin');
+      return callback?.(result);
+    } catch (err) {
+      console.error(err);
+    }
+    return callback?.([]);
   }
 
   async load() {

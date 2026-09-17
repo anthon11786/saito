@@ -5,10 +5,15 @@ const SaitoUser = require('./../../saito-user/saito-user');
 const CreateNFT = require('./create-overlay');
 const NFTOverlay = require('./nft-overlay');
 
+const NFT_LIST_TYPES = new Set(['image', 'css', 'js', 'vault-nft-key']);
+
 class SelectNFT {
-  constructor(app, mod, attach_events = true) {
+  constructor(app, mod, attach_events = true, type = '') {
     this.app = app;
     this.mod = mod;
+    if (app?.browser?.addStylesheet) {
+      app.browser.addStylesheet('/saito/css-imports/ui/saito-nft.css');
+    }
     this.overlay = new SaitoOverlay(this.app, this.mod);
     this.create_nft_overlay = new CreateNFT(this.app, this.mod);
     this.nft_overlay = new NFTOverlay(this.app, this.mod);
@@ -16,6 +21,7 @@ class SelectNFT {
     this.card_list = [];
 
     this.callback = null;
+    this.type = this.normalizeType(type);
 
     if (attach_events) {
       this.app.connection.on(
@@ -31,29 +37,37 @@ class SelectNFT {
         this.overlay.close();
       });
 
+      // Prefer wallet-updated (not on-nft-sent/received): options.wallet.nfts
+      // is only fresh after updateNFTList. Await sync before re-render so we
+      // don't race the Wallet module's own async listener.
       app.connection.on('wallet-updated', async () => {
-        const { updated, rebroadcast, persisted } = await this.app.wallet.updateNFTList();
-
-        if (persisted) {
-          siteMessage(`NFT updated in wallet`, 3000);
+        if (typeof this.app.wallet?.updateNFTList === 'function') {
+          await this.app.wallet.updateNFTList();
         }
-
-        // re-render send-nft overlay if its open
         if (this.overlay.visible) {
-          //  this doesn't seem to trigger when NFT is just newly created by wallet
-          //  if (this.overlay.visible && (updated.length > 0 || persisted)) {
-          this.render();
+          await this.render();
         } else {
-          this.updateCardList();
+          await this.updateCardList();
         }
       });
     }
   }
 
+  normalizeType(type = '') {
+    if (type == null || type === '' || type === 'all') {
+      return '';
+    }
+    return NFT_LIST_TYPES.has(String(type)) ? String(type) : '';
+  }
+
   async render(filter = null) {
+    if (arguments.length >= 1) {
+      this.type = this.normalizeType(filter);
+    }
+
     this.overlay.show(SelectNFTTemplate(this));
 
-    await this.renderNFTList(filter);
+    await this.renderNFTList(this.type || null);
 
     setTimeout(() => {
       this.attachEvents();
@@ -61,7 +75,6 @@ class SelectNFT {
   }
 
   async updateCardList() {
-    await this.app.wallet.updateNFTList();
     let nft_list = this.app.options.wallet.nfts || [];
 
     // We want to avoid recreating the cards every time we look launch the overlay
@@ -97,6 +110,7 @@ class SelectNFT {
 
   async renderNFTList(filter) {
     const container = document.querySelector('#nft-list');
+    const instructionsEl = document.querySelector('.saito-nft-list #nft-list-instructions');
 
     if (!container) {
       console.warn('Missing NFT-list container!');
@@ -106,16 +120,20 @@ class SelectNFT {
     await this.updateCardList();
 
     if (!this.card_list?.length) {
-      let html = `
-        <div class="instructions">
-            You do not have any NFTs in your wallet. 
-            If you have just created or been sent one, please wait a few minutes 
-            for the network to confirm for your wallet.
-        </div>
-      `;
-      container.innerHTML = html;
+      container.innerHTML = '<div class="send-nft-list"></div>';
+      if (instructionsEl) {
+        instructionsEl.innerHTML = `
+          <div class="instructions">
+            You do not yet have any NFTs in your wallet.
+          </div>
+        `;
+      }
       return;
     } else {
+      if (instructionsEl) {
+        instructionsEl.innerHTML = '';
+      }
+
       // if nft-list contains nft
       let html = '<div class="send-nft-list"></div>';
       container.innerHTML = html;
@@ -140,6 +158,73 @@ class SelectNFT {
         this.overlay.close();
         this.create_nft_overlay.render();
       };
+    }
+
+    const typeWrap = document.getElementById('nft-list-type');
+    if (typeWrap) {
+      const button = typeWrap.querySelector('.nft-list-type-button');
+      const menu = typeWrap.querySelector('.nft-list-type-menu');
+      const label = typeWrap.querySelector('.nft-list-type-label');
+
+      const closeMenu = () => {
+        if (menu) {
+          menu.hidden = true;
+        }
+        if (button) {
+          button.setAttribute('aria-expanded', 'false');
+        }
+        typeWrap.classList.remove('is-open');
+      };
+
+      const openMenu = () => {
+        if (menu) {
+          menu.hidden = false;
+        }
+        if (button) {
+          button.setAttribute('aria-expanded', 'true');
+        }
+        typeWrap.classList.add('is-open');
+      };
+
+      button.onclick = (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        if (menu?.hidden) {
+          openMenu();
+        } else {
+          closeMenu();
+        }
+      };
+
+      menu?.querySelectorAll('.nft-list-type-option').forEach((option) => {
+        option.onclick = (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          const value = this.normalizeType(option.getAttribute('data-value') || '');
+          this.type = value;
+          menu.querySelectorAll('.nft-list-type-option').forEach((item) => {
+            item.setAttribute(
+              'aria-selected',
+              item.getAttribute('data-value') === value ? 'true' : 'false'
+            );
+          });
+          if (label) {
+            label.textContent = option.textContent;
+          }
+          closeMenu();
+          void this.renderNFTList(this.type || null);
+        };
+      });
+
+      if (this._nftTypeMenuCloser) {
+        document.removeEventListener('mousedown', this._nftTypeMenuCloser, true);
+      }
+      this._nftTypeMenuCloser = (e) => {
+        if (!typeWrap.contains(e.target)) {
+          closeMenu();
+        }
+      };
+      document.addEventListener('mousedown', this._nftTypeMenuCloser, true);
     }
   }
 }

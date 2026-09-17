@@ -1,3 +1,5 @@
+const CtaLoader = require('../../lib/templates/saito-cta-loader.template');
+
 module.exports = (app, mod, build_number, og_card) => {
   return `
 
@@ -20,8 +22,8 @@ module.exports = (app, mod, build_number, og_card) => {
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="application-name" content="saito.io ${mod.returnSlug()}" />
     <meta name="apple-mobile-web-app-title" content="Saito Talk" />
-    <meta name="theme-color" content="#FFFFFF" />
-    <meta name="msapplication-navbutton-color" content="#FFFFFF" />
+    <meta name="theme-color" content="#0d0e11" />
+    <meta name="msapplication-navbutton-color" content="#0d0e11" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <meta name="msapplication-starturl" content="/index.html" />
   
@@ -49,6 +51,7 @@ module.exports = (app, mod, build_number, og_card) => {
 
     <script data-pace-options='{ "restartOnRequestAfter" : false, "restartOnPushState" : false}' src="/saito/lib/pace/pace.min.js"></script>
     <link rel="stylesheet" href="/saito/lib/pace/center-atom.css">
+    ${CtaLoader.head('talk')}
     <link rel="stylesheet" type="text/css" href="/saito/saito.css?v=${build_number}" />  
   
     <title>Saito Talk</title>
@@ -69,14 +72,60 @@ module.exports = (app, mod, build_number, og_card) => {
       height: 100vh;
       width: 100vw;
       /* hardcode bg colors used because saito-variables arent accessible here */
-      background-color: #222;
-      background-image: url('/saito/img/tiled-logo.svg');
+      background-color: #0d0e11;
+    }
+
+    .pace {
+      width: 300px;
+      height: 300px;
+      background: transparent;
+      overflow: visible;
+    }
+
+    .pace::before {
+      content: "";
+      position: absolute;
+      inset: 0;
+      background: var(--dreamscape);
+      border-radius: 50%;
+      animation: pace-theme-center-atom-spin 6s linear infinite;
+    }
+
+    .pace .pace-progress:after {
+      top: calc(100% + 2.5rem);
+      color: #fff;
+      font-size: 32px;
+      text-shadow: 1px 1px 2px #000;
+      transform: translateX(-50%);
+    }
+
+    .pace .pace-activity {
+      width: 290px;
+      height: 290px;
+      top: 0;
+      left: 0;
+      background-image: url('/saito/icons/saito-talk-icon-outline-label.svg');
+      background-size: 190px 190px;
+      background-position: center;
+      background-repeat: no-repeat;
+      animation: pace-icon-throb 1.2s ease-in-out infinite;
+    }
+
+    @keyframes pace-icon-throb {
+      0%,
+      100% {
+        background-size: 175px 175px;
+      }
+
+      50% {
+        background-size: 190px 190px;
+      }
     }
   </style>
   </head>
   
-  <body class="videocall">
-  
+  <body class="videocall saito-cta-loader-active">
+    ${CtaLoader.loader('talk')}
   </body>
   <script type="text/javascript" src="/saito/saito.js?build=${build_number}" >
 </script>

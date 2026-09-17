@@ -1,0 +1,96 @@
+/*
+ * Shared sidebar presentation components.
+ *
+ * Official roots:
+ *   .saito-sidebar-header  — section title row for embedded panels
+ *   .saito-sidebar-element — bordered body surface
+ *
+ * Header contract:
+ *   .title            — always present (text)
+ *   .actions          — optional; zero or more controls / decorative icons
+ *
+ * Legacy class names remain as aliases so unmigrated markup keeps working.
+ */
+
+/* ----------------------------------------------------------------
+   Header
+----------------------------------------------------------------- */
+
+.saito-sidebar-header,
+.sidebar-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--saito-space-sm);
+  width: 100%;
+  min-width: 0;
+  flex-shrink: 0;
+  margin: 0;
+  font-size: inherit;
+  font-family: var(--saito-font-medium);
+  font-weight: normal;
+  /* ≥ visuelt-regular ascent 102% + descent 30% so overflow:hidden does not clip glyphs */
+  line-height: 1.4;
+  color: var(--saito-foreground);
+  text-transform: none;
+}
+
+/* Desktop section step — one size above typical module body (1.25rem → ~20px) */
+@media (min-width: 601px) {
+  .saito-sidebar-header,
+  .sidebar-header {
+    font-size: 1.67rem;
+  }
+}
+
+.saito-sidebar-header > *,
+.sidebar-header > * {
+  width: fit-content;
+  cursor: pointer;
+}
+
+/* Title — left-aligned text */
+.saito-sidebar-header .title,
+.saito-sidebar-header .sidebar-title,
+.sidebar-header .title,
+.sidebar-header .sidebar-title {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: default;
+}
+
+/* Actions — right-aligned controls (Chat ellipsis, Leaderboard icon, …) */
+.saito-sidebar-header .actions,
+.sidebar-header .actions {
+  display: flex;
+  align-items: center;
+  gap: var(--saito-space-xs);
+  flex-shrink: 0;
+  cursor: default;
+}
+
+/*
+ * Full-bleed mobile hosts (e.g. RedSquare Chat) have no rail padding.
+ * Match #saito-header mobile inset (1rem @ ≤620px) so title ↔ logo,
+ * actions ↔ hamburger share one horizontal grid.
+ */
+@media (max-width: 600px) {
+  .saito-sidebar-header,
+  .sidebar-header {
+    padding-inline: 1rem;
+  }
+}
+
+/* ----------------------------------------------------------------
+   Body surface
+----------------------------------------------------------------- */
+
+.saito-sidebar-element {
+  padding: var(--border-padding-normal);
+  border: 1px solid var(--saito-border);
+  border-radius: var(--saito-radius);
+  background: var(--saito-card-wash);
+}

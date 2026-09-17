@@ -1,33 +1,160 @@
 /* Non-lounge overlay rules. Lounge structure lives in arcade-lounge.css */
-.overlay-invite-manager > .arcade-invite {
-	margin-bottom: 0.5rem;
+
+.overlay-invite-manager > .arcade-invites {
+  margin-bottom: 0.5rem;
 }
 
-/* Lightweight READY notification popup (when not in Arcade) */
-.arcade-ready-popup {
-	max-width: 22rem;
-	margin: 0 auto;
-	padding: 1.5rem;
-	text-align: center;
-	background: var(--saito-background-color);
-	border-radius: var(--saito-border-radius);
-	box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
+.arcade-ready-overlay.maximized-overlay .saito-overlay-closebox {
+  top: -1.5rem;
+  right: -1.5rem;
 }
-.arcade-ready-popup-title {
-	font-size: 1.25rem;
-	font-weight: 600;
-	margin-bottom: 0.5rem;
+
+.arcade-lounge.arcade-lounge--ready-popup {
+  width: min(36rem, calc(100vw - 2rem));
+  min-width: unset;
+  max-width: 36rem;
+  padding: 2rem;
+  grid-gap: var(--saito-space-lg);
+  text-align: center;
 }
-.arcade-ready-popup-name {
-	opacity: 0.9;
-	margin-bottom: 1.25rem;
+
+.arcade-lounge--ready-popup .arcade-lounge-header-image {
+  float: none;
+  margin: 0 auto var(--saito-space-sm);
 }
-.arcade-ready-popup-actions {
-	display: flex;
-	flex-direction: column;
-	gap: 0.5rem;
+
+.arcade-lounge--ready-popup .arcade-lounge-header-desc {
+  color: var(--saito-primary);
 }
-.arcade-ready-popup-actions .saito-button-primary,
-.arcade-ready-popup-actions .saito-button-secondary {
-	width: 100%;
+
+.arcade-lounge--ready-popup .arcade-lounge-body {
+  row-gap: 0;
+}
+
+.arcade-lounge--ready-popup .arcade-lounge-message {
+  margin: 0;
+}
+
+.arcade-lounge--ready-popup .arcade-ready-popup-start {
+  width: 100%;
+}
+
+/*
+ * Crypto staking promo — artwork lives on the overlay panel, not the backdrop.
+ */
+
+.crypto-staking-overlay {
+  width: min(90rem, 96vw);
+  max-height: min(92vh, 64rem);
+  padding: 0;
+  overflow: hidden;
+  color: #fff;
+  background: transparent;
+  background-image: none;
+}
+
+.crypto-staking-overlay-art {
+  position: relative;
+  min-height: min(52rem, 80vh);
+  border-radius: var(--saito-radius);
+  overflow: hidden;
+  background: var(--saito-muted);
+}
+
+.crypto-staking-overlay-art .hero {
+  position: absolute;
+  inset: 0;
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.crypto-staking-overlay-content {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  align-items: flex-start;
+  min-height: min(52rem, 80vh);
+  padding: var(--saito-space-xl);
+}
+
+.crypto-staking-overlay-copy {
+  display: flex;
+  flex-direction: column;
+  gap: var(--saito-space-md);
+  width: min(40rem, 100%);
+  padding: var(--saito-space-lg);
+  border-radius: var(--saito-radius);
+  background: color-mix(in srgb, #000 78%, transparent);
+  border: 1px solid color-mix(in srgb, #fff 12%, transparent);
+  box-shadow: 0 1rem 2.5rem rgba(0, 0, 0, 0.28);
+}
+
+.crypto-staking-overlay-title {
+  margin: 0;
+  font-family: var(--saito-font-heavy);
+  font-size: 2.4rem;
+  line-height: 1.15;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: #fff;
+}
+
+.crypto-staking-overlay-message,
+.crypto-staking-overlay-cta {
+  margin: 0;
+  font-size: inherit;
+  line-height: 1.5;
+  color: color-mix(in srgb, #fff 92%, transparent);
+}
+
+.crypto-staking-link {
+  display: inline;
+  margin: 0;
+  padding: 0;
+  border: none;
+  background: none;
+  font: inherit;
+  line-height: inherit;
+  color: #fff;
+  text-decoration: underline;
+  text-underline-offset: 0.15em;
+  cursor: pointer;
+}
+
+.crypto-staking-link:hover,
+.crypto-staking-link:focus-visible {
+  color: color-mix(in srgb, #fff 85%, var(--saito-primary));
+  outline: none;
+}
+
+.saito-overlay:has(> .crypto-staking-overlay) + .saito-overlay-backdrop {
+  filter: brightness(0.32) saturate(0.8);
+}
+
+@media (max-width: 700px) {
+  .crypto-staking-overlay {
+    width: min(96vw, 72rem);
+  }
+
+  .crypto-staking-overlay-art,
+  .crypto-staking-overlay-content {
+    min-height: min(40rem, 76vh);
+  }
+
+  .crypto-staking-overlay-content {
+    padding: var(--saito-space-lg);
+  }
+
+  .crypto-staking-overlay-copy {
+    width: 100%;
+    padding: var(--saito-space-md);
+  }
+
+  .crypto-staking-overlay-title {
+    font-size: 1.85rem;
+  }
 }

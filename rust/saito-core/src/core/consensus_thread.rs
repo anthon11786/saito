@@ -4,84 +4,37 @@ use std::time::Duration;
 
 use ahash::HashMap;
 use async_trait::async_trait;
-use log::{debug, info, trace, warn};
+use log::{debug, error, info, trace, warn};
 use tokio::sync::mpsc::Sender;
 use tokio::sync::RwLock;
 
-use crate::core::consensus::block::{Block, BlockType};
+use crate::core::consensus::block::Block;
 use crate::core::consensus::blockchain::Blockchain;
 use crate::core::consensus::golden_ticket::GoldenTicket;
 use crate::core::consensus::mempool::Mempool;
 use crate::core::consensus::transaction::{Transaction, TransactionType};
 use crate::core::consensus::wallet::Wallet;
 use crate::core::defs::{
-    BlockId, PrintForLog, SaitoHash, SaitoPublicKey, StatVariable, Timestamp, CHANNEL_SAFE_BUFFER,
-    STAT_BIN_COUNT,
+    format_timestamp, BlockId, PrintForLog, SaitoHash, Timestamp, CHANNEL_SAFE_BUFFER,
 };
 use crate::core::mining_thread::MiningEvent;
+use crate::core::network::events::NetworkEvent;
+use crate::core::network::network::Network;
 use crate::core::process::keep_time::Timer;
 use crate::core::process::process_event::ProcessEvent;
-use crate::core::routing::io::network::Network;
-use crate::core::routing::io::network_event::NetworkEvent;
-use crate::core::routing::io::storage::Storage;
-use crate::core::routing::peers::congestion_controller::CongestionType;
 use crate::core::routing_thread::RoutingEvent;
-use crate::core::util::configuration::{Configuration, InitialLoadingStatus};
+use crate::core::storage::storage::Storage;
+use crate::core::util::configuration::Configuration;
 use crate::core::util::crypto::hash;
-
-use super::stat_thread::{BlockchainStat, MempoolStat, StatEvent, WalletStat};
 
 pub const BLOCK_PRODUCING_TIMER: u64 = Duration::from_millis(1000).as_millis() as u64;
 
 #[derive(Debug)]
 pub enum ConsensusEvent {
-    NewGoldenTicket {
-        golden_ticket: GoldenTicket,
-    },
-    BlockFetched {
-        public_key: SaitoPublicKey,
-        block: Block,
-    },
-    NewTransaction {
-        transaction: Transaction,
-    },
-    NewTransactions {
-        transactions: Vec<Transaction>,
-    },
-}
-
-pub struct ConsensusStats {
-    pub blocks_fetched: StatVariable,
-    pub blocks_created: StatVariable,
-    pub received_tx: StatVariable,
-    pub received_gts: StatVariable,
-}
-
-impl ConsensusStats {
-    pub fn new(sender: Sender<StatEvent>) -> Self {
-        ConsensusStats {
-            blocks_fetched: StatVariable::new(
-                "consensus::blocks_fetched".to_string(),
-                STAT_BIN_COUNT,
-                sender.clone(),
-            ),
-            blocks_created: StatVariable::new(
-                "consensus::blocks_created".to_string(),
-                STAT_BIN_COUNT,
-                sender.clone(),
-            ),
-            received_tx: StatVariable::new(
-                "consensus::received_tx".to_string(),
-                STAT_BIN_COUNT,
-                sender.clone(),
-            ),
-            received_gts: StatVariable::new(
-                "consensus::received_gts".to_string(),
-                STAT_BIN_COUNT,
-                sender.clone(),
-            ),
-        }
-    }
+    NewGoldenTicket { golden_ticket: GoldenTicket },
+    BlockFetched { peer_id: u64, block: Block },
+    NewTransaction { transaction: Transaction },
+    NewTransactions { transactions: Vec<Transaction> },
 }
 
 /// Manages blockchain and the mempool
@@ -96,9 +49,7 @@ pub struct ConsensusThread {
     pub timer: Timer,
     pub network: Network,
     pub storage: Storage,
-    pub stats: ConsensusStats,
     pub txs_for_mempool: Vec<Transaction>,
-    pub stat_sender: Sender<StatEvent>,
     pub config_lock: Arc<RwLock<dyn Configuration + Send + Sync>>,
     pub produce_blocks_by_timer: bool,
     pub delete_old_blocks: bool,
@@ -110,8 +61,6 @@ impl ConsensusThread {
         mempool_lock: Arc<RwLock<Mempool>>,
         blockchain_lock: Arc<RwLock<Blockchain>>,
     ) {
-        info!("generating issuance init transaction");
-
         let slips = self.storage.get_token_supply_slips_from_disk().await;
         let private_key;
         let public_key;
@@ -148,7 +97,6 @@ impl ConsensusThread {
             mempool
                 .add_transaction_if_validates(tx.clone(), &blockchain)
                 .await;
-            info!("added issuance init tx for : {:?}", tx.signature.to_hex());
         }
         debug_assert_eq!(
             mempool.transactions.len(),
@@ -164,8 +112,6 @@ impl ConsensusThread {
         blockchain: &Blockchain,
         configs: &(dyn Configuration + Send + Sync),
     ) -> Option<Block> {
-        // trace!("locking blockchain 3");
-
         self.block_producing_timer = 0;
 
         let block = mempool
@@ -189,15 +135,27 @@ impl ConsensusThread {
         }
         None
     }
+
     pub async fn bundle_block(
         &mut self,
         timestamp: Timestamp,
         produce_without_limits: bool,
     ) -> bool {
+        let chain_sync_in_progress = {
+            let peers = self.network.peer_lock.read().await;
+            peers
+                .peers
+                .values()
+                .any(|peer| peer.is_connected && peer.is_syncing && !peer.is_synced)
+        };
+        if chain_sync_in_progress && !produce_without_limits {
+            trace!("skipping block production while chain sync is in progress");
+            return false;
+        }
+
         let config_lock = self.config_lock.clone();
         let mut configs = config_lock.write().await;
 
-        // trace!("locking blockchain 3");
         let blockchain_lock = self.blockchain_lock.clone();
         let mempool_lock = self.mempool_lock.clone();
         let mut blockchain = blockchain_lock.write().await;
@@ -226,11 +184,13 @@ impl ConsensusThread {
                 gt_propagated = *propagated;
             }
         }
+
         let mut block = None;
         let mut disable_block_production = false;
         if let Some(configs) = configs.get_consensus_config() {
             disable_block_production = configs.disable_block_production;
         }
+
         if (produce_without_limits || (!configs.is_browser() && !configs.is_spv_mode()))
             && !blockchain.blocks.is_empty()
             && !disable_block_production
@@ -244,17 +204,14 @@ impl ConsensusThread {
                     configs.deref(),
                 )
                 .await;
-        } else {
-            // debug!("skipped bundling block. : produce_without_limits = {:?}, is_browser : {:?} block_count : {:?}",
-            //     produce_without_limits,
-            //     configs.is_browser() || configs.is_spv_mode(),
-            //     blockchain.blocks.len());
         }
+
         if let Some(block) = block {
+            let block_id = block.id;
+            let block_hash = block.hash.to_hex();
             debug!(
                 "adding bundled block : {:?} with id : {:?} to mempool",
-                block.hash.to_hex(),
-                block.id
+                block_hash, block_id
             );
             trace!(
                 "mempool size after bundling : {:?}",
@@ -262,9 +219,9 @@ impl ConsensusThread {
             );
 
             mempool.add_block(block);
-            // dropping the lock here since blockchain needs the write lock to add blocks
+
             drop(mempool);
-            self.stats.blocks_created.increment();
+
             let _updated = blockchain
                 .add_blocks_from_mempool(
                     self.mempool_lock.clone(),
@@ -279,7 +236,7 @@ impl ConsensusThread {
             debug!("blocks added to blockchain");
             return true;
         } else {
-            // route messages to peers
+            let mut txs_to_propagate: Vec<Transaction> = Vec::new();
             if !self.txs_for_mempool.is_empty() {
                 debug!(
                     "since a block was not produced, propagating {:?} txs to peers",
@@ -287,32 +244,49 @@ impl ConsensusThread {
                 );
                 for tx in self.txs_for_mempool.drain(..) {
                     debug!("propagating tx : {} to peers", tx.signature.to_hex());
-                    self.network.propagate_transaction(&tx).await;
+                    txs_to_propagate.push(tx);
                 }
             }
-            // route golden tickets to peers
-            if gt_result.is_some() && !gt_propagated {
-                self.network
-                    .propagate_transaction(gt_result.as_ref().unwrap())
-                    .await;
+
+            let gt_tx_to_propagate: Option<Transaction> = if gt_result.is_some() && !gt_propagated {
+                Some(gt_result.as_ref().unwrap().clone())
+            } else {
+                None
+            };
+
+            drop(mempool);
+            drop(blockchain);
+            drop(configs);
+
+            for tx in txs_to_propagate {
+                self.network.propagate_transaction(&tx).await;
+            }
+
+            if let Some(ref gt_tx) = gt_tx_to_propagate {
+                self.network.propagate_transaction(gt_tx).await;
                 debug!(
                     "propagating gt : {:?} to peers",
-                    hash(&gt_result.unwrap().serialize_for_net()).to_hex()
+                    hash(&gt_tx.serialize_for_net()).to_hex()
                 );
-                let (_, propagated) = mempool
+            }
+
+            if gt_tx_to_propagate.is_some() {
+                let mut mempool = self.mempool_lock.write().await;
+                let blockchain = self.blockchain_lock.read().await;
+
+                if let Some((_, propagated)) = mempool
                     .golden_tickets
                     .get_mut(&blockchain.get_latest_block_hash())
-                    .unwrap();
-                *propagated = true;
+                {
+                    *propagated = true;
+                }
             }
+
             return true;
         }
-        // trace!("releasing blockchain 3");
-        false
     }
 
     async fn produce_genesis_block(&mut self, timestamp: Timestamp) {
-        info!("producing genesis block");
         self.generate_issuance_tx(self.mempool_lock.clone(), self.blockchain_lock.clone())
             .await;
 
@@ -324,11 +298,6 @@ impl ConsensusThread {
             let block = mempool
                 .bundle_genesis_block(&mut blockchain, timestamp, configs.deref(), &self.storage)
                 .await;
-            info!(
-                "produced genesis block : {:?} with id : {:?}",
-                block.hash.to_hex(),
-                block.id
-            );
 
             let _res = blockchain
                 .add_block(
@@ -367,7 +336,6 @@ impl ConsensusThread {
         let transaction =
             Wallet::create_golden_ticket_transaction(golden_ticket, &public_key, &private_key)
                 .await;
-        self.stats.received_gts.increment();
         mempool.add_golden_ticket(transaction).await;
     }
 }
@@ -389,10 +357,9 @@ impl ProcessEvent<ConsensusEvent> for ConsensusThread {
         }
 
         // generate blocks
-        self.block_producing_timer += duration_value;
+        self.block_producing_timer = self.block_producing_timer.saturating_add(duration_value);
         if self.produce_blocks_by_timer && self.block_producing_timer >= BLOCK_PRODUCING_TIMER {
             self.bundle_block(timestamp, false).await;
-
             work_done = true;
         }
 
@@ -413,9 +380,10 @@ impl ProcessEvent<ConsensusEvent> for ConsensusThread {
                 Some(())
             }
             ConsensusEvent::BlockFetched { block, .. } => {
+                let fetched_block_hash_hex = block.hash.to_hex();
                 trace!(
                     "ConsensusThread::process_event : new block fetched : {:?}",
-                    block.hash.to_hex()
+                    fetched_block_hash_hex
                 );
                 let mut configs = self.config_lock.write().await;
                 // trace!("locking blockchain 4");
@@ -439,7 +407,6 @@ impl ProcessEvent<ConsensusEvent> for ConsensusThread {
                     let mut mempool = self.mempool_lock.write().await;
                     mempool.add_block(block);
                 }
-                self.stats.blocks_fetched.increment();
                 blockchain
                     .add_blocks_from_mempool(
                         self.mempool_lock.clone(),
@@ -455,28 +422,15 @@ impl ProcessEvent<ConsensusEvent> for ConsensusThread {
                 Some(())
             }
             ConsensusEvent::NewTransaction { transaction } => {
+                let sig = transaction.signature.to_hex();
                 trace!(
                     "ConsensusThread::process_event : new transaction : {:?}",
-                    transaction.signature.to_hex()
+                    sig
                 );
-                self.stats.received_tx.increment();
-
-                {
-                    if let Some(public_key) = transaction.routed_from_peer {
-                        let mut peers = self.network.peer_lock.write().await;
-                        let time: u64 = self.timer.get_timestamp_in_ms();
-                        peers.add_congestion_event(
-                            public_key,
-                            CongestionType::ReceivedValidTransactions,
-                            time,
-                        );
-                    }
-                }
 
                 if let TransactionType::GoldenTicket = transaction.transaction_type {
                     let mut mempool = self.mempool_lock.write().await;
 
-                    self.stats.received_gts.increment();
                     trace!("adding golden ticket to mempool");
                     mempool.add_golden_ticket(transaction).await;
                 } else {
@@ -491,24 +445,11 @@ impl ProcessEvent<ConsensusEvent> for ConsensusThread {
                     "ConsensusThread::process_event : new transactions : {:?}",
                     transactions.len()
                 );
-                self.stats
-                    .received_tx
-                    .increment_by(transactions.len() as u64);
 
                 self.txs_for_mempool.reserve(transactions.len());
                 let mut mempool = self.mempool_lock.write().await;
-                let mut peers = self.network.peer_lock.write().await;
                 for transaction in transactions.drain(..) {
-                    if let Some(public_key) = transaction.routed_from_peer {
-                        let time: u64 = self.timer.get_timestamp_in_ms();
-                        peers.add_congestion_event(
-                            public_key,
-                            CongestionType::ReceivedValidTransactions,
-                            time,
-                        );
-                    }
                     if let TransactionType::GoldenTicket = transaction.transaction_type {
-                        self.stats.received_gts.increment();
                         mempool.add_golden_ticket(transaction).await;
                     } else {
                         self.txs_for_mempool.push(transaction);
@@ -521,28 +462,13 @@ impl ProcessEvent<ConsensusEvent> for ConsensusThread {
 
     async fn on_init(&mut self) {
         info!(
-            "saito version = {}",
+            "Saito.on_init: version = {}",
             option_env!("CARGO_PKG_VERSION").unwrap_or("unknown")
         );
 
         let mut configs = self.config_lock.write().await;
         let mut blockchain = self.blockchain_lock.write().await;
         {
-            info!(
-                "genesis_period : {:?}",
-                configs.get_consensus_config().unwrap().genesis_period
-            );
-            info!(
-                "default_social_stake : {:?}",
-                configs.get_consensus_config().unwrap().default_social_stake
-            );
-            info!(
-                "default_social_stake_period : {:?}",
-                configs
-                    .get_consensus_config()
-                    .unwrap()
-                    .default_social_stake_period
-            );
             {
                 let consensus = configs.get_consensus_config().unwrap();
                 debug_assert!(
@@ -552,24 +478,8 @@ impl ProcessEvent<ConsensusEvent> for ConsensusThread {
                     consensus.block_confirmation_limit
                 );
             }
-            // let blockchain_configs =
-            //     ConfigManager::read_blockchain_configs(self.network.io_interface.deref())
-            //         .await
-            //         .map(|config| Some(config))
-            //         .unwrap_or_else(|e| {
-            //             error!(
-            //                 "Error reading blockchain config: {}. Loading with default values",
-            //                 e
-            //             );
-            //             Some(Default::default())
-            //         });
-            // configs.set_blockchain_configs(blockchain_configs);
 
             let blockchain_configs = configs.get_blockchain_configs();
-            info!(
-                "loading blockchain state from configs : {:?}",
-                blockchain_configs
-            );
             blockchain.last_block_hash =
                 SaitoHash::from_hex(blockchain_configs.last_block_hash.as_str()).unwrap_or([0; 32]);
             blockchain.last_block_id = blockchain_configs.last_block_id;
@@ -585,7 +495,16 @@ impl ProcessEvent<ConsensusEvent> for ConsensusThread {
                 Some(SaitoHash::from_hex(blockchain_configs.fork_id.as_str()).unwrap_or([0; 32]));
         }
 
+        //
+        // full nodes
+        //
         if !configs.is_browser() {
+            //
+            // start loading from disk
+            //
+            blockchain.is_loading = true;
+            blockchain.is_loaded = false;
+
             let mut list = self
                 .storage
                 .load_block_name_list()
@@ -597,18 +516,27 @@ impl ProcessEvent<ConsensusEvent> for ConsensusThread {
             let start_time = self.timer.get_timestamp_in_ms();
 
             info!(
-                "loading {:?} blocks from disk. Timestamp : {:?}",
+                "Saito.on_init: loading {:?} blocks from disk (ts: {:?})",
                 list.len(),
-                StatVariable::format_timestamp(start_time)
+                format_timestamp(start_time)
             );
             let mut files_to_delete: HashMap<String, BlockId> = Default::default();
 
             while !list.is_empty() {
                 let file_names: Vec<String> =
                     list.drain(..std::cmp::min(10000, list.len())).collect();
-                self.storage
+                if !self
+                    .storage
                     .load_blocks_from_disk(file_names.as_slice(), self.mempool_lock.clone())
-                    .await;
+                    .await
+                {
+                    error!(
+                        "refusing to start: block file load failed mid-batch ({} files drained from queue). \
+                         fix or remove the corrupt file under data/blocks/ and restart",
+                        file_names.len()
+                    );
+                    panic!("blockchain disk load failed: incomplete batch");
+                }
 
                 {
                     let mempool = self.mempool_lock.read().await;
@@ -629,32 +557,28 @@ impl ProcessEvent<ConsensusEvent> for ConsensusThread {
                     )
                     .await;
 
+                if blockchain.checkpoint_found {
+                    list.clear();
+                }
+
                 info!(
-                    "{:?} blocks remaining to be loaded. Timestamp : {:?}",
+                    "Saito.on_init: {:?} blocks remaining to be loaded. (ts: {:?})",
                     list.len(),
-                    StatVariable::format_timestamp(self.timer.get_timestamp_in_ms())
+                    format_timestamp(self.timer.get_timestamp_in_ms())
                 );
             }
             {
                 let mut mempool = self.mempool_lock.write().await;
-                info!("removing {} failed blocks from mempool so new blocks can be bundled after node loadup", mempool.blocks_queue.len());
                 mempool.blocks_queue.clear();
             }
             if self.delete_old_blocks {
                 info!(
-                    "deleting old blocks from disk. latest_block_id : {}",
+                    "Saito.on_init: deleting old blocks from disk. latest_block_id : {}",
                     blockchain.get_latest_block_id()
                 );
                 let purge_id = blockchain
                     .get_latest_block_id()
                     .saturating_sub(blockchain.genesis_period * 2);
-                info!(
-                    "removing {} blocks from disk which were not loaded to blockchain or older than : {} where genesis block : {}. where genesis_period = {}",
-                    files_to_delete.len(),
-                    purge_id,
-                    blockchain.genesis_block_id,
-                    blockchain.genesis_period,
-                );
                 for (file_name, block_id) in files_to_delete {
                     if block_id < purge_id {
                         self.storage
@@ -666,12 +590,17 @@ impl ProcessEvent<ConsensusEvent> for ConsensusThread {
                     }
                 }
             }
-            configs.get_blockchain_configs_mut().initial_loading_status =
-                InitialLoadingStatus::Completed;
+
+            //
+            // mark load as complete
+            //
+            blockchain.is_loading = false;
+            blockchain.is_loaded = true;
+
             info!(
-                "{:?} total blocks in blockchain. Timestamp : {:?}, elapsed_time : {:?}",
+                "Saito.on_init: {:?} total blocks in blockchain (ts: {:?}, elapsed: {:?})",
                 blockchain.blocks.len(),
-                StatVariable::format_timestamp(self.timer.get_timestamp_in_ms()),
+                format_timestamp(self.timer.get_timestamp_in_ms()),
                 self.timer.get_timestamp_in_ms() - start_time
             );
             {
@@ -686,126 +615,17 @@ impl ProcessEvent<ConsensusEvent> for ConsensusThread {
                         .unwrap();
                 }
             }
-        }
 
-        debug!(
-            "sending block id update as : {:?}",
-            blockchain.last_block_id
-        );
-    }
-
-    async fn on_stat_interval(&mut self, current_time: Timestamp) {
-        // println!("on_stat_interval : {:?}", current_time);
-
-        self.stats
-            .blocks_fetched
-            .calculate_stats(current_time)
-            .await;
-        self.stats
-            .blocks_created
-            .calculate_stats(current_time)
-            .await;
-        self.stats.received_tx.calculate_stats(current_time).await;
-        self.stats.received_gts.calculate_stats(current_time).await;
-
-        {
-            let wallet = self.wallet_lock.read().await;
-
-            let stat = format!(
-                "{} - {} - total_slips : {:?}, unspent_slips : {:?}, current_balance : {:?}",
-                StatVariable::format_timestamp(current_time),
-                format!("{:width$}", "wallet::state", width = 40),
-                wallet.slips.len(),
-                wallet.get_unspent_slip_count(),
-                wallet.get_available_balance()
-            );
-            self.stat_sender
-                .send(StatEvent::StringStat(stat))
-                .await
-                .unwrap();
-
-            let wallet_stat = WalletStat {
-                wallet_balance: wallet.get_available_balance(),
-                wallet_address: wallet.public_key.to_base58(),
-            };
-            self.stat_sender
-                .send(StatEvent::WalletStat(wallet_stat))
-                .await
-                .unwrap();
-        }
-        {
-            let stat;
-            {
-                // trace!("locking blockchain 5");
-                let blockchain = self.blockchain_lock.read().await;
-
-                stat = format!(
-                    "{} - {} - utxo_size : {:?}, block_count : {:?}, longest_chain_len : {:?} full_block_count : {:?} txs_in_blocks : {:?}",
-                    StatVariable::format_timestamp(current_time),
-                    format!("{:width$}", "blockchain::state", width = 40),
-                    blockchain.utxoset.len(),
-                    blockchain.blocks.len(),
-                    blockchain.get_latest_block_id(),
-                    blockchain.blocks.iter().filter(|(_hash, block)| { block.block_type == BlockType::Full }).count(),
-                    blockchain.blocks.iter().map(|(_hash, block)| { block.transactions.len() }).sum::<usize>()
-                );
-
-                let blockchain_stat = BlockchainStat {
-                    longest_chain_length: blockchain.get_latest_block_id(),
-                    latest_block_hash: blockchain.get_latest_block_hash().to_hex(),
-                };
-                self.stat_sender
-                    .send(StatEvent::BlockchainStat(blockchain_stat))
-                    .await
-                    .unwrap();
-            }
-            // trace!("releasing blockchain 5");
-            self.stat_sender
-                .send(StatEvent::StringStat(stat))
-                .await
-                .unwrap();
-        }
-        {
-            let stat;
-            {
-                let mempool = self.mempool_lock.read().await;
-
-                stat = format!(
-                    "{} - {} - blocks_queue : {:?}, transactions : {:?}",
-                    StatVariable::format_timestamp(current_time),
-                    format!("{:width$}", "mempool:state", width = 40),
-                    mempool.blocks_queue.len(),
-                    mempool.transactions.len(),
-                );
-
-                let mempool_stat = MempoolStat {
-                    mempool_size: mempool.transactions.len() as u64,
-                };
-                self.stat_sender
-                    .send(StatEvent::MempoolStat(mempool_stat))
-                    .await
-                    .unwrap();
-            }
-
-            self.stat_sender
-                .send(StatEvent::StringStat(stat))
-                .await
-                .unwrap();
-        }
-        {
-            let stat = format!(
-                "{} - {} - capacity : {:?} / {:?}",
-                StatVariable::format_timestamp(current_time),
-                format!("{:width$}", "router::channel", width = 40),
-                self.sender_to_router.capacity(),
-                self.sender_to_router.max_capacity()
-            );
-            self.stat_sender
-                .send(StatEvent::StringStat(stat))
-                .await
-                .unwrap();
+        //
+        // browsers
+        //
+        } else {
+            blockchain.is_loading = false;
+            blockchain.is_loaded = true;
         }
     }
+
+    async fn on_stat_interval(&mut self, _current_time: Timestamp) {}
 
     fn is_ready_to_process(&self) -> bool {
         self.sender_to_miner.capacity() > CHANNEL_SAFE_BUFFER
@@ -1374,9 +1194,8 @@ mod tests {
         let timer = tester.consensus_thread.timer.clone();
 
         let mut utxokey = [0; UTXO_KEY_LENGTH];
-        let mut block_3_hash = [0; 32];
         let alternate_block_4;
-        // create a main fork first
+
         for i in 2..=4 {
             let tx = tester.create_transaction(10, 10, public_key).await.unwrap();
 
@@ -1389,7 +1208,6 @@ mod tests {
 
             if i == 3 {
                 let blockchain = tester.consensus_thread.blockchain_lock.read().await;
-                block_3_hash = blockchain.blockring.get_block_hash_by_block_id(3).unwrap();
             }
         }
 
@@ -1632,7 +1450,6 @@ mod tests {
         NodeTester::delete_data().await.unwrap();
         let mut tester = NodeTester::new(10, None, None);
         let public_key = tester.get_public_key().await;
-        let private_key = tester.get_private_key().await;
         tester.set_staking_requirement(2 * NOLAN_PER_SAITO, 8).await;
         let issuance = vec![
             (public_key.to_base58(), 8 * 2 * NOLAN_PER_SAITO),
@@ -1653,8 +1470,10 @@ mod tests {
         let mut blocks = vec![];
         // create a main fork first
         for i in 2..=100 {
+            // Fees are unrelated to replay handling and can strand the wallet's
+            // larger slips outside this test's short genesis window.
             let tx = tester
-                .create_transaction(NOLAN_PER_SAITO, NOLAN_PER_SAITO, public_key)
+                .create_transaction(NOLAN_PER_SAITO, 0, public_key)
                 .await
                 .unwrap();
 
@@ -1699,17 +1518,14 @@ mod tests {
         {
             for mut block in blocks {
                 block.in_longest_chain = false;
-                block.keys_invloved.clear();
+                block.publickeys_referenced_in_block_transactions.clear();
                 block.created_hashmap_of_slips_spent_this_block = false;
                 block.safe_to_prune_transactions = false;
                 block.slips_spent_this_block.clear();
 
                 tester
                     .consensus_thread
-                    .process_event(ConsensusEvent::BlockFetched {
-                        block,
-                        public_key: [0; 33],
-                    })
+                    .process_event(ConsensusEvent::BlockFetched { block, peer_id: 0 })
                     .await;
             }
         }
@@ -1758,7 +1574,7 @@ mod tests {
         // create a main fork first
         for i in 2..=100 {
             let tx = tester
-                .create_transaction(NOLAN_PER_SAITO, NOLAN_PER_SAITO, public_key)
+                .create_transaction(NOLAN_PER_SAITO, 0, public_key)
                 .await
                 .unwrap();
 
@@ -1802,17 +1618,14 @@ mod tests {
 
         for mut block in blocks {
             block.in_longest_chain = false;
-            block.keys_invloved.clear();
+            block.publickeys_referenced_in_block_transactions.clear();
             block.created_hashmap_of_slips_spent_this_block = false;
             block.safe_to_prune_transactions = false;
             block.slips_spent_this_block.clear();
 
             tester
                 .consensus_thread
-                .process_event(ConsensusEvent::BlockFetched {
-                    block,
-                    public_key: [0; 33],
-                })
+                .process_event(ConsensusEvent::BlockFetched { block, peer_id: 0 })
                 .await;
         }
 
@@ -2055,7 +1868,7 @@ mod tests {
 
         for mut block in blocks.drain(0..19) {
             block.in_longest_chain = false;
-            block.keys_invloved.clear();
+            block.publickeys_referenced_in_block_transactions.clear();
             block.created_hashmap_of_slips_spent_this_block = false;
             block.safe_to_prune_transactions = false;
             block.slips_spent_this_block.clear();
@@ -2063,10 +1876,7 @@ mod tests {
             let block_id = block.id;
             tester
                 .consensus_thread
-                .process_event(ConsensusEvent::BlockFetched {
-                    block,
-                    public_key: [0; 33],
-                })
+                .process_event(ConsensusEvent::BlockFetched { block, peer_id: 0 })
                 .await;
             tester.wait_till_block_id(block_id).await.unwrap();
 
@@ -2087,7 +1897,7 @@ mod tests {
         {
             for mut block in blocks {
                 block.in_longest_chain = false;
-                block.keys_invloved.clear();
+                block.publickeys_referenced_in_block_transactions.clear();
                 block.created_hashmap_of_slips_spent_this_block = false;
                 block.safe_to_prune_transactions = false;
                 block.slips_spent_this_block.clear();
@@ -2097,10 +1907,7 @@ mod tests {
 
                 tester
                     .consensus_thread
-                    .process_event(ConsensusEvent::BlockFetched {
-                        block,
-                        public_key: [0; 33],
-                    })
+                    .process_event(ConsensusEvent::BlockFetched { block, peer_id: 0 })
                     .await;
                 tester
                     .wait_till_block_id_with_hash(block_id, block_hash)
@@ -2257,7 +2064,7 @@ mod tests {
     pub struct TempTestBlockchainObserver;
 
     impl BlockchainObserver for TempTestBlockchainObserver {
-        fn on_chain_reorg(
+        fn on_chain_reorganization(
             &self,
             block_id: u64,
             block_hash: &crate::core::defs::BlockHash,
@@ -2413,12 +2220,6 @@ mod tests {
             .await
             .get_latest_block_id();
         assert_eq!(latest_block_id, 40);
-        let block_hash_40 = tester
-            .consensus_thread
-            .blockchain_lock
-            .read()
-            .await
-            .get_latest_block_hash();
 
         info!("\n+++++++++ continuing till block 50 +++++++++\n");
         // now we have the blocks upto 40 in the chain. now we create a new chain upto 50.
@@ -2461,16 +2262,10 @@ mod tests {
 
         // then re-add old blocks from 40 to 60 so it would become the longest chain
         for block in blocks {
-            let block_hash = block.hash;
-            let block_id = block.id;
             if block.id > 60 {
                 continue;
             }
             tester.add_block(block).await;
-            // tester
-            //     .wait_till_block_id_with_hash(block_id, block_hash)
-            //     .await
-            //     .unwrap();
         }
         tester
             .wait_till_block_id_with_hash(block_id_old, block_hash_old)
@@ -2640,7 +2435,6 @@ mod tests {
         info!("\n+++++++++ restarting the node 2 +++++++++\n");
         let mut tester = NodeTester::new(100, Some(private_key), Some(tester.timer));
         let public_key = tester.get_public_key().await;
-        let private_key = tester.get_private_key().await;
         tester
             .set_staking_requirement(2 * NOLAN_PER_SAITO, 50)
             .await;

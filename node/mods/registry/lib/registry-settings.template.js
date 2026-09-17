@@ -1,10 +1,10 @@
 module.exports = (app, mod) => {
-	let eo = app.options.registry?.override_names || false;
+  let eo = app.options.registry?.override_names || false;
 
-	return `
+  return `
 			<fieldset class="saito-grid">
 			<legend class="settings-label">Anonymous Keys</legend>
-			<input type="checkbox" id="registry_translate" ${eo ? 'checked' : ''}/> 
+			<input class="saito-checkbox" type="checkbox" id="registry_translate" ${eo ? 'checked' : ''}/> 
    			<label for="registry_translate">Convert non-registered keys into human readable format</label>
 			</fieldset>
 			`;

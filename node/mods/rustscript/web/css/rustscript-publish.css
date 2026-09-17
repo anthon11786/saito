@@ -1,0 +1,398 @@
+/*
+ * Publish / unlock — host chrome + content
+ */
+
+body.rustscript.rs-publish-modal-open main.rustscript .rs-publish-script {
+  pointer-events: none;
+}
+
+.saito-overlay.rs-publish-overlay-backdrop,
+[id^='saito-overlay-backdrop'].rs-publish-overlay-backdrop {
+  position: fixed;
+  display: block;
+  inset: 0;
+  width: 100vw;
+  height: 100dvh;
+  pointer-events: auto;
+  z-index: 20;
+}
+
+.saito-overlay.rs-publish-overlay-shell {
+  position: fixed;
+  inset: 0;
+  width: 100vw;
+  height: 100dvh;
+  /* Saito center-overlay uses translate(-50%,-50%); neutralize it. */
+  left: 0;
+  top: 0;
+  transform: none;
+  overflow: visible;
+  z-index: 21;
+  /* Host is display:block (pullOverlayToFront). Do not rely on flex centering. */
+  display: block;
+  pointer-events: none;
+  background: transparent;
+  border: none;
+}
+
+/*
+ * Root cause of off-center overlays: the shell is full-viewport while
+ * pullOverlayToFront forces display:block, so flex align/justify never run.
+ * Center the panel with absolute positioning instead.
+ */
+.saito-overlay.rs-publish-overlay-shell > .rustscript-overlay {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  margin: 0;
+  pointer-events: auto;
+}
+
+.rs-publish-asset-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--saito-space-md);
+}
+
+.rs-publish-asset-card {
+  aspect-ratio: 4 / 3;
+  min-height: 0;
+}
+
+.rs-publish-asset-media {
+  display: block;
+  flex: 1 1 auto;
+  position: relative;
+  min-height: 0;
+  height: 100%;
+  overflow: hidden;
+  background: #0a0a0a;
+}
+
+.rs-publish-asset-saito .rs-publish-asset-media {
+  background:
+    radial-gradient(circle at 50% 40%, rgba(252, 163, 17, 0.14) 0%, transparent 62%), #0a0a0a;
+}
+
+.rs-publish-asset-img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.rs-publish-asset-nft .rs-publish-asset-img {
+  filter: grayscale(0.35) brightness(0.85);
+}
+
+.rs-publish-asset-name {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 1;
+  font-size: var(--font-size-large);
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  line-height: 1.3;
+  padding: var(--saito-space-md);
+  color: #f0f0f0;
+  text-align: center;
+  background: linear-gradient(
+    180deg,
+    rgba(0, 0, 0, 0) 0%,
+    rgba(0, 0, 0, 0.5) 40%,
+    rgba(0, 0, 0, 0.86) 100%
+  );
+  pointer-events: none;
+}
+
+.rs-publish-send-panels {
+  flex: 1 1 auto;
+  display: grid;
+  grid-template-columns: 60fr 40fr;
+  min-height: 0;
+  height: 100%;
+  overflow: hidden;
+}
+
+.rs-publish-send-column {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.rs-publish-send-form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--saito-space-md);
+  padding: var(--saito-space-xl);
+  overflow-y: auto;
+}
+
+.rs-publish-send-form .rs-overlay-actions {
+  margin-top: auto;
+  padding-top: var(--saito-space-md);
+}
+
+.rs-publish-script-readonly {
+  flex: 1 1 auto;
+  min-height: 0;
+  padding: var(--saito-space-xl);
+  overflow: auto;
+  white-space: pre-wrap;
+  line-height: 1.55;
+  font-family: var(--rustscript-font-mono);
+  font-size: 0.95em;
+  background: #101010;
+  color: #d0d0d0;
+  border-right: 1px solid #333;
+}
+
+.rs-publish-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  margin: 0;
+}
+
+.rs-publish-field-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--saito-space-md);
+  margin: 0;
+}
+
+.rs-publish-field-row .rs-publish-field {
+  margin: 0;
+}
+
+input.rs-publish-input {
+  min-height: var(--rs-control-height);
+  height: var(--rs-control-height);
+  padding: 0 var(--saito-space-md);
+  background: #0c0c0c;
+  color: #efefef;
+  border: 1px solid #4a4a4a;
+  border-radius: 4px;
+  font-weight: 400;
+}
+
+input.rs-publish-input:focus {
+  border-color: #666;
+}
+
+input.rs-publish-input[readonly] {
+  color: #c8c8c8;
+  background: #0a0a0a;
+}
+
+.rs-publish-input-copy-row {
+  display: flex;
+  align-items: stretch;
+  gap: 0;
+}
+
+.rs-publish-input-copy-row input.rs-publish-input {
+  flex: 1 1 auto;
+  min-width: 0;
+  border-top-right-radius: 0;
+  border-bottom-right-radius: 0;
+}
+
+.rs-publish-error[hidden] {
+  display: none !important;
+}
+
+.rs-publish-error {
+  font-size: var(--font-size-tiny);
+  line-height: 1.4;
+  color: #c07070;
+  margin: 0;
+}
+
+.rs-save-later-copy {
+  display: flex;
+  flex-direction: column;
+  gap: var(--saito-space-lg);
+  height: 100%;
+}
+
+.rs-save-later-lead,
+.rs-save-later-note {
+  margin: 0;
+  color: var(--rustscript-text);
+  font-size: 1.6rem;
+  line-height: 1.5;
+}
+
+.rs-save-later-download {
+  align-self: flex-start;
+  min-width: 18rem;
+}
+
+.rs-save-later-home {
+  align-self: flex-start;
+  margin: 0;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: var(--saito-muted-foreground);
+  font-size: 1.3rem;
+  line-height: 1.4;
+  cursor: pointer;
+}
+
+.rs-save-later-home:hover {
+  color: var(--rustscript-text);
+}
+
+/*
+ * Post-publish hand-off — calm completion modal (not a wizard step).
+ */
+.rs-post-publish {
+  gap: 1.8rem;
+  max-height: min(90vh, 72rem);
+}
+
+.rs-post-publish .rs-overlay-body {
+  gap: 0;
+  overflow: auto;
+  align-items: center;
+}
+
+.rs-post-publish-head {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1.4rem;
+  text-align: center;
+}
+
+.rs-post-publish-head .rs-overlay-title {
+  padding-right: 0;
+  text-align: center;
+}
+
+.rs-post-publish-success {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 6rem;
+  height: 6rem;
+  border-radius: 50%;
+  border: 1px solid color-mix(in srgb, var(--saito-status-success) 40%, var(--saito-border));
+  background: color-mix(in srgb, var(--saito-status-success) 12%, transparent);
+  color: var(--saito-status-success);
+  font-size: 2.5rem;
+}
+
+/*
+ * Must beat `.rs-overlay-lead { margin: 0 }` (same element; that reset
+ * loads later in style.css at equal specificity).
+ */
+.rs-post-publish .rs-overlay-lead.rs-post-publish-lead {
+  width: 100%;
+  max-width: 44rem;
+  margin: 0 auto 2rem;
+  text-align: center;
+  color: #e0e0e0;
+  font-size: 1.45rem;
+  font-weight: 400;
+  line-height: 1.7;
+}
+
+.rs-post-publish-primary {
+  display: flex;
+  justify-content: center;
+  width: 100%;
+  margin: 0 0 2rem;
+  padding: 0;
+}
+
+.rs-post-publish .rs-post-publish-download {
+  width: min(100%, 36rem);
+  min-width: 22rem;
+  height: 7.2rem;
+  padding: 0 3rem;
+  font-family: var(--rustscript-font-sans);
+  font-size: 1.7rem;
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  text-transform: none;
+}
+
+.rs-post-publish-divider {
+  display: flex;
+  align-items: center;
+  gap: var(--saito-space-md);
+  width: 100%;
+  max-width: 36rem;
+  margin: 0 auto 1.2rem;
+  font-size: var(--font-size-tiny);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: #777;
+}
+
+.rs-post-publish-divider::before,
+.rs-post-publish-divider::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: #333;
+}
+
+.rs-post-publish-secondary {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0.85rem;
+  width: 100%;
+  max-width: 48rem;
+  margin: 0 auto;
+}
+
+.rs-post-publish .rs-overlay-lead.rs-post-publish-secondary-lead {
+  margin: 0;
+  text-align: center;
+  color: #b8b8b8;
+  font-size: 1.25rem;
+  font-weight: 400;
+  line-height: 1.5;
+  text-transform: none;
+}
+
+.rs-post-publish .rs-publish-copy-btn:active {
+  background: #2a2a2a;
+  color: #fff;
+  border-color: #777;
+  transform: scale(0.96);
+}
+
+.rs-post-publish .rs-publish-copy-btn.is-copied {
+  color: #8fd49a;
+  border-color: #3f8a4c;
+  background: #1e2a20;
+}
+
+@media (max-width: 900px) {
+  .rs-publish-asset-grid,
+  .rs-publish-send-panels,
+  .rs-publish-field-row {
+    grid-template-columns: 1fr;
+  }
+
+  .rs-publish-script-readonly {
+    border-right: none;
+    border-bottom: 1px solid #333;
+  }
+
+  .rs-post-publish-download {
+    width: 100%;
+    min-width: 0;
+  }
+}

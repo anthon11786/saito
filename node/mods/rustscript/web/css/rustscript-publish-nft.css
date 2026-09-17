@@ -1,0 +1,117 @@
+/*
+ * .rs-publish-nft-send — NFT publish variant
+ */
+
+.rs-publish-send-nft-list {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  min-width: 0;
+  height: 100%;
+  overflow: hidden;
+  background: #0c0c0c;
+}
+
+.rs-publish-nft-list {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  padding: var(--saito-space-md);
+}
+
+.rs-publish-nft-list .saito-nft-card {
+  cursor: pointer;
+  transition:
+    border-color 0.12s ease,
+    box-shadow 0.12s ease;
+}
+
+.rs-publish-nft-list .saito-nft-card.is-selected {
+  border-color: rgba(63, 143, 76, 0.65);
+  box-shadow: inset 0 0 0 1px rgba(63, 143, 76, 0.3);
+}
+
+.rs-publish-nft-empty {
+  padding: var(--saito-space-xl) var(--saito-space-lg);
+  color: #888;
+  text-align: center;
+}
+
+.rs-publish-nft-selected {
+  display: flex;
+  gap: var(--saito-space-md);
+  align-items: flex-start;
+  padding: var(--saito-space-md);
+  min-height: 0;
+  border: 1px solid #333;
+  border-radius: 4px;
+  background: #0a0a0a;
+}
+
+.rs-publish-nft-selected-thumb {
+  flex: 0 0 5.2rem;
+  width: 5.2rem;
+  height: 5.2rem;
+  border-radius: 4px;
+  background: #181818 center / cover no-repeat;
+  border: 1px solid #333;
+}
+
+.rs-publish-nft-selected-meta {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.rs-publish-nft-selected-title {
+  font-weight: 500;
+  line-height: 1.35;
+  margin: 0 0 var(--saito-space-xs);
+  color: #f0f0f0;
+  word-break: break-word;
+}
+
+.rs-publish-nft-selected-row {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--saito-space-sm);
+  font-size: var(--font-size-tiny);
+  line-height: 1.4;
+}
+
+.rs-publish-nft-selected-label {
+  color: #888;
+}
+
+.rs-publish-nft-selected-value {
+  color: #d0d0d0;
+  text-align: right;
+}
+
+.rs-publish-nft-amount-row {
+  display: flex;
+  gap: 0;
+  align-items: stretch;
+}
+
+.rs-publish-nft-amount-row .rs-publish-nft-amount {
+  flex: 1 1 auto;
+  min-width: 0;
+  border-top-right-radius: 0;
+  border-bottom-right-radius: 0;
+}
+
+.rs-publish-nft-amount-row .rs-publish-nft-max-btn {
+  flex: 0 0 auto;
+  align-self: stretch;
+  min-width: 6rem;
+  height: auto;
+  min-height: var(--rs-control-height);
+  padding: 0 var(--saito-space-md);
+  border-radius: 0 4px 4px 0;
+  border-left: none;
+}
+
+.rs-publish-nft-send .rs-publish-go-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}

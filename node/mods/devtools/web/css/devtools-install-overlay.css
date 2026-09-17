@@ -1,0 +1,168 @@
+/*
+ * Install Module confirmation — after a .saito file is parsed.
+ * Scoped to this overlay only; drop-zone and shared overlay shells unchanged.
+ *
+ * Width: inherit .saito-overlay-form (min(60rem, 95vw)) — same desktop
+ * footprint as the preceding Install Module drag-and-drop dialog
+ * (.saito-overlay-form.saito-file-drop-overlay), which resolves to that
+ * shared rule. Do not reintroduce a narrower width here.
+ */
+
+.saito-overlay-form.saito-app-install-overlay {
+  /* width intentionally omitted — use shared .saito-overlay-form */
+  gap: var(--saito-space-md);
+  max-height: min(88vh, 72rem);
+  overflow: auto;
+}
+
+/* Scoped header spacing — do not alter shared .saito-overlay-form-header */
+.saito-app-install-overlay > .saito-overlay-form-header {
+  padding-left: var(--saito-space-lg);
+  padding-right: var(--saito-space-lg);
+  box-sizing: border-box;
+}
+
+.saito-app-install-overlay .body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--saito-space-lg);
+  min-width: 0;
+}
+
+.saito-app-install-overlay .content {
+  display: grid;
+  grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr);
+  gap: var(--saito-space-lg);
+  align-items: start;
+  min-width: 0;
+}
+
+.saito-app-install-overlay .content:not(:has(.preview)) {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.saito-app-install-overlay .content > * {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.saito-app-install-overlay .preview {
+  display: block;
+  width: 100%;
+  height: auto;
+  max-width: 100%;
+  object-fit: contain;
+  object-position: center top;
+  border-radius: var(--saito-radius);
+  border: 1px solid var(--saito-border);
+  background-color: var(--saito-secondary);
+}
+
+.saito-app-install-overlay .description {
+  margin: 0;
+  font-size: var(--font-size-medium);
+  line-height: 1.45;
+  color: var(--saito-foreground);
+}
+
+.saito-app-install-overlay .footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--saito-space-md);
+  min-width: 0;
+  padding-top: var(--saito-space-md);
+  border-top: 1px solid var(--saito-border);
+}
+
+.saito-app-install-overlay .meta {
+  display: flex;
+  align-items: stretch;
+  gap: var(--saito-space-lg);
+  min-width: 0;
+}
+
+.saito-app-install-overlay .field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  min-width: 0;
+}
+
+.saito-app-install-overlay .field + .field {
+  padding-left: var(--saito-space-lg);
+  border-left: 1px solid var(--saito-border);
+}
+
+.saito-app-install-overlay .label {
+  font-size: var(--font-size-tiny);
+  line-height: 1.2;
+  color: var(--saito-muted-foreground);
+}
+
+.saito-app-install-overlay .value {
+  font-size: var(--font-size-medium);
+  line-height: 1.3;
+  color: var(--saito-foreground);
+  overflow-wrap: anywhere;
+}
+
+.saito-app-install-overlay .value.unknown {
+  font-style: italic;
+}
+
+.saito-app-install-overlay .saito-button-row {
+  flex: 0 0 auto;
+  width: auto;
+  margin-top: 0;
+  justify-content: flex-end;
+}
+
+.saito-app-install-overlay .saito-button-row .saito-button-primary {
+  min-width: 11rem;
+}
+
+/*
+ * Stack when the dialog is viewport-bound and two columns stop being
+ * comfortable. 768px matches shared Saito overlay mobile gates and is
+ * wider than 600px so phones/narrow windows don't keep a squeezed side-by-side.
+ */
+@media (max-width: 768px) {
+  .saito-app-install-overlay .content {
+    grid-template-columns: minmax(0, 1fr);
+    gap: var(--saito-space-md);
+  }
+
+  .saito-app-install-overlay .preview {
+    max-height: min(40vh, 24rem);
+    width: auto;
+    max-width: 100%;
+    margin-inline: auto;
+  }
+
+  .saito-app-install-overlay .footer {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .saito-app-install-overlay .meta {
+    width: 100%;
+    flex-direction: column;
+    gap: var(--saito-space-md);
+  }
+
+  .saito-app-install-overlay .field + .field {
+    padding-left: 0;
+    border-left: none;
+  }
+
+  .saito-app-install-overlay .saito-button-row {
+    width: 100%;
+  }
+
+  .saito-app-install-overlay .saito-button-row .saito-button-primary {
+    min-width: 0;
+    flex: 1 1 auto;
+    width: 100%;
+  }
+}

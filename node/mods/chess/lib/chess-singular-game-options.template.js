@@ -1,6 +1,6 @@
 module.exports = (app, mod) => {
-	let html = `<div class="overlay-input">
-      <select name="clock">
+  let html = `<div class="overlay-input">
+      <select class="saito-form-select" name="clock">
         <option value="0" default>no clock</option>
         <option value="1">1 minute</option>
         <option value="2">2 minutes</option>
@@ -11,5 +11,5 @@ module.exports = (app, mod) => {
       </select>
       </div>
       `;
-	return html;
+  return html;
 };

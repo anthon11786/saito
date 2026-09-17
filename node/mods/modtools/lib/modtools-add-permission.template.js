@@ -1,30 +1,30 @@
 module.exports = (app, mod) => {
-	let mods = app.modules.mods;
+  let mods = app.modules.mods;
 
-	let html = `
+  let html = `
 		<div class="saito-module-settings modtools-addnew-permission-container">
 			<fieldset class="saito-grid">
 			<legend class="settings-label">New Permission</legend>
 
 		    <div class="modtools-app-permission-dropdowns">
 				<div class="overlay-input">
-					<select id="modtools-add-permission-app" class="app-options-select">
+					<select id="modtools-add-permission-app" class="saito-form-select app-options-select">
 	`;
 
-					for (let i = 0; i < mods.length; i++) {	
-						let name = (mods[i].name).toLowerCase();
+  for (let i = 0; i < mods.length; i++) {
+    let name = mods[i].name.toLowerCase();
 
-						if (typeof mod.apps[name] == 'undefined') {
-							html += `<option value='${name}'>${mods[i].name}</option>`;
-						}
-					}
+    if (typeof mod.apps[name] == 'undefined') {
+      html += `<option value='${name}'>${mods[i].name}</option>`;
+    }
+  }
 
-	html += `
+  html += `
 					</select>
 				</div>
 
 				<div class="overlay-input">
-					<select id="modtools-add-permission-option" class="app-options-select">
+					<select id="modtools-add-permission-option" class="saito-form-select app-options-select">
 						<option value="*" >Allow all</option>
 	                 	<option value="!" >None</option>
 	                 	<option value="$" >Fee-bearing</option>
@@ -42,6 +42,5 @@ module.exports = (app, mod) => {
 		</div>
 	`;
 
-
-	return html;
-}
+  return html;
+};

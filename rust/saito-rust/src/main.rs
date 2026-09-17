@@ -1,7 +1,4 @@
-use std::cmp::min;
-use std::ops::DerefMut;
 use std::panic;
-use std::path::Path;
 use std::process;
 use std::str::FromStr;
 use std::sync::Arc;
@@ -12,8 +9,6 @@ use clap::{crate_version, App, Arg};
 use log::info;
 use log::{debug, error};
 use saito_rust::run_thread::run_thread;
-use tokio::fs::File;
-use tokio::io::AsyncWriteExt;
 use tokio::select;
 use tokio::sync::mpsc::{Receiver, Sender};
 use tokio::sync::RwLock;
@@ -27,27 +22,24 @@ use once_cell::sync::OnceCell;
 use saito_core::core::consensus::blockchain::Blockchain;
 use saito_core::core::consensus::context::Context;
 use saito_core::core::consensus::wallet::Wallet;
-use saito_core::core::consensus_thread::{ConsensusEvent, ConsensusStats, ConsensusThread};
-use saito_core::core::defs::{
-    Currency, PrintForLog, SaitoPrivateKey, SaitoPublicKey, StatVariable, CHANNEL_SAFE_BUFFER,
-    PROJECT_PUBLIC_KEY, STAT_BIN_COUNT,
-};
+use saito_core::core::consensus_thread::{ConsensusEvent, ConsensusThread};
+use saito_core::core::defs::{PrintForLog, SaitoPrivateKey, SaitoPublicKey, CHANNEL_SAFE_BUFFER};
 use saito_core::core::mining_thread::{MiningEvent, MiningThread};
+use saito_core::core::network::events::IoEvent;
+use saito_core::core::network::events::NetworkEvent;
+use saito_core::core::network::gatekeeper::Gatekeeper;
+use saito_core::core::network::network::Network;
+use saito_core::core::network::peers::Peers;
+use saito_core::core::network::sync::{FetchDispatcher, SyncManager};
 use saito_core::core::process::keep_time::{KeepTime, Timer};
 use saito_core::core::process::process_event::ProcessEvent;
-use saito_core::core::routing::blockchain_sync_state::BlockchainSyncState;
-use saito_core::core::routing::io::network::Network;
-use saito_core::core::routing::io::network_event::NetworkEvent;
-use saito_core::core::routing::io::storage::Storage;
-use saito_core::core::routing::peers::io_event::IoEvent;
-use saito_core::core::routing::peers::peer_collection::PeerCollection;
-use saito_core::core::routing_thread::{RoutingEvent, RoutingStats, RoutingThread};
-use saito_core::core::stat_thread::{StatEvent, StatThread};
+use saito_core::core::routing_thread::{RoutingEvent, RoutingThread};
+use saito_core::core::storage::storage::Storage;
 use saito_core::core::util::configuration::Configuration;
 use saito_core::core::util::crypto::generate_keys;
 use saito_core::core::verification_thread::{VerificationThread, VerifyRequest};
-use saito_rust::config_handler::{ConfigHandler, NodeConfigurations};
-use saito_rust::network_controller::run_network_controller;
+use saito_rust::config_handler::ConfigHandler;
+use saito_rust::network_controller::{run_network_controller, NetworkController};
 use saito_rust::rust_io_handler::RustIOHandler;
 use saito_rust::time_keeper::TimeKeeper;
 use tracing_appender::non_blocking::WorkerGuard;
@@ -118,12 +110,6 @@ async fn run_verification_thread(
                     }
                 }
             }
-            // if !requests.is_empty() {
-            //     event_processor
-            //         .processed_msgs
-            //         .increment_by(requests.len() as u64);
-            //     event_processor.verify_txs(&mut requests).await;
-            // }
             for request in queued_requests.drain(..) {
                 event_processor.process_event(request).await;
             }
@@ -138,7 +124,6 @@ async fn run_mining_event_processor(
     stat_timer_in_ms: u64,
     thread_sleep_time_in_ms: u64,
     channel_size: usize,
-    sender_to_stat: Sender<StatEvent>,
     time_keeper_origin: &Timer,
 ) -> (Sender<NetworkEvent>, JoinHandle<()>) {
     let mining_event_processor = MiningThread {
@@ -151,7 +136,6 @@ async fn run_mining_event_processor(
         difficulty: 0,
         public_key: [0; 33],
         mined_golden_tickets: 0,
-        stat_sender: sender_to_stat.clone(),
         config_lock: context.config_lock.clone(),
         enabled: true,
         mining_iterations: 10_000,
@@ -177,15 +161,15 @@ async fn run_mining_event_processor(
 
 async fn run_consensus_event_processor(
     context: &Context,
-    peer_lock: Arc<RwLock<PeerCollection>>,
+    peer_lock: Arc<RwLock<Peers>>,
     receiver_for_blockchain: Receiver<ConsensusEvent>,
     sender_to_routing: &Sender<RoutingEvent>,
     sender_to_miner: Sender<MiningEvent>,
     sender_to_network_controller: Sender<IoEvent>,
+    network_controller: Arc<RwLock<NetworkController>>,
     stat_timer_in_ms: u64,
     thread_sleep_time_in_ms: u64,
     channel_size: usize,
-    sender_to_stat: Sender<StatEvent>,
     time_keeper_origin: &Timer,
 ) -> (Sender<NetworkEvent>, JoinHandle<()>) {
     let consensus_event_processor = ConsensusThread {
@@ -201,6 +185,7 @@ async fn run_consensus_event_processor(
         network: Network::new(
             Box::new(RustIOHandler::new(
                 sender_to_network_controller.clone(),
+                Some(network_controller.clone()),
                 CONSENSUS_EVENT_PROCESSOR_ID,
             )),
             peer_lock.clone(),
@@ -210,11 +195,10 @@ async fn run_consensus_event_processor(
         block_producing_timer: 0,
         storage: Storage::new(Box::new(RustIOHandler::new(
             sender_to_network_controller.clone(),
+            None,
             CONSENSUS_EVENT_PROCESSOR_ID,
         ))),
-        stats: ConsensusStats::new(sender_to_stat.clone()),
         txs_for_mempool: Vec::new(),
-        stat_sender: sender_to_stat.clone(),
         config_lock: context.config_lock.clone(),
         produce_blocks_by_timer: true,
         delete_old_blocks: true,
@@ -238,9 +222,10 @@ async fn run_consensus_event_processor(
 
 async fn run_routing_event_processor(
     sender_to_io_controller: Sender<IoEvent>,
+    network_controller: Arc<RwLock<NetworkController>>,
     configs_lock: Arc<RwLock<dyn Configuration + Send + Sync>>,
     context: &Context,
-    peers_lock: Arc<RwLock<PeerCollection>>,
+    peers_lock: Arc<RwLock<Peers>>,
     sender_to_mempool: &Sender<ConsensusEvent>,
     receiver_for_routing: Receiver<RoutingEvent>,
     sender_to_miner: &Sender<MiningEvent>,
@@ -248,11 +233,33 @@ async fn run_routing_event_processor(
     stat_timer_in_ms: u64,
     thread_sleep_time_in_ms: u64,
     channel_size: usize,
-    sender_to_stat: Sender<StatEvent>,
-    fetch_batch_size: usize,
     time_keeper_origin: &Timer,
 ) -> (Sender<NetworkEvent>, JoinHandle<()>) {
     let (sender, _receiver) = tokio::sync::mpsc::channel::<IoEvent>(channel_size);
+    let sync_lite_block_fetch = {
+        let c = configs_lock.read().await;
+        c.is_spv_mode()
+    };
+    let fetch_dispatcher: FetchDispatcher = {
+        let sender_to_io = sender_to_io_controller.clone();
+        Arc::new(move |block_hash, peer_id, url, block_id| {
+            let sender_to_io = sender_to_io.clone();
+            tokio::spawn(async move {
+                if sender_to_io
+                    .send(IoEvent::new(NetworkEvent::BlockFetchRequest {
+                        block_hash,
+                        peer_id,
+                        url,
+                        block_id,
+                    }))
+                    .await
+                    .is_err()
+                {
+                    log::error!("failed to dispatch block fetch request");
+                }
+            });
+        })
+    };
     let routing_event_processor = RoutingThread {
         blockchain_lock: context.blockchain_lock.clone(),
         mempool_lock: context.mempool_lock.clone(),
@@ -264,27 +271,31 @@ async fn run_routing_event_processor(
         network: Network::new(
             Box::new(RustIOHandler::new(
                 sender_to_io_controller.clone(),
+                Some(network_controller.clone()),
                 ROUTING_EVENT_PROCESSOR_ID,
             )),
             peers_lock.clone(),
             context.wallet_lock.clone(),
             time_keeper_origin.clone(),
         ),
-        storage: Storage::new(Box::new(RustIOHandler::new(sender, 1))),
+        storage: Storage::new(Box::new(RustIOHandler::new(sender, None, 1))),
         reconnection_timer: 0,
         peer_removal_timer: 0,
         last_emitted_block_fetch_count: 0,
-        stats: RoutingStats::new(sender_to_stat.clone()),
         senders_to_verification: senders,
         last_verification_thread_index: 0,
-        stat_sender: sender_to_stat.clone(),
-        blockchain_sync_state: BlockchainSyncState::new(fetch_batch_size),
+        sync: Arc::new(RwLock::new(SyncManager::new(
+            context.blockchain_lock.clone(),
+            context.mempool_lock.clone(),
+            context.wallet_lock.clone(),
+            Arc::new(time_keeper_origin.clone()),
+            sync_lite_block_fetch,
+        ))),
+        gatekeeper: Gatekeeper::default(),
         congestion_check_timer: 0,
-        received_ghost_chain: None,
-        waiting_for_genesis_block: false,
+        gatekeeper_monitor_timer: 0,
         message_sending_timer: 0,
-        blockchain_send_results: Default::default(),
-        new_peers: vec![],
+        fetch_dispatcher,
     };
 
     let (interface_sender_to_routing, interface_receiver_for_routing) =
@@ -308,12 +319,11 @@ async fn run_routing_event_processor(
 async fn run_verification_threads(
     sender_to_consensus: Sender<ConsensusEvent>,
     blockchain_lock: Arc<RwLock<Blockchain>>,
-    peer_lock: Arc<RwLock<PeerCollection>>,
+    peer_lock: Arc<RwLock<Peers>>,
     wallet_lock: Arc<RwLock<Wallet>>,
     stat_timer_in_ms: u64,
     thread_sleep_time_in_ms: u64,
     verification_thread_count: u16,
-    sender_to_stat: Sender<StatEvent>,
     time_keeper_origin: &Timer,
 ) -> (Vec<Sender<VerifyRequest>>, Vec<JoinHandle<()>>) {
     let mut senders = vec![];
@@ -327,27 +337,6 @@ async fn run_verification_threads(
             blockchain_lock: blockchain_lock.clone(),
             peer_lock: peer_lock.clone(),
             wallet_lock: wallet_lock.clone(),
-            processed_txs: StatVariable::new(
-                format!("verification_{:?}::processed_txs", i),
-                STAT_BIN_COUNT,
-                sender_to_stat.clone(),
-            ),
-            processed_blocks: StatVariable::new(
-                format!("verification_{:?}::processed_blocks", i),
-                STAT_BIN_COUNT,
-                sender_to_stat.clone(),
-            ),
-            processed_msgs: StatVariable::new(
-                format!("verification_{:?}::processed_msgs", i),
-                STAT_BIN_COUNT,
-                sender_to_stat.clone(),
-            ),
-            invalid_txs: StatVariable::new(
-                format!("verification_{:?}::invalid_txs", i),
-                STAT_BIN_COUNT,
-                sender_to_stat.clone(),
-            ),
-            stat_sender: sender_to_stat.clone(),
             timer: time_keeper_origin.clone(),
         };
 
@@ -370,52 +359,20 @@ async fn run_verification_threads(
 fn run_loop_thread(
     mut receiver: Receiver<IoEvent>,
     network_event_sender_to_routing_ep: Sender<NetworkEvent>,
-    stat_timer_in_ms: u64,
     _thread_sleep_time_in_ms: u64,
-    sender_to_stat: Sender<StatEvent>,
-    time_keeper_origin: &Timer,
 ) -> JoinHandle<()> {
-    let time_keeper = time_keeper_origin.clone();
     tokio::spawn(async move {
-        let mut incoming_msgs = StatVariable::new(
-            "network::incoming_msgs".to_string(),
-            STAT_BIN_COUNT,
-            sender_to_stat.clone(),
-        );
-        let mut stat_interval = tokio::time::interval(Duration::from_millis(stat_timer_in_ms));
-
-        let mut last_stat_on: Instant = Instant::now();
-        loop {
-            select! {
-                result = receiver.recv()=>{
-                    if result.is_some() {
-                        let command = result.unwrap();
-                        incoming_msgs.increment();
-                        match command.event_processor_id {
-                            ROUTING_EVENT_PROCESSOR_ID => {
-                                network_event_sender_to_routing_ep
-                                    .send(command.event)
-                                    .await
-                                    .unwrap();
-                            }
-
-                            _ => {
-                                unreachable!()
-                            }
-                        }
-                    }
+        while let Some(command) = receiver.recv().await {
+            match command.event_processor_id {
+                ROUTING_EVENT_PROCESSOR_ID => {
+                    network_event_sender_to_routing_ep
+                        .send(command.event)
+                        .await
+                        .unwrap();
                 }
-                _ = stat_interval.tick()=>{
-                    {
-                        if Instant::now().duration_since(last_stat_on)
-                            > Duration::from_millis(stat_timer_in_ms)
-                        {
-                            last_stat_on = Instant::now();
-                            incoming_msgs
-                                .calculate_stats(time_keeper.get_timestamp_in_ms())
-                                .await;
-                        }
-                    }
+
+                _ => {
+                    unreachable!()
                 }
             }
         }
@@ -509,7 +466,6 @@ async fn run_node(
     let thread_sleep_time_in_ms;
     let stat_timer_in_ms;
     let verification_thread_count;
-    let fetch_batch_size;
     let genesis_period;
     let social_stake;
     let social_stake_period;
@@ -521,12 +477,12 @@ async fn run_node(
         let mut configs = configs_lock.write().await;
 
         if let Some(wallet) = configs.get_wallet_configs_mut() {
-            if !wallet.privateKey.is_empty() {
-                private_key = SaitoPrivateKey::from_hex(wallet.privateKey.as_str())
+            if !wallet.private_key.is_empty() {
+                private_key = SaitoPrivateKey::from_hex(wallet.private_key.as_str())
                     .expect("invalid private key");
 
-                if !wallet.publicKey.is_empty() {
-                    public_key = SaitoPublicKey::from_base58(wallet.publicKey.as_str())
+                if !wallet.public_key.is_empty() {
+                    public_key = SaitoPublicKey::from_base58(wallet.public_key.as_str())
                         .expect("invalid public key");
                     info!(
                         "found public key as : {} in Wallet Configs",
@@ -535,8 +491,8 @@ async fn run_node(
                 }
             } else {
                 if let Some(wallet) = configs.get_wallet_configs_mut() {
-                    wallet.privateKey = private_key.to_hex();
-                    wallet.publicKey = public_key.to_base58();
+                    wallet.private_key = private_key.to_hex();
+                    wallet.public_key = public_key.to_base58();
                 }
             }
         } else {
@@ -551,7 +507,6 @@ async fn run_node(
             .thread_sleep_time_in_ms;
         stat_timer_in_ms = configs.get_server_configs().unwrap().stat_timer_in_ms;
         verification_thread_count = configs.get_server_configs().unwrap().verification_threads;
-        fetch_batch_size = configs.get_server_configs().unwrap().block_fetch_batch_size as usize;
         genesis_period = configs.get_consensus_config().unwrap().genesis_period;
         social_stake = configs.get_consensus_config().unwrap().default_social_stake;
         social_stake_period = configs
@@ -563,7 +518,6 @@ async fn run_node(
             .get_consensus_config()
             .unwrap()
             .block_confirmation_limit;
-        assert_ne!(fetch_batch_size, 0);
     }
 
     let (event_sender_to_loop, event_receiver_in_loop) =
@@ -571,6 +525,9 @@ async fn run_node(
 
     let (sender_to_network_controller, receiver_in_network_controller) =
         tokio::sync::mpsc::channel::<IoEvent>(channel_size);
+    let network_controller = Arc::new(RwLock::new(NetworkController::new(
+        event_sender_to_loop.clone(),
+    )));
 
     info!("running saito controllers");
 
@@ -611,7 +568,7 @@ async fn run_node(
         block_confirmation_limit,
     );
 
-    let peers_lock = Arc::new(RwLock::new(PeerCollection::default()));
+    let peers_lock = Arc::new(RwLock::new(Peers::default()));
 
     let (sender_to_consensus, receiver_for_consensus) =
         tokio::sync::mpsc::channel::<ConsensusEvent>(channel_size);
@@ -621,7 +578,6 @@ async fn run_node(
 
     let (sender_to_miner, receiver_for_miner) =
         tokio::sync::mpsc::channel::<MiningEvent>(channel_size);
-    let (sender_to_stat, receiver_for_stat) = tokio::sync::mpsc::channel::<StatEvent>(channel_size);
 
     let (senders, verification_handles) = run_verification_threads(
         sender_to_consensus.clone(),
@@ -631,13 +587,13 @@ async fn run_node(
         stat_timer_in_ms,
         thread_sleep_time_in_ms,
         verification_thread_count,
-        sender_to_stat.clone(),
         &time_keeper,
     )
     .await;
 
     let (network_event_sender_to_routing, routing_handle) = run_routing_event_processor(
         sender_to_network_controller.clone(),
+        network_controller.clone(),
         configs_lock.clone(),
         &context,
         peers_lock.clone(),
@@ -648,8 +604,6 @@ async fn run_node(
         stat_timer_in_ms,
         thread_sleep_time_in_ms,
         channel_size,
-        sender_to_stat.clone(),
-        fetch_batch_size,
         &time_keeper,
     )
     .await;
@@ -661,10 +615,10 @@ async fn run_node(
         &sender_to_routing,
         sender_to_miner,
         sender_to_network_controller.clone(),
+        network_controller.clone(),
         stat_timer_in_ms,
         thread_sleep_time_in_ms,
         channel_size,
-        sender_to_stat.clone(),
         &time_keeper,
     )
     .await;
@@ -676,41 +630,21 @@ async fn run_node(
         stat_timer_in_ms,
         thread_sleep_time_in_ms,
         channel_size,
-        sender_to_stat.clone(),
-        &time_keeper,
-    )
-    .await;
-    let stat_handle = run_thread(
-        Box::new(
-            StatThread::new(Box::new(RustIOHandler::new(
-                sender_to_network_controller.clone(),
-                ROUTING_EVENT_PROCESSOR_ID,
-            )))
-            .await,
-        ),
-        None,
-        Some(receiver_for_stat),
-        stat_timer_in_ms,
-        "saito-stats",
-        thread_sleep_time_in_ms,
         &time_keeper,
     )
     .await;
     let loop_handle: JoinHandle<()> = run_loop_thread(
         event_receiver_in_loop,
         network_event_sender_to_routing,
-        stat_timer_in_ms,
         thread_sleep_time_in_ms,
-        sender_to_stat.clone(),
-        &time_keeper,
     );
 
     let (server_handle, controller_handle) = run_network_controller(
+        network_controller.clone(),
         receiver_in_network_controller,
         event_sender_to_loop.clone(),
         configs_lock.clone(),
         context.blockchain_lock.clone(),
-        sender_to_stat.clone(),
         peers_lock.clone(),
         sender_to_network_controller.clone(),
         &time_keeper,
@@ -725,163 +659,7 @@ async fn run_node(
         loop_handle,
         server_handle,
         controller_handle,
-        stat_handle,
         futures::future::join_all(verification_handles)
-    );
-}
-
-pub async fn run_utxo_to_issuance_converter(threshold: Currency) {
-    info!("running saito controllers");
-    let start_time = Instant::now();
-    let public_key: SaitoPublicKey =
-        hex::decode("03145c7e7644ab277482ba8801a515b8f1b62bcd7e4834a33258f438cd7e223849")
-            .unwrap()
-            .try_into()
-            .unwrap();
-    let private_key: SaitoPrivateKey =
-        hex::decode("ddb4ba7e5d70c2234f035853902c6bc805cae9163085f2eac5e585e2d6113ccd")
-            .unwrap()
-            .try_into()
-            .unwrap();
-
-    let configs_lock: Arc<RwLock<NodeConfigurations>> =
-        Arc::new(RwLock::new(NodeConfigurations::default()));
-
-    let configs_clone: Arc<RwLock<dyn Configuration + Send + Sync>> = configs_lock.clone();
-
-    let wallet = Arc::new(RwLock::new(Wallet::new(private_key, public_key)));
-    {
-        let _configs = configs_clone.write().await;
-        let mut wallet = wallet.write().await;
-        let (sender, _receiver) = tokio::sync::mpsc::channel::<IoEvent>(100);
-        Wallet::load(&mut wallet, &(RustIOHandler::new(sender, 1))).await;
-    }
-    let consensus = configs_clone
-        .read()
-        .await
-        .get_consensus_config()
-        .unwrap()
-        .clone();
-    let context = Context::new(
-        configs_clone.clone(),
-        wallet,
-        consensus.genesis_period,
-        consensus.default_social_stake,
-        consensus.default_social_stake_period,
-        consensus.prune_after_blocks,
-        consensus.block_confirmation_limit,
-    );
-
-    let (sender_to_network_controller, _receiver_in_network_controller) =
-        tokio::sync::mpsc::channel::<IoEvent>(100000);
-    let mut storage = Storage::new(Box::new(RustIOHandler::new(
-        sender_to_network_controller.clone(),
-        0,
-    )));
-    let list = storage.load_block_name_list().await.unwrap();
-
-    let page_size = 100;
-    let pages = list.len() / page_size;
-    let mut configs = configs_lock.write().await;
-
-    let mut blockchain = context.blockchain_lock.write().await;
-
-    for current_page in 0..pages {
-        let start = current_page * page_size;
-        let end = min(start + page_size, list.len());
-        storage
-            .load_blocks_from_disk(&list[start..end], context.mempool_lock.clone())
-            .await;
-
-        tokio::task::yield_now().await;
-
-        blockchain
-            .add_blocks_from_mempool(
-                context.mempool_lock.clone(),
-                None,
-                &mut storage,
-                None,
-                None,
-                configs.deref_mut(),
-            )
-            .await;
-        // blockchain.utxoset.shrink_to_fit();
-        // blockchain.blocks.shrink_to_fit();
-    }
-
-    info!("utxo size : {:?}", blockchain.utxoset.len());
-
-    let data = blockchain.get_utxoset_data();
-
-    info!("{:?} entries in utxo to write to file", data.len());
-    let issuance_path: String = "./data/issuance.file".to_string();
-    info!("opening file : {:?}", issuance_path);
-
-    let path = Path::new(issuance_path.as_str());
-    if path.parent().is_some() {
-        tokio::fs::create_dir_all(path.parent().unwrap())
-            .await
-            .expect("failed creating directory structure");
-    }
-
-    let file = File::create(issuance_path.clone()).await;
-    if file.is_err() {
-        error!("error opening file. {:?}", file.err().unwrap());
-        File::create(issuance_path)
-            .await
-            .expect("couldn't create file");
-        return;
-    }
-    let mut file = file.unwrap();
-
-    let mut sum = 0;
-    let slip_type = "Normal";
-    let mut aggregated_value = 0;
-    let mut total_written_lines = 0;
-    for (key, value) in &data {
-        if value < &threshold {
-            // PROJECT_PUBLIC_KEY.to_string()
-            aggregated_value += value;
-        } else {
-            sum += value;
-            total_written_lines += 1;
-            let key_base58 = key.to_base58();
-
-            file.write_all(format!("{}\t{}\t{}\n", value, key_base58, slip_type).as_bytes())
-                .await
-                .expect("failed writing to issuance file");
-        };
-    }
-
-    // add remaining value
-    if aggregated_value > 0 {
-        sum += aggregated_value;
-        total_written_lines += 1;
-        file.write_all(
-            format!(
-                "{}\t{}\t{}\n",
-                aggregated_value,
-                PROJECT_PUBLIC_KEY.to_string(),
-                slip_type
-            )
-            .as_bytes(),
-        )
-        .await
-        .expect("failed writing to issuance file");
-    }
-
-    file.flush()
-        .await
-        .expect("failed flushing issuance file data");
-
-    let end_time = Instant::now();
-    let spent_time = end_time.duration_since(start_time);
-
-    info!(
-        "total written lines : {:?} sum : {:?} spent_time : {:?}",
-        total_written_lines,
-        sum,
-        spent_time.as_secs()
     );
 }
 
@@ -901,15 +679,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 .long("mode")
                 .value_name("MODE")
                 .default_value("node")
-                .possible_values(["node", "utxo-issuance", "hastened"])
+                .possible_values(["node", "hastened"])
                 .help("Sets the mode for execution")
-                .takes_value(true),
-        )
-        .arg(
-            Arg::with_name("utxo_threshold")
-                .long("threshold")
-                .value_name("UTXO_THRESHOLD")
-                .help("Threshold for selecting utxo for issuance file")
                 .takes_value(true),
         )
         .arg(
@@ -941,23 +712,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             Arc::new(RwLock::new(configs.unwrap()));
 
         run_node(configs, 1).await;
-    } else if program_mode == "utxo-issuance" {
-        let threshold_str = matches.value_of("utxo_threshold");
-        let mut threshold: Currency = 25_000;
-        if threshold_str.is_some() {
-            let result = String::from(threshold_str.unwrap()).parse();
-            if result.is_err() {
-                error!("cannot parse threshold : {:?}", threshold_str);
-            } else {
-                threshold = result.unwrap();
-            }
-        }
-        info!(
-            "running the program in utxo to issuance converter mode with threshold : {:?}",
-            threshold
-        );
-
-        run_utxo_to_issuance_converter(threshold).await;
     } else if program_mode == "hastened" {
         let multiplier_str = matches.value_of("haste_multiplier");
         let result = String::from(multiplier_str.unwrap()).parse();

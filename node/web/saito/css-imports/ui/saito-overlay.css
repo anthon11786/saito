@@ -1,0 +1,330 @@
+/* SaitoOverlay — shell only: backdrop, position, size, panel, close, lifecycle.
+   Forms/inputs/buttons/type inherit the Saito design system. */
+
+.saito-overlay-backdrop {
+  position: fixed !important;
+  display: none;
+  top: 0;
+  left: 0;
+  width: 100vw;
+  height: 100vh;
+  background-color: var(--saito-overlay-backdrop);
+  z-index: 100;
+}
+
+.saito-overlay-backdrop ~ .saito-overlay-backdrop {
+  background-color: var(--saito-overlay-backdrop-stacked);
+}
+
+.saito-overlay {
+  position: fixed;
+  display: inline-block;
+  z-index: 1000;
+  height: min-content;
+  width: min-content;
+  max-height: 100svh;
+  max-width: 100vw;
+}
+
+.saito-overlay-size {
+  width: min(600px, 95vw);
+  min-height: min(400px, 80vh);
+  max-height: 80vh;
+  padding: var(--saito-space-xl);
+}
+
+.saito-overlay-size.wide {
+  width: min(900px, 100vw);
+  padding: var(--saito-space-xxl);
+}
+
+.saito-overlay-size.tall {
+  min-height: min(600px, 100vh);
+  max-height: 100vh;
+}
+
+.saito-overlay-size.narrow {
+  width: min(400px, 90vw);
+}
+
+/* Shared elevated panel chrome — class owns presentation anywhere it appears.
+   Overlay forms / file-transfer / hamburger share the same surface. */
+.saito-overlay-panel,
+.saito-overlay > form,
+.saito-file-transfer-overlay,
+.saito-header-hamburger-contents,
+.stun-invite {
+  background-color: var(--saito-popover);
+  background-image: var(--saito-popover-wash);
+  box-shadow: var(--saito-elevation-3);
+  border-radius: var(--saito-radius-lg);
+  border: 1px solid var(--saito-border);
+}
+
+/* Compact floating menus / pickers (smaller radius + mid elevation) */
+.saito-overlay-panel.compact {
+  box-shadow: var(--saito-elevation-2);
+  border-radius: var(--saito-radius);
+}
+
+/* Keep dialog surface on mobile when overlay host goes full-bleed */
+.saito-overlay-panel.retain-surface {
+  background-color: var(--saito-popover);
+  background-image: var(--saito-popover-wash);
+  box-shadow: var(--saito-elevation-3);
+}
+
+.center-overlay {
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  margin: 0 auto;
+}
+
+.saito-overlay-closebox {
+  position: absolute;
+  width: 4.2rem;
+  height: 3.4rem;
+  border-radius: 0.8rem;
+  z-index: 100;
+  top: -1rem;
+  right: -1rem;
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--saito-foreground) 12%, transparent), transparent),
+    color-mix(in srgb, var(--saito-card) 84%, var(--saito-primary));
+  border: 1px solid color-mix(in srgb, var(--saito-primary) 42%, var(--saito-border));
+  box-shadow:
+    0 1.2rem 3rem color-mix(in srgb, var(--saito-black) 28%, transparent),
+    inset 0 1px 0 color-mix(in srgb, var(--saito-white) 16%, transparent);
+  backdrop-filter: blur(10px);
+  transition:
+    background 0.2s ease,
+    border-color 0.2s ease,
+    box-shadow 0.2s ease,
+    transform 0.2s ease;
+  display: none;
+  cursor: pointer;
+}
+
+.maximized-overlay .saito-overlay-closebox {
+  top: 1rem;
+  right: 1rem;
+}
+
+.saito-overlay-closebox-btn {
+  pointer-events: none;
+  display: block;
+  height: 100%;
+  width: 100%;
+  color: transparent;
+  background-color: transparent;
+  font-size: 0;
+  border-radius: inherit;
+  position: absolute;
+  inset: 0;
+  transform: none;
+}
+
+.saito-overlay-closebox::before,
+.saito-overlay-closebox::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 1.45rem;
+  height: 2px;
+  border-radius: 999px;
+  background: var(--saito-primary-foreground);
+  transform-origin: center;
+}
+
+.saito-overlay-closebox::before {
+  transform: translate(-50%, -50%) rotate(45deg);
+}
+
+.saito-overlay-closebox::after {
+  transform: translate(-50%, -50%) rotate(-45deg);
+}
+
+.saito-overlay-closebox:hover {
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--saito-white) 18%, transparent), transparent),
+    var(--saito-primary);
+  border-color: var(--saito-primary);
+  box-shadow:
+    0 1.4rem 3.6rem color-mix(in srgb, var(--saito-black) 34%, transparent),
+    0 0 0 1px color-mix(in srgb, var(--saito-primary) 24%, transparent),
+    inset 0 1px 0 color-mix(in srgb, var(--saito-white) 24%, transparent);
+  transform: translateY(-1px);
+  transform-origin: center;
+}
+
+/* Dialog content stack — layout only; controls inherit Saito.
+   Gap matches Send body rhythm (--saito-space-lg / 1.6rem). */
+.saito-overlay-form,
+.saito-recovery,
+.saito-backup {
+  width: min(60rem, 95vw);
+  padding: var(--saito-space-xl);
+  display: flex;
+  flex-direction: column;
+  gap: var(--saito-space-lg);
+}
+
+/* Button-row margin is for free-standing footers; flex gap owns spacing here */
+.saito-overlay-form > .saito-button-row,
+.saito-recovery > .saito-button-row,
+.saito-backup > .saito-button-row {
+  margin-top: 0;
+}
+
+/* Shared dialog title bar — deliberate identity used across overlays */
+.saito-overlay-form-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--saito-space-lg);
+  width: 100%;
+  height: 6rem;
+  padding-left: var(--saito-space-lg);
+  border-radius: var(--saito-radius);
+  background: linear-gradient(
+    90deg,
+    var(--saito-primary) 0%,
+    var(--saito-primary) 20%,
+    transparent 100%
+  );
+  color: var(--saito-primary-foreground);
+}
+
+@media (max-width: 768px) {
+  .saito-overlay-form-header {
+    background: linear-gradient(
+      90deg,
+      var(--saito-primary) 0%,
+      var(--saito-primary) 40%,
+      transparent 100%
+    );
+  }
+}
+
+.saito-overlay-form-header-title {
+  margin: 0;
+  font-size: 2rem;
+  font-family: var(--saito-font-medium);
+  text-transform: uppercase;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.saito-overlay-form-header-title.loading {
+  line-height: 6rem;
+}
+
+/* Supporting copy — secondary to title / input / CTA */
+.saito-overlay-form-text {
+  color: var(--saito-muted-foreground);
+}
+
+.saito-overlay-form-text p {
+  margin: 0;
+}
+
+.saito-overlay-form-text p + p {
+  margin-top: var(--saito-space-md);
+}
+
+/* Backup subform — layout only */
+.saito-overlay-subform {
+  display: grid;
+  grid-template-columns: min-content 1fr;
+  gap: var(--saito-space-md);
+}
+
+.saito-overlay-subform.centered {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.saito-overlay-subform-inputs {
+  display: flex;
+  flex-direction: column;
+  gap: var(--saito-space-md);
+}
+
+.saito-overlay-auto-backup .saito-overlay-subform {
+  grid-template-columns: 3fr 1fr;
+}
+
+@media screen and (max-width: 600px) {
+  .maximized-overlay .saito-overlay-closebox {
+    top: 0.5rem;
+    right: 0.5rem;
+  }
+
+  .saito-overlay-subform > .saito-overlay-form-subtext {
+    display: none;
+  }
+
+  .saito-overlay-subform-inputs {
+    grid-column: span 2;
+  }
+
+  .bottom-mobile-overlay.center-overlay {
+    top: unset;
+    bottom: 0;
+  }
+
+  .saito-overlay-size.wide {
+    padding: var(--saito-space-xl) var(--saito-space-md);
+  }
+}
+
+@media screen and (max-width: 768px) {
+  .saito-overlay {
+    inset: 0;
+    top: var(--saito-overlay-viewport-top, 0px);
+    bottom: auto;
+    box-sizing: border-box;
+    width: 100vw;
+    max-width: none;
+    height: 100vh;
+    height: var(--saito-overlay-viewport-height, 100dvh);
+    max-height: none;
+    margin: 0;
+    padding: 1rem;
+    border-radius: 0;
+    transform: none;
+    overflow-y: auto;
+    scrollbar-width: none;
+    overscroll-behavior: contain;
+    background: var(--saito-canvas-wash);
+  }
+
+  .saito-overlay::-webkit-scrollbar {
+    display: none;
+  }
+
+  .saito-overlay > .saito-overlay-panel:not(.retain-surface),
+  .saito-overlay > form:not(.retain-surface) {
+    box-sizing: border-box;
+    width: 100% !important;
+    max-width: 100% !important;
+    margin: 0;
+    padding: 0 !important;
+    border: 0;
+    border-radius: 0;
+    box-shadow: none;
+    min-height: 100%;
+    background: transparent;
+    background-image: none;
+  }
+
+  .saito-overlay .saito-overlay-closebox {
+    position: fixed;
+    top: max(2.3rem, env(safe-area-inset-top));
+    right: max(1rem, env(safe-area-inset-right));
+  }
+}

@@ -24,12 +24,18 @@ module.exports = (app, mod, self) => {
     .join('');
 
   return `
-    <div class="purchase-container saito-overlay-size" id="purchase-container">
-      <h3 class="purchase-select-crypto-msg">Select Payment Method</h3>
-      <div class="purchase-crypto-list">
-        ${cryptos_list}
+    <div class="purchase-container saito-overlay-panel saito-overlay-size" id="purchase-container">
+      <header class="saito-overlay-form-header">
+        <h2 class="saito-overlay-form-header-title">Get SAITO</h2>
+      </header>
+      <div class="buysaito-options"></div>
+      <div class="buysaito-stage" id="buysaito-stage">
+        <h3 class="purchase-select-crypto-msg">CHOOSE PAYMENT METHOD</h3>
+        <div class="purchase-crypto-list">
+          ${cryptos_list}
+        </div>
       </div>
-      <div class="footer-note">Already have (ERC-20 wrapped) SAITO? Visit our <a href="/migration">migration portal</a></div>
+      <div class="buysaito-footer-note">Already have (ERC-20 wrapped) SAITO? Visit our <a href="/migration">migration portal</a></div>
     </div>
   `;
 };

@@ -1,119 +1,188 @@
-module.exports = (app, mod, tweet) => {
-	let notice = tweet?.notice || '';
+const TweetHeaderTemplate = require('./tweet-header.template');
+const TweetBodyTemplate = require('./tweet-body.template');
+const TweetGalleryTemplate = require('./tweet-gallery.template');
+const TweetFooterTemplate = require('./tweet-footer.template');
 
-	// Extract hypertext-y mentions!
-	let text = app.browser.markupMentions(tweet?.text || '');
+function escapeAttribute(value) {
+  return String(value ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
+}
 
-	let identicon_src = app.keychain.returnIdenticon(tweet.tx.from[0].publicKey);
-	let identicon_color = app.keychain.returnIdenticonColor(tweet.tx.from[0].publicKey);
-	let curation_info = '';
+function resolvePresentation(className = '', options = {}) {
+  if (options.presentation) {
+    return options.presentation;
+  }
 
-	if (tweet.sources.length) {
-		let source = tweet.sources[0];
-		if (source?.type) {
-			curation_info += ` data-source-type="${source.type}"`;
-		}
-		if (source?.node) {
-			curation_info += ` data-source-node="${source.node}"`;
-		}
-	}
-	curation_info += ` data-curated="${tweet.curated || 0}"`;
+  if (options.embedded || String(className).includes('embedded')) {
+    return 'embedded';
+  }
 
-	if (app.modules.moderateAddress(mod.publicKey) && tweet.curation_check && tweet.curated == 0) {
-		curation_info += ' data-check="1"';
-	} else {
-		tweet.curation_check = false;
-	}
+  if (options.focused || String(className).includes('focused')) {
+    return 'focused';
+  }
 
-	if (!text && !notice && tweet.retweet_tx) {
-		notice = 'retweeted by ' + app.browser.returnAddressHTML(tweet.tx.from[0].publicKey);
-	}
+  if (options.root || String(className).includes('root')) {
+    return 'root';
+  }
 
-	let is_liked_css = mod.liked_tweets.includes(tweet.tx.signature) ? 'liked' : '';
+  if (options.reply || String(className).includes('reply')) {
+    return 'reply';
+  }
 
-	let is_retweeted_css = mod.retweeted_tweets.includes(tweet.tx.signature) ? 'retweeted' : '';
-	let is_replied_css = mod.replied_tweets.includes(tweet.tx.signature) ? 'replied' : '';
+  return 'timeline';
+}
 
-	let comment_count = tweet.num_replies;
-	if (tweet.rethread) {
-		comment_count = comment_count + tweet.tree_size - 1;
-	}
+/**
+ * Public key for detail headers — raw key, never an @handle.
+ */
+function formatPublicKey(tweet = {}) {
+  const key =
+    tweet.publicKey != null && String(tweet.publicKey).trim() !== ''
+      ? String(tweet.publicKey).trim()
+      : tweet.handle != null
+        ? String(tweet.handle).trim()
+        : '';
 
-	let controls = `
-                <div class="tweet-tool tweet-tool-comment" title="Reply/Comment">
-                  <span class="tweet-tool-comment-count ${is_replied_css}">${tweet.num_replies}</span>
-                  <i class="far fa-comment ${is_replied_css}"></i>
-                </div>
-                <div class="tweet-tool tweet-tool-retweet" title="Retweet/Quote-tweet">
-                	<span class="tweet-tool-retweet-count ${is_retweeted_css}">${tweet.num_retweets}</span>
-                  <i class="fa fa-repeat ${is_retweeted_css}"></i>
-                </div>
-                <div class="tweet-tool tweet-tool-like" title="Like tweet">
-		  						<span class="tweet-tool-like-count ${is_liked_css}">${tweet.num_likes}</span>
-                  <div class="heart-bg">
-                    <div class="heart-icon ${is_liked_css}"></div>
-                  </div>
-								</div>
-                <div class="tweet-tool tweet-tool-share" title="Copy link to tweet">
-                	<i class="fa-solid fa-share-nodes"></i>
-                </div>
-								<div class="tweet-tool tweet-tool-more" title="More options">
-									<i class="fa-solid fa-ellipsis"></i>
-								</div>
-	`;
+  return key.replace(/^@/, '');
+}
 
-	let html = `
+/** @deprecated use formatPublicKey — kept for callers that still import formatHandle */
+function formatHandle(tweet = {}) {
+  return formatPublicKey(tweet);
+}
 
-	  <div class="tweet tweet-${tweet.tx.signature} ${tweet.reply_class}" data-id="${tweet.tx.signature}" ${curation_info}>
-      <img class="tweet-avatar saito-add-user-menu" src="${identicon_src}" data-id="${tweet.tx.from[0].publicKey}" />
-      <div class="tweet-body">
-	      <div class="tweet-context">${notice}</div>
-	      <div class="tweet-curation">${curation_info.replace(/data-/g, '<br>').substring(5)}</div>
-        <div class="tweet-header"></div>
-        <div class="tweet-text">${app.browser.sanitize(text, true)}</div>
-	      <div class="tweet-image"></div>
-	      <div class="tweet-retweet"></div>
-	      <div class="tweet-link-preview"></div>
+function resolveHeaderMode(presentation) {
+  if (presentation === 'focused') {
+    return 'expanded';
+  }
 
-	`;
-	if (tweet.youtube_id != null && tweet.youtube_id != 'null') {
-		html += `<iframe class="youtube-embed" src="https://www.youtube.com/embed/${tweet.youtube_id}"></iframe>`;
-	}
+  if (presentation === 'compose') {
+    return 'compose';
+  }
 
-	if (tweet?.show_controls) {
-		html += `<div class="tweet-controls saito-menu-select-subtle">${controls}</div>`;
-	}
+  return 'compact';
+}
 
-	if (tweet.curation_check) {
-		controls = `
-								<div class="tweet-tool saito-button-secondary" id="hide-spam" title="mark spam"><i class="fa-solid fa-xmark"></i></div>
-								<div class="tweet-tool saito-button-secondary" id="approve-tweet" title="approve tweet"><i class="fa-solid fa-check"></i></div>
-		`;
+const TweetTemplate = (tweet, className = 'tweet', options = {}) => {
+  const presentation = resolvePresentation(className, options);
+  const embedded = presentation === 'embedded' || options.embedded;
+  const allowEmbed = options.allowEmbed !== false && !embedded;
+  const hideControls =
+    embedded || options.hideControls || presentation === 'compose' || Boolean(tweet.ephemeral);
+  const mode = options.mode || resolveHeaderMode(presentation);
 
-		html += `<div class="tweet-curation-controls">${controls}</div>`;
-	}
+  // Timeline: no key. Detail: public key only (no @). Compose: none.
+  const handle =
+    options.handle != null
+      ? String(options.handle).replace(/^@/, '')
+      : mode === 'expanded'
+        ? formatPublicKey(tweet)
+        : '';
 
-	html += `
+  const time = options.time != null ? String(options.time) : tweet.time ? String(tweet.time) : '';
+
+  const header = TweetHeaderTemplate({
+    mode,
+    presentation,
+    publicKey: tweet.publicKey || '',
+    name: tweet.username || '',
+    handle,
+    time: mode === 'compose' ? '' : time,
+    secondary: options.secondary != null ? String(options.secondary) : ''
+  });
+
+  const body = TweetBodyTemplate({
+    text:
+      tweet.app && tweet.app.browser
+        ? tweet.app.browser.sanitize(tweet.app.browser.markupMentions(tweet?.text || ''), true)
+        : ''
+  });
+
+  const gallery = TweetGalleryTemplate({
+    images: tweet.images
+  });
+
+  const youtubeId = String(tweet.youtube_id || '').replace(/[^A-Za-z0-9_-]/g, '');
+  const youtube =
+    youtubeId && youtubeId !== 'null'
+      ? `<iframe class="youtube-embed" src="https://www.youtube.com/embed/${youtubeId}" allowfullscreen></iframe>`
+      : '';
+
+  const linkPreview =
+    typeof tweet.renderLinkPreviewHTML === 'function' ? tweet.renderLinkPreviewHTML() : '';
+
+  let embed = '';
+
+  if (allowEmbed && tweet.embedded) {
+    embed = `
+      <div class="embed">
+        ${TweetTemplate(tweet.embedded, 'tweet embedded', {
+          presentation: 'embedded',
+          embedded: true,
+          allowEmbed: false
+        })}
       </div>
-    </div>
-	`;
+    `;
+  }
 
-	return html;
+  const footer = hideControls
+    ? ''
+    : TweetFooterTemplate({
+        replies: tweet.replies,
+        retweets: tweet.retweets,
+        likes: tweet.likes
+      });
 
-	/****
-	if (tweet.youtube_id != null && tweet.youtube_id != 'null') {
-		html += `<iframe class="youtube-embed" src="https://www.youtube.com/embed/${tweet.youtube_id}"></iframe>`;
-	} else {
-		html += `<div class="tweet-preview tweet-preview-${tweet.tx.signature}"></div>`;
-	}
+  const chain = embedded ? '' : '<div class="chain" aria-hidden="true"></div>';
 
-	if (tweet?.show_controls) {
-		html += controls;
-	}
+  const showMask =
+    Boolean(tweet.flagged === 1) || Boolean(tweet.moderated && !tweet.moderated_revealed);
+  const maskText =
+    tweet.flagged === 1
+      ? 'This tweet has been reported and is under review'
+      : 'This tweet has been moderated';
+  const showReveal = tweet.flagged !== 1 && tweet.moderated && !tweet.moderated_revealed;
 
-	html += `</div>
-          </div>
+  const moderationMask = showMask
+    ? `
+      <div class="moderation-mask">
+        <div class="moderation-message">
+          <span class="text">${maskText}</span>
+          ${
+            showReveal
+              ? '<button type="button" class="saito-button-secondary small show-tweet">Show Tweet</button>'
+              : ''
+          }
         </div>
+      </div>
+    `
+    : '';
+
+  return `
+    <article class="${className}" data-id="${escapeAttribute(tweet.signature)}">
+      ${chain}
+      <img class="avatar saito-identicon" src="${escapeAttribute(tweet.avatar)}" alt="${escapeAttribute(tweet.username)}" data-id="${escapeAttribute(tweet.publicKey || '')}" />
+      <div class="content">
+        ${header}
+        ${body}
+        ${gallery}
+        ${youtube}
+        ${linkPreview}
+        ${embed}
+        ${footer}
+      </div>
+      ${moderationMask}
+    </article>
   `;
-****/
 };
+
+TweetTemplate.resolvePresentation = resolvePresentation;
+TweetTemplate.formatPublicKey = formatPublicKey;
+TweetTemplate.formatHandle = formatHandle;
+TweetTemplate.resolveHeaderMode = resolveHeaderMode;
+
+module.exports = TweetTemplate;

@@ -1,17 +1,19 @@
 use std::sync::Arc;
 
-use js_sys::{BigUint64Array, Function, JsString};
-use log::info;
-use std::cell::RefCell;
-use tokio::sync::RwLock;
-use wasm_bindgen::prelude::wasm_bindgen;
-use wasm_bindgen::JsValue;
-
-use crate::saitowasm::{string_to_key, SAITO};
+use crate::saitowasm::{string_to_hex, string_to_key, SAITO};
+use crate::wasm_block::WasmBlock;
+use js_sys::{Array, BigUint64Array, Function, JsString};
+use log::{info, warn};
 use saito_core::core::consensus::blockchain::{Blockchain, BlockchainObserver};
 use saito_core::core::defs::{
     BlockHash, BlockId, PrintForLog, SaitoHash, SaitoUTXOSetKey, UTXO_KEY_LENGTH,
 };
+use serde::Serialize;
+use serde_wasm_bindgen::Serializer;
+use std::cell::RefCell;
+use tokio::sync::RwLock;
+use wasm_bindgen::prelude::wasm_bindgen;
+use wasm_bindgen::JsValue;
 
 struct JsBlockchainObserver;
 
@@ -22,7 +24,12 @@ thread_local! {
 }
 
 impl BlockchainObserver for JsBlockchainObserver {
-    fn on_chain_reorg(&self, block_id: BlockId, block_hash: &BlockHash, longest_chain: bool) {
+    fn on_chain_reorganization(
+        &self,
+        block_id: BlockId,
+        block_hash: &BlockHash,
+        longest_chain: bool,
+    ) {
         let hash = block_hash.to_hex();
         REORG_FN.with(|cell| {
             if let Some(f) = cell.borrow().as_ref() {
@@ -77,6 +84,159 @@ pub struct WasmBlockchain {
 
 #[wasm_bindgen]
 impl WasmBlockchain {
+    pub fn get(&self) -> JsValue {
+        let saito = SAITO.blocking_lock();
+
+        let blockchain = saito
+            .as_ref()
+            .unwrap()
+            .routing_thread
+            .blockchain_lock
+            .blocking_read();
+
+        let serializer = Serializer::new().serialize_large_number_types_as_bigints(true);
+        blockchain.serialize(&serializer).unwrap()
+    }
+
+    pub async fn get_blocks(&self, count: u32, include_offchain: bool) -> Result<Array, JsValue> {
+        let blockchain = self.blockchain_lock.read().await;
+
+        let latest = blockchain.blockring.get_latest_block_id();
+
+        let blocks = Array::new();
+
+        for offset in 0..count {
+            if latest < offset as u64 {
+                break;
+            }
+
+            let block_id = latest - offset as u64;
+
+            if include_offchain {
+                let hashes = blockchain.blockring.get_block_hashes_at_block_id(block_id);
+
+                for hash in hashes {
+                    if let Some(mem_block) = blockchain.get_block(&hash) {
+                        let mut block = mem_block.clone();
+                        block.transactions.clear();
+                        blocks.push(&JsValue::from(WasmBlock::from_block(block)));
+                    }
+                }
+            } else {
+                if let Some(hash) = blockchain
+                    .blockring
+                    .get_longest_chain_block_hash_at_block_id(block_id)
+                {
+                    if let Some(mem_block) = blockchain.get_block(&hash) {
+                        let mut block = mem_block.clone();
+                        block.transactions.clear();
+                        blocks.push(&JsValue::from(WasmBlock::from_block(block)));
+                    }
+                }
+            }
+        }
+
+        Ok(blocks)
+    }
+
+    pub async fn get_block(
+        &self,
+        block_hash: JsString,
+        include_transactions: bool,
+    ) -> Result<WasmBlock, JsValue> {
+        let block_hash = string_to_hex(block_hash).or(Err(JsValue::from(
+            "Failed parsing block hash string to key",
+        )))?;
+
+        let blockchain = self.blockchain_lock.read().await;
+        let result = blockchain.get_block(&block_hash);
+        if result.is_none() {
+            warn!("block {:?} not found", block_hash.to_hex());
+            return Err(JsValue::from("block not found"));
+        }
+        let mem_block = result.unwrap();
+
+        //
+        // return header-only if requested
+        //
+        if !include_transactions {
+            let mut block = mem_block.clone();
+            block.transactions.clear();
+            return Ok(WasmBlock::from_block(block));
+        }
+
+        //
+        // or full block with transactions (if exists)
+        //
+        if !mem_block.transactions.is_empty() {
+            let needs_generate = mem_block
+                .transactions
+                .iter()
+                .any(|tx| tx.hash_for_signature.is_none());
+            if needs_generate {
+                let mut block = mem_block.clone();
+                drop(blockchain);
+                block
+                    .generate()
+                    .map_err(|_| JsValue::from("failed to generate block"))?;
+                return Ok(WasmBlock::from_block(block));
+            }
+            return Ok(WasmBlock::from_block(mem_block.clone()));
+        }
+
+        //
+        // if we hit here, the user has requested transactions
+        // but those do not exist on the block we have access
+        // to from the blockchain (likely loaded from the header)
+        // so we need to fetch the block from disk if available
+        //
+        let filepath = {
+            let saito = SAITO.lock().await;
+            let storage = &saito.as_ref().unwrap().routing_thread.storage;
+            storage.generate_block_filepath(mem_block)
+        };
+
+        //
+        // release blockchain lock before disk I/O.
+        //
+        drop(blockchain);
+
+        //
+        // and fetch from disk
+        //
+        let saito = SAITO.lock().await;
+        let storage = &saito.as_ref().unwrap().routing_thread.storage;
+
+        let mut block = storage
+            .load_block_from_disk(filepath.as_str())
+            .await
+            .map_err(|_| JsValue::from("transactions unavailable"))?;
+
+        block
+            .generate()
+            .map_err(|_| JsValue::from("failed to generate block"))?;
+
+        Ok(WasmBlock::from_block(block))
+    }
+
+    pub async fn get_block_by_id(
+        &self,
+        block_id: u64,
+        include_transactions: bool,
+    ) -> Result<WasmBlock, JsValue> {
+        let blockchain = self.blockchain_lock.read().await;
+
+        let block_hash = blockchain
+            .blockring
+            .get_longest_chain_block_hash_at_block_id(block_id)
+            .ok_or_else(|| JsValue::from("block not found"))?;
+
+        drop(blockchain);
+
+        self.get_block(block_hash.to_hex().into(), include_transactions)
+            .await
+    }
+
     pub async fn reset(&self) {
         {
             let saito = SAITO.lock().await;
@@ -87,13 +247,6 @@ impl WasmBlockchain {
                 .config_lock
                 .write()
                 .await;
-            // configs.set_blockchain_configs(Some(Default::default()));
-            // configs
-            //     .get_blockchain_configs_mut()
-            //     .expect("blockchain config should exist here")
-            //     .confirmations
-            //     .clear();
-            configs.set_congestion_data(None);
             configs.get_blockchain_configs_mut().confirmations.clear();
         }
         let mut blockchain = self.blockchain_lock.write().await;

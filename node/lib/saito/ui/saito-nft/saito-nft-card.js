@@ -14,10 +14,16 @@ class SaitoNFTCard {
     // UI helpers
     //
     this.callback = callback;
+    this.expires_timer = null;
   }
 
   async render() {
     let this_self = this;
+    this.stopExpiresTimer();
+
+    if (this.app?.browser?.addStylesheet) {
+      this.app.browser.addStylesheet('/saito/css-imports/ui/saito-nft.css');
+    }
 
     if (!document.querySelector(this.container)) {
       return;
@@ -88,61 +94,75 @@ class SaitoNFTCard {
 
     console.log('Insert fetched NFT details into CARD');
 
-    let type = document.querySelector(this.my_qs + ' .nft-card-type');
+    let type = document.querySelector(this.my_qs + ' .saito-nft-card-type');
     if (type) {
-      type.innerHTML = this.nft.returnType();
+      type.textContent = this.nft.returnType() || '';
     }
 
     if (this.nft.title) {
       try {
-        let telm = document.querySelector(this.my_qs + ' .nft-card-title');
-        telm.innerHTML = this.nft.title;
+        let telm = document.querySelector(this.my_qs + ' .saito-nft-card-title');
+        telm.textContent = this.nft.title;
       } catch (err) {}
     }
 
-    let elm = document.querySelector(this.my_qs + ' .nft-card-img');
+    let elm = document.querySelector(this.my_qs + ' .saito-nft-card-img');
     if (elm) {
-      if (this.nft.nft_type == 'vault') {
-        try {
-          elm.innerHTML = `<div class="nft-card-text">${this.nft.json}</div>`;
-          let obj = JSON.parse(this.nft.json);
-          elm.style.backgroundImage = `url("/vault/img/jade_key_min.png")`;
-          if (obj.file_access_script) {
-            elm.style.backgroundImage = `url("/vault/img/crystal_key_min.png")`;
-          }
-          return;
-        } catch (err) {}
-      }
-      if (this.nft.image != '') {
-        elm.innerHTML = '';
-        elm.style.backgroundImage = `url("${this.nft.image}")`;
-        return;
-      }
-      if (this.nft.js != '') {
-        elm.innerHTML = `<div class="nft-card-text">${this.nft.js}</div>`;
-        return;
-      }
-      if (this.nft.css != '') {
-        elm.innerHTML = `<div class="nft-card-text">${this.nft.css}</div>`;
-        return;
-      }
-      if (this.nft.text != '') {
-        elm.innerHTML = `<div class="nft-card-text">${this.nft.text}</div>`;
-        return;
-      }
-      if (this.nft.json != '') {
-        elm.innerHTML = `<div class="nft-card-text">${this.nft.json}</div>`;
+      const display = this.nft.returnMediaDisplay();
+
+      if (display.loading) {
+        elm.innerHTML = `<div class="saito-spinner spinner"></div>`;
+        elm.style.backgroundImage = '';
         return;
       }
 
-      if (this.nft.load_failed) {
-        elm.innerHTML = `<i class="fa-solid fa-heart-crack"></i>`;
+      elm.innerHTML = display.innerHtml || '';
+      if (this.app.browser.isSafeMediaUrl(display.backgroundImage)) {
+        elm.style.backgroundImage = `url("${String(display.backgroundImage).replace(/"/g, '%22')}")`;
       } else {
-        elm.innerHTML = `<div class="saito_spinner spinner"></div>`;
+        elm.style.backgroundImage = '';
       }
+      this.startExpiresTimer();
     } else {
       console.warn('NFT Element not rendered --', this.my_qs);
     }
+  }
+
+  stopExpiresTimer() {
+    if (this.expires_timer) {
+      clearInterval(this.expires_timer);
+      this.expires_timer = null;
+    }
+  }
+
+  startExpiresTimer() {
+    this.stopExpiresTimer();
+    if (this.nft.expires_at == null || this.nft.expires_at === '') {
+      return;
+    }
+    this.tickExpiresClock();
+    this.expires_timer = setInterval(() => {
+      if (!document.querySelector(this.my_qs)) {
+        this.stopExpiresTimer();
+        return;
+      }
+      this.tickExpiresClock();
+    }, 1000);
+  }
+
+  tickExpiresClock() {
+    const img = document.querySelector(this.my_qs + ' .saito-nft-card-img');
+    if (!img) {
+      this.stopExpiresTimer();
+      return;
+    }
+    let clock = img.querySelector('.saito-nft-expires-clock');
+    if (!clock) {
+      clock = document.createElement('div');
+      clock.className = 'saito-nft-expires-clock';
+      img.appendChild(clock);
+    }
+    clock.textContent = this.nft.remainingExpiresLabel();
   }
 }
 

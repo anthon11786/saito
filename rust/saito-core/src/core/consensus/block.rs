@@ -2,7 +2,7 @@ use ahash::{AHashMap, AHashSet};
 use log::{debug, error, info, trace, warn};
 use num_derive::FromPrimitive;
 use num_traits::Zero;
-use rayon::prelude::*;
+use rayon::iter::{IndexedParallelIterator, IntoParallelRefIterator, ParallelIterator};
 use serde::{Deserialize, Serialize};
 use std::convert::TryInto;
 use std::fmt::{Display, Formatter};
@@ -21,8 +21,8 @@ use crate::core::defs::{
     BlockId, Currency, PrintForLog, SaitoHash, SaitoPrivateKey, SaitoPublicKey, SaitoSignature,
     SaitoUTXOSetKey, Timestamp, UtxoSet, BLOCK_FILE_EXTENSION,
 };
-use crate::core::routing::io::storage::Storage;
-use crate::core::util::configuration::{Configuration, InitialLoadingStatus};
+use crate::core::storage::storage::Storage;
+use crate::core::util::configuration::Configuration;
 use crate::core::util::crypto::{hash, sign, verify_signature};
 use crate::iterate;
 
@@ -422,9 +422,9 @@ pub struct Block {
     #[serde(skip)]
     pub created_hashmap_of_slips_spent_this_block: bool,
     #[serde(skip)]
-    pub routed_from_peer: Option<SaitoPublicKey>,
+    pub routed_from_peer_id: u64,
     #[serde(skip)]
-    pub keys_invloved: AHashSet<SaitoPublicKey>,
+    pub publickeys_referenced_in_block_transactions: AHashSet<SaitoPublicKey>,
     #[serde(skip)]
     pub force_loaded: bool,
     // used for checking, before pruning txs from block on downgrade
@@ -443,7 +443,7 @@ impl Display for Block {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         writeln!(
             f,
-            "Block {{ id: {}, timestamp: {}, previous_block_hash: {:?}, creator: {:?}, merkle_root: {:?}, signature: {:?}, graveyard: {}, treasury: {}, total_fees: {}, total_fees_new: {}, total_fees_atr: {}, avg_total_fees: {}, avg_total_fees_new: {}, avg_total_fees_atr: {}, total_payout_routing: {}, total_payout_mining: {}, total_payout_treasury: {}, total_payout_graveyard: {}, total_payout_atr: {}, avg_payout_routing: {}, avg_payout_mining: {}, avg_payout_treasury: {}, avg_payout_graveyard: {}, avg_payout_atr: {}, avg_fee_per_byte: {}, fee_per_byte: {}, avg_nolan_rebroadcast_per_block: {}, burnfee: {}, difficulty: {}, previous_block_unpaid: {}, hash: {:?}, total_work: {}, in_longest_chain: {}, has_golden_ticket: {}, has_issuance_transaction: {}, issuance_transaction_index: {}, has_fee_transaction: {}, has_staking_transaction: {}, golden_ticket_index: {}, fee_transaction_index: {}, total_rebroadcast_slips: {}, total_rebroadcast_nolan: {}, rebroadcast_hash: {}, block_type: {:?}, cv: {}, routed_from_peer: {:?} confirmations: {:?}",
+            "Block {{ id: {}, timestamp: {}, previous_block_hash: {:?}, creator: {:?}, merkle_root: {:?}, signature: {:?}, graveyard: {}, treasury: {}, total_fees: {}, total_fees_new: {}, total_fees_atr: {}, avg_total_fees: {}, avg_total_fees_new: {}, avg_total_fees_atr: {}, total_payout_routing: {}, total_payout_mining: {}, total_payout_treasury: {}, total_payout_graveyard: {}, total_payout_atr: {}, avg_payout_routing: {}, avg_payout_mining: {}, avg_payout_treasury: {}, avg_payout_graveyard: {}, avg_payout_atr: {}, avg_fee_per_byte: {}, fee_per_byte: {}, avg_nolan_rebroadcast_per_block: {}, burnfee: {}, difficulty: {}, previous_block_unpaid: {}, hash: {:?}, total_work: {}, in_longest_chain: {}, has_golden_ticket: {}, has_issuance_transaction: {}, issuance_transaction_index: {}, has_fee_transaction: {}, has_staking_transaction: {}, golden_ticket_index: {}, fee_transaction_index: {}, total_rebroadcast_slips: {}, total_rebroadcast_nolan: {}, rebroadcast_hash: {}, block_type: {:?}, cv: {}, routed_from_peer_id: {:?} confirmations: {:?}",
             self.id,
             self.timestamp,
             self.previous_block_hash.to_hex(),
@@ -489,7 +489,7 @@ impl Display for Block {
             self.rebroadcast_hash.to_hex(),
             self.block_type,
             self.cv,
-            self.routed_from_peer,
+            self.routed_from_peer_id,
             self.confirmations,
         ).unwrap();
         // writeln!(f, " transactions : ").unwrap();
@@ -557,8 +557,8 @@ impl Block {
             // hashmap of all SaitoUTXOSetKeys of the slips in the block
             slips_spent_this_block: AHashMap::new(),
             created_hashmap_of_slips_spent_this_block: false,
-            routed_from_peer: None,
-            keys_invloved: Default::default(),
+            routed_from_peer_id: 0,
+            publickeys_referenced_in_block_transactions: Default::default(),
             cv: ConsensusValues::default(),
             force_loaded: false,
             safe_to_prune_transactions: false,
@@ -968,52 +968,140 @@ impl Block {
             .try_into()
             .or(Err(Error::from(ErrorKind::InvalidData)))?;
 
-        let graveyard: Currency = Currency::from_be_bytes(bytes[181..189].try_into().unwrap());
-        let treasury: Currency = Currency::from_be_bytes(bytes[189..197].try_into().unwrap());
-        let burnfee: Currency = Currency::from_be_bytes(bytes[197..205].try_into().unwrap());
-        let difficulty: u64 = u64::from_be_bytes(bytes[205..213].try_into().unwrap());
-        let _avg_total_fees: Currency =
-            Currency::from_be_bytes(bytes[213..221].try_into().unwrap()); // dupe below
-        let avg_fee_per_byte: Currency =
-            Currency::from_be_bytes(bytes[221..229].try_into().unwrap());
-        let avg_nolan_rebroadcast_per_block: Currency =
-            Currency::from_be_bytes(bytes[229..237].try_into().unwrap());
-        let previous_block_unpaid: Currency =
-            Currency::from_be_bytes(bytes[237..245].try_into().unwrap());
-        let avg_total_fees: Currency = Currency::from_be_bytes(bytes[245..253].try_into().unwrap());
-        let avg_total_fees_new: Currency =
-            Currency::from_be_bytes(bytes[253..261].try_into().unwrap());
-        let avg_total_fees_atr: Currency =
-            Currency::from_be_bytes(bytes[261..269].try_into().unwrap());
-        let avg_payout_routing: Currency =
-            Currency::from_be_bytes(bytes[269..277].try_into().unwrap());
-        let avg_payout_mining: Currency =
-            Currency::from_be_bytes(bytes[277..285].try_into().unwrap());
-        let avg_payout_treasury: Currency =
-            Currency::from_be_bytes(bytes[285..293].try_into().unwrap());
-        let avg_payout_graveyard: Currency =
-            Currency::from_be_bytes(bytes[293..301].try_into().unwrap());
-        let avg_payout_atr: Currency = Currency::from_be_bytes(bytes[301..309].try_into().unwrap());
-        let total_payout_routing: Currency =
-            Currency::from_be_bytes(bytes[309..317].try_into().unwrap());
-        let total_payout_mining: Currency =
-            Currency::from_be_bytes(bytes[317..325].try_into().unwrap());
-        let total_payout_treasury: Currency =
-            Currency::from_be_bytes(bytes[325..333].try_into().unwrap());
-        let total_payout_graveyard: Currency =
-            Currency::from_be_bytes(bytes[333..341].try_into().unwrap());
-        let total_payout_atr: Currency =
-            Currency::from_be_bytes(bytes[341..349].try_into().unwrap());
-        let total_fees: Currency = Currency::from_be_bytes(bytes[349..357].try_into().unwrap());
-        let total_fees_new: Currency = Currency::from_be_bytes(bytes[357..365].try_into().unwrap());
-        let total_fees_atr: Currency = Currency::from_be_bytes(bytes[365..373].try_into().unwrap());
-        let fee_per_byte: Currency = Currency::from_be_bytes(bytes[373..381].try_into().unwrap());
-        let total_fees_cumulative: Currency =
-            Currency::from_be_bytes(bytes[381..389].try_into().unwrap());
+        let graveyard: Currency = Currency::from_be_bytes(
+            bytes[181..189]
+                .try_into()
+                .or(Err(Error::from(ErrorKind::InvalidData)))?,
+        );
+        let treasury: Currency = Currency::from_be_bytes(
+            bytes[189..197]
+                .try_into()
+                .or(Err(Error::from(ErrorKind::InvalidData)))?,
+        );
+        let burnfee: Currency = Currency::from_be_bytes(
+            bytes[197..205]
+                .try_into()
+                .or(Err(Error::from(ErrorKind::InvalidData)))?,
+        );
+        let difficulty: u64 = u64::from_be_bytes(
+            bytes[205..213]
+                .try_into()
+                .or(Err(Error::from(ErrorKind::InvalidData)))?,
+        );
+        let _avg_total_fees: Currency = Currency::from_be_bytes(
+            bytes[213..221]
+                .try_into()
+                .or(Err(Error::from(ErrorKind::InvalidData)))?,
+        ); // dupe below
+        let avg_fee_per_byte: Currency = Currency::from_be_bytes(
+            bytes[221..229]
+                .try_into()
+                .or(Err(Error::from(ErrorKind::InvalidData)))?,
+        );
+        let avg_nolan_rebroadcast_per_block: Currency = Currency::from_be_bytes(
+            bytes[229..237]
+                .try_into()
+                .or(Err(Error::from(ErrorKind::InvalidData)))?,
+        );
+        let previous_block_unpaid: Currency = Currency::from_be_bytes(
+            bytes[237..245]
+                .try_into()
+                .or(Err(Error::from(ErrorKind::InvalidData)))?,
+        );
+        let avg_total_fees: Currency = Currency::from_be_bytes(
+            bytes[245..253]
+                .try_into()
+                .or(Err(Error::from(ErrorKind::InvalidData)))?,
+        );
+        let avg_total_fees_new: Currency = Currency::from_be_bytes(
+            bytes[253..261]
+                .try_into()
+                .or(Err(Error::from(ErrorKind::InvalidData)))?,
+        );
+        let avg_total_fees_atr: Currency = Currency::from_be_bytes(
+            bytes[261..269]
+                .try_into()
+                .or(Err(Error::from(ErrorKind::InvalidData)))?,
+        );
+        let avg_payout_routing: Currency = Currency::from_be_bytes(
+            bytes[269..277]
+                .try_into()
+                .or(Err(Error::from(ErrorKind::InvalidData)))?,
+        );
+        let avg_payout_mining: Currency = Currency::from_be_bytes(
+            bytes[277..285]
+                .try_into()
+                .or(Err(Error::from(ErrorKind::InvalidData)))?,
+        );
+        let avg_payout_treasury: Currency = Currency::from_be_bytes(
+            bytes[285..293]
+                .try_into()
+                .or(Err(Error::from(ErrorKind::InvalidData)))?,
+        );
+        let avg_payout_graveyard: Currency = Currency::from_be_bytes(
+            bytes[293..301]
+                .try_into()
+                .or(Err(Error::from(ErrorKind::InvalidData)))?,
+        );
+        let avg_payout_atr: Currency = Currency::from_be_bytes(
+            bytes[301..309]
+                .try_into()
+                .or(Err(Error::from(ErrorKind::InvalidData)))?,
+        );
+        let total_payout_routing: Currency = Currency::from_be_bytes(
+            bytes[309..317]
+                .try_into()
+                .or(Err(Error::from(ErrorKind::InvalidData)))?,
+        );
+        let total_payout_mining: Currency = Currency::from_be_bytes(
+            bytes[317..325]
+                .try_into()
+                .or(Err(Error::from(ErrorKind::InvalidData)))?,
+        );
+        let total_payout_treasury: Currency = Currency::from_be_bytes(
+            bytes[325..333]
+                .try_into()
+                .or(Err(Error::from(ErrorKind::InvalidData)))?,
+        );
+        let total_payout_graveyard: Currency = Currency::from_be_bytes(
+            bytes[333..341]
+                .try_into()
+                .or(Err(Error::from(ErrorKind::InvalidData)))?,
+        );
+        let total_payout_atr: Currency = Currency::from_be_bytes(
+            bytes[341..349]
+                .try_into()
+                .or(Err(Error::from(ErrorKind::InvalidData)))?,
+        );
+        let total_fees: Currency = Currency::from_be_bytes(
+            bytes[349..357]
+                .try_into()
+                .or(Err(Error::from(ErrorKind::InvalidData)))?,
+        );
+        let total_fees_new: Currency = Currency::from_be_bytes(
+            bytes[357..365]
+                .try_into()
+                .or(Err(Error::from(ErrorKind::InvalidData)))?,
+        );
+        let total_fees_atr: Currency = Currency::from_be_bytes(
+            bytes[365..373]
+                .try_into()
+                .or(Err(Error::from(ErrorKind::InvalidData)))?,
+        );
+        let fee_per_byte: Currency = Currency::from_be_bytes(
+            bytes[373..381]
+                .try_into()
+                .or(Err(Error::from(ErrorKind::InvalidData)))?,
+        );
+        let total_fees_cumulative: Currency = Currency::from_be_bytes(
+            bytes[381..389]
+                .try_into()
+                .or(Err(Error::from(ErrorKind::InvalidData)))?,
+        );
 
         let mut transactions = vec![];
         let mut start_of_transaction_data = BLOCK_HEADER_SIZE;
-        for _n in 0..transactions_len {
+        for _tx_index in 0..transactions_len {
             if bytes.len() < start_of_transaction_data + 16 {
                 warn!(
                     "block buffer is invalid to read transaction metadata. length : {:?}, end_of_tx_data : {:?}",
@@ -1045,11 +1133,20 @@ impl Block {
             let total_len = inputs_len
                 .checked_add(outputs_len)
                 .ok_or(Error::from(ErrorKind::InvalidData))?;
-            let end_of_transaction_data = start_of_transaction_data
-                + TRANSACTION_SIZE
-                + (total_len as usize * SLIP_SIZE)
-                + message_len
-                + path_len * HOP_SIZE;
+            let Some(slips_size) = (total_len as usize).checked_mul(SLIP_SIZE) else {
+                return Err(Error::from(ErrorKind::InvalidData));
+            };
+            let Some(path_size) = path_len.checked_mul(HOP_SIZE) else {
+                return Err(Error::from(ErrorKind::InvalidData));
+            };
+            let Some(end_of_transaction_data) = start_of_transaction_data
+                .checked_add(TRANSACTION_SIZE)
+                .and_then(|n| n.checked_add(slips_size))
+                .and_then(|n| n.checked_add(message_len))
+                .and_then(|n| n.checked_add(path_size))
+            else {
+                return Err(Error::from(ErrorKind::InvalidData));
+            };
 
             if bytes.len() < end_of_transaction_data {
                 warn!(
@@ -1448,7 +1545,9 @@ impl Block {
                 total_number_of_non_fee_transactions += 1;
             }
 
-            if (transaction.is_golden_ticket() || transaction.is_normal_transaction())
+            if (transaction.is_golden_ticket()
+                || transaction.is_normal_transaction()
+                || transaction.transaction_type == TransactionType::Bound)
                 && !transaction.is_atr_transaction()
             {
                 cv.total_bytes_new += transaction.get_serialized_size() as u64;
@@ -1560,10 +1659,33 @@ impl Block {
                                 atr_block.hash.to_hex()
                             );
                             atr_block.generate().unwrap();
-                            assert_ne!(
+
+                            if atr_block.block_type != BlockType::Full {
+                                error!(
+                                    "ERROR: ATR lookback block {}-{} loaded from disk as {:?}, expected Full",
+                                    atr_block.id,
+                                    atr_block.hash.to_hex(),
+                                    atr_block.block_type
+                                );
+                            }
+                            assert_eq!(
                                 atr_block.block_type,
-                                BlockType::Pruned,
-                                "block should be fetched fully before this"
+                                BlockType::Full,
+                                "ATR lookback loaded from disk must include the transaction body"
+                            );
+
+                            if atr_block.transactions.is_empty() {
+                                error!(
+                                    "ERROR: ATR lookback block {}-{} loaded from disk has no transactions; every block must include at least one",
+                                    atr_block.id,
+                                    atr_block.hash.to_hex()
+                                );
+                            }
+                            assert!(
+                                !atr_block.transactions.is_empty(),
+                                "ATR lookback block {}-{} must have at least one transaction",
+                                atr_block.id,
+                                atr_block.hash.to_hex()
                             );
 
                             // estimate amount looping around chain
@@ -1590,7 +1712,8 @@ impl Block {
                                 // - `regular_slips` will hold any standalone valid slips
                                 let mut nft_groups: Vec<(Slip, Slip, Slip)> = Vec::new();
                                 let mut regular_slips: Vec<Slip> = Vec::new();
-                                let mut total_nolan_eligible_for_atr_payout: Currency = 0;
+                                // currently un-used
+                                //let mut total_nolan_eligible_for_atr_payout: Currency = 0;
 
                                 // Loop output slip in the transaction
                                 // recognized NFT groups once they are collected.
@@ -1643,7 +1766,7 @@ impl Block {
                                                 //
                                                 // Only the payload slip2 amount counts toward the ATR payout
                                                 //
-                                                total_nolan_eligible_for_atr_payout += slip2.amount;
+                                                //total_nolan_eligible_for_atr_payout += slip2.amount;
                                             }
 
                                             //
@@ -1678,7 +1801,7 @@ impl Block {
                                         }
 
                                         regular_slips.push(slip.clone());
-                                        total_nolan_eligible_for_atr_payout += slip.amount;
+                                        //total_nolan_eligible_for_atr_payout += slip.amount;
                                     }
                                     i += 1;
                                 }
@@ -2073,7 +2196,13 @@ impl Block {
             // golden ticket needed to process payout
             //
             let golden_ticket: GoldenTicket =
-                GoldenTicket::deserialize_from_net(&self.transactions[gt_index].data);
+                match GoldenTicket::deserialize_from_net(&self.transactions[gt_index].data) {
+                    Ok(gt) => gt,
+                    Err(_) => {
+                        warn!("failed to deserialize golden ticket for payout; skipping payout");
+                        return cv;
+                    }
+                };
             let mut next_random_number = hash(golden_ticket.random.as_ref());
 
             //
@@ -2131,8 +2260,8 @@ impl Block {
                 //
                 // finding a router consumes 2 hashes
                 //
-                next_random_number = hash(next_random_number.as_ref());
-                next_random_number = hash(next_random_number.as_ref());
+                let h1 = hash(next_random_number.as_ref());
+                next_random_number = hash(h1.as_ref());
 
                 //
                 // if the previous block ALSO HAD a golden ticket there is no need for further
@@ -2191,8 +2320,12 @@ impl Block {
                         //
                         // finding a router consumes 2 hashes
                         //
-                        next_random_number = hash(next_random_number.as_slice());
-                        next_random_number = hash(next_random_number.as_slice());
+                        // this should be uncommented if we make the router payouts MAX_RECURSION
+                        // greater than 2 blocks, as then we need to hash again before continuing
+                        // our loop.
+                        //
+                        //let h1 = hash(next_random_number.as_slice());
+                        //next_random_number = hash(h1.as_slice());
                     }
                 }
             } else {
@@ -2258,7 +2391,8 @@ impl Block {
                     output.tx_ordinal = total_number_of_non_fee_transactions + 1;
                     output.block_id = self.id;
                     transaction.add_to_slip(output.clone());
-                    slip_index += 1;
+                // uncomment if we add another payout
+                // slip_index += 1;
                 } else {
                     graveyard_contribution += router2_payout;
                 }
@@ -2347,11 +2481,6 @@ impl Block {
     }
 
     pub fn on_chain_reorganization(&mut self, utxoset: &mut UtxoSet, longest_chain: bool) -> bool {
-        debug!(
-            "block : on chain reorg : {:?} - {:?}",
-            self.id,
-            self.hash.to_hex()
-        );
         for tx in &self.transactions {
             tx.on_chain_reorganization(utxoset, longest_chain);
         }
@@ -2628,7 +2757,7 @@ impl Block {
                         total_fees: 0,
                         total_work_for_me: 0,
                         cumulative_fees: 0,
-                        routed_from_peer: tx.routed_from_peer.clone(),
+                        routed_from_peer_id: tx.routed_from_peer_id,
                     }
                 }
             })
@@ -2705,7 +2834,15 @@ impl Block {
         block.hash = self.hash;
         block.total_fees_cumulative = self.total_fees_cumulative;
 
-        block.merkle_root = self.generate_merkle_root(true, true);
+        // Prefer the source block's merkle root when already set. Recomputing via
+        // generate_merkle_root requires hash_for_signature on every tx; disk-loaded
+        // / ungenerated txs can leave those as None and panic in MerkleTree.
+        // Lite blocks must advertise the same root as the full block header.
+        block.merkle_root = if self.merkle_root != [0; 32] {
+            self.merkle_root
+        } else {
+            self.generate_merkle_root(true, true)
+        };
 
         block
     }
@@ -2717,38 +2854,67 @@ impl Block {
         storage: &Storage,
         validate_against_utxo: bool,
     ) -> bool {
+        //
+        // return true if previously validated
+        //
         if self.is_valid {
-            // block is already validated
             return true;
         }
+
         //
-        // TODO SYNC : Add the code to check whether this is the genesis block and skip validations
+        // return true if hardcoded
+        //
+        //
+        // these entries exist for RC1 testing / syncing and can be removed for any other chain. they
+        // should probably be purged the next time we find ourselves editing this file. current date
+        // Sept 7, 2026.
+        //
+        if self.id == 1754546 {
+            let hardcoded_hash: [u8; 32] =
+                hex::decode("f7b293c131384fbfc60f8b4954a23050e8a1df5fd4e66cc51984839b8b35c98b")
+                    .unwrap()
+                    .try_into()
+                    .unwrap();
+            if self.hash == hardcoded_hash {
+                return true;
+            }
+        }
+        if self.id == 1754560 {
+            let hardcoded_hash: [u8; 32] =
+                hex::decode("c8323bd736a5e69df1c4a13397a1d3dc7c2c5b432debc48d8099ae37af17d6ee")
+                    .unwrap()
+                    .try_into()
+                    .unwrap();
+            if self.hash == hardcoded_hash {
+                return true;
+            }
+        }
+
+        //
+        // TODO
+        //
+        // this code requires clean-up, it seems to be skipping  SYNC : Add the code to check whether this is the genesis block and skip validations
         //
         assert!(self.id > 0);
         if configs.is_spv_mode() {
             trace!("SPV mode, skipping block validation");
             self.generate_consensus_values(blockchain, storage, configs)
                 .await;
-            if let InitialLoadingStatus::Completed =
-                configs.get_blockchain_configs().initial_loading_status
-            {
+            if blockchain.is_loaded {
                 self.is_valid = true;
             }
             return true;
         }
 
         //
-        // "ghost blocks" are blocks that simply contain the block hash, they are used
-        // by lite-clients to sync the chain without validating all of the transactions
-        // in situations where users want to make that trade-off. for that reasons, if
-        // we have a Ghost Block we automatically validate it.
+        // "ghost blocks" are used by lite-clients in SPV mode
         //
         if let BlockType::Ghost = self.block_type {
             return true;
         }
 
         //
-        // all valid blocks with ID > 1 must have at least one transaction
+        // valid blocks have at least one transaction
         //
         if self.transactions.is_empty() && self.id != 1 && !blockchain.blocks.is_empty() {
             error!("ERROR 424342: block does not validate as it has no transactions",);
@@ -2756,21 +2922,23 @@ impl Block {
         }
 
         //
-        // all valid blocks must be signed by their creator
+        // valid blocks are signed by their creator
         //
         if !verify_signature(&self.pre_hash, &self.signature, &self.creator) {
             error!("ERROR 582039: block is not signed by creator or signature does not validate",);
             return false;
         }
 
-        debug!("validate block : {:?}-{:?}", self.id, self.hash.to_hex());
-
+        //
         // generate "consensus values"
+        //
         let cv = self
             .generate_consensus_values(blockchain, storage, configs)
             .await;
-        trace!("consensus values generated : {}", cv);
 
+        //
+        // validating total fees requires supply loaded
+        //
         if validate_against_utxo {
             //
             // total_fees
@@ -3042,9 +3210,7 @@ impl Block {
             // ghost blocks
             //
             if let BlockType::Ghost = previous_block.block_type {
-                if let InitialLoadingStatus::Completed =
-                    configs.get_blockchain_configs().initial_loading_status
-                {
+                if blockchain.is_loaded {
                     self.is_valid = true;
                 }
                 return true;
@@ -3095,20 +3261,15 @@ impl Block {
             //
             // validate golden ticket
             //
-            // the golden ticket is a special kind of transaction that stores the
-            // solution to the network-payment lottery in the transaction message
-            // field. it targets the hash of the previous block, which is why we
-            // tackle it's validation logic here.
-            //
-            // first we reconstruct the ticket, then calculate that the solution
-            // meets our consensus difficulty criteria. note that by this point in
-            // the validation process we have already examined the fee transaction
-            // which was generated using this solution. If the solution is invalid
-            // we find that out now, and it invalidates the block.
-            //
             if let Some(gt_index) = cv.gt_index {
                 let golden_ticket: GoldenTicket =
-                    GoldenTicket::deserialize_from_net(&self.transactions[gt_index].data);
+                    match GoldenTicket::deserialize_from_net(&self.transactions[gt_index].data) {
+                        Ok(gt) => gt,
+                        Err(_) => {
+                            warn!("failed to deserialize golden ticket during validation");
+                            return false;
+                        }
+                    };
 
                 //
                 // we already have a golden ticket, but create a new one pulling the
@@ -3135,27 +3296,14 @@ impl Block {
                 // we confirm that the golden ticket is targetting the block hash
                 // of the previous block. the solution is invalid if it is not
                 // current with the state of the chain..
-                trace!("validating gt...");
+                //
                 if !gt.validate(previous_block.difficulty) {
                     error!(
-                        "ERROR 801923: Golden Ticket solution does not validate against previous_block_hash : {:?}, difficulty : {:?}, random : {:?}, public_key : {:?} target : {:?}",
+                        "ERROR 801923: Golden Ticket solution does not validate against previous_block_hash : {:?}",
                         previous_block.hash.to_hex(),
-                        previous_block.difficulty,
-                        gt.random.to_hex(),
-                        gt.public_key.to_base58(),
-                        gt.target.to_hex()
-                    );
-                    let solution = hash(&gt.serialize_for_net());
-                    let solution_num = primitive_types::U256::from_big_endian(&solution);
-
-                    error!(
-                        "solution : {:?} leading zeros : {:?}",
-                        solution.to_hex(),
-                        solution_num.leading_zeros()
                     );
                     return false;
                 }
-                trace!("gt validated !");
             } else {
                 //
                 // if there is no golden ticket, our previous block's total_fees will
@@ -3168,7 +3316,6 @@ impl Block {
                     return false;
                 }
             }
-            // trace!(" ... golden ticket: (validated)  {:?}", create_timestamp());
         }
 
         //
@@ -3199,24 +3346,32 @@ impl Block {
         //    );
         //    return false;
         //}
+
+        //
+        // must follow ATR section
+        //
         if validate_against_utxo && cv.rebroadcast_hash != self.rebroadcast_hash {
             error!("ERROR 123422: hash of rebroadcast transactions incorrect. expected : {:?} actual : {:?}",cv.rebroadcast_hash.to_hex(), self.rebroadcast_hash.to_hex());
             return false;
         }
 
+        debug!(
+            "MERKLE: id={} hash={:?} merkle={:?}",
+            self.id, self.hash, self.merkle_root,
+        );
+
         //
-        // merkle root
+        // validate merkle root
         //
-        if self.merkle_root == [0; 32]
-            && self.merkle_root
-                != self.generate_merkle_root(configs.is_browser(), configs.is_spv_mode())
+        if self.merkle_root
+            != self.generate_merkle_root(configs.is_browser(), configs.is_spv_mode())
         {
             error!("merkle root is unset or is invalid false 1");
             return false;
         }
 
         //
-        // fee transaction
+        // validate fee transaction (payouts)
         //
         // because the fee transaction that is created by generate_consensus_values is
         // produced without knowledge of the block in which it will be put, we need to
@@ -3227,37 +3382,26 @@ impl Block {
             if let (Some(ft_index), Some(fee_transaction_expected)) =
                 (cv.ft_index, cv.fee_transaction)
             {
+                //
+                // requires golden ticket
+                //
                 if cv.gt_index.is_none() {
                     error!("ERROR 48203: block has fee transaction but no golden ticket");
                     return false;
                 }
 
-                //
-                // the fee transaction is hashed to compare it with the one in the block
-                //
                 let fee_transaction_in_block = self.transactions.get(ft_index).unwrap();
                 let hash1 = hash(&fee_transaction_expected.serialize_for_signature());
                 let hash2 = hash(&fee_transaction_in_block.serialize_for_signature());
 
+                //
+                // requires exact hash match
+                //
                 if validate_against_utxo && hash1 != hash2 {
                     error!(
                         "ERROR 892032: block {} fee transaction doesn't match cv-expected fee transaction",
                         self.id
                     );
-                    error!(
-                        "expected = {:?}",
-                        &fee_transaction_expected.serialize_for_signature()
-                    );
-                    error!(
-                        "actual   = {:?}",
-                        &fee_transaction_in_block.serialize_for_signature()
-                    );
-                    if let Some(gt_index) = cv.gt_index {
-                        let golden_ticket: GoldenTicket =
-                            GoldenTicket::deserialize_from_net(&self.transactions[gt_index].data);
-                        error!("gt.publickey = {:?}", golden_ticket.public_key.to_hex());
-                    }
-
                     return false;
                 }
             }
@@ -3282,10 +3426,8 @@ impl Block {
         // class, and the validation logic for slips is contained in the slips
         // class. Note that we are passing in a read-only copy of our UTXOSet so
         // as to determine spendability.
-
-        if let InitialLoadingStatus::Completed =
-            configs.get_blockchain_configs().initial_loading_status
-        {
+        //
+        if blockchain.is_loaded {
             // we don't validate transactions if we load blocks from disk
             trace!(
                 "validating transactions ... count : {:?}",
@@ -3336,9 +3478,7 @@ impl Block {
             trace!("transactions validation complete");
         }
 
-        if let InitialLoadingStatus::Completed =
-            configs.get_blockchain_configs().initial_loading_status
-        {
+        if blockchain.is_loaded {
             self.is_valid = true;
         }
 
@@ -3346,21 +3486,26 @@ impl Block {
     }
 
     pub fn generate_transaction_hashmap(&mut self) {
-        if !self.keys_invloved.is_empty() {
+        if !self.publickeys_referenced_in_block_transactions.is_empty() {
             return;
         }
         for tx in self.transactions.iter() {
             for slip in tx.from.iter() {
-                self.keys_invloved.insert(slip.public_key);
+                self.publickeys_referenced_in_block_transactions
+                    .insert(slip.public_key);
             }
             for slip in tx.to.iter() {
-                self.keys_invloved.insert(slip.public_key);
+                self.publickeys_referenced_in_block_transactions
+                    .insert(slip.public_key);
             }
         }
     }
     pub fn has_keylist_txs(&self, keylist: &Vec<SaitoPublicKey>) -> bool {
         for key in keylist {
-            if self.keys_invloved.contains(key) {
+            if self
+                .publickeys_referenced_in_block_transactions
+                .contains(key)
+            {
                 return true;
             }
         }
@@ -3375,7 +3520,7 @@ impl Block {
     }
     pub fn print_all(&self) {
         info!(
-            "Block {{ id: {}, timestamp: {}, previous_block_hash: {:?}, creator: {:?}, merkle_root: {:?}, signature: {:?}, graveyard: {}, treasury: {}, total_fees: {}, total_fees_new: {}, total_fees_atr: {}, avg_total_fees: {}, avg_total_fees_new: {}, avg_total_fees_atr: {}, total_payout_routing: {}, total_payout_mining: {}, total_payout_treasury: {}, total_payout_graveyard: {}, total_payout_atr: {}, avg_payout_routing: {}, avg_payout_mining: {}, avg_payout_treasury: {}, avg_payout_graveyard: {}, avg_payout_atr: {}, avg_fee_per_byte: {}, fee_per_byte: {}, avg_nolan_rebroadcast_per_block: {}, burnfee: {}, difficulty: {}, previous_block_unpaid: {}, hash: {:?}, total_work: {}, in_longest_chain: {}, has_golden_ticket: {}, has_issuance_transaction: {}, issuance_transaction_index: {}, has_fee_transaction: {}, has_staking_transaction: {}, golden_ticket_index: {}, fee_transaction_index: {}, total_rebroadcast_slips: {}, total_rebroadcast_nolan: {}, rebroadcast_hash: {}, block_type: {:?}, cv: {}, routed_from_peer: {:?} ",
+            "Block {{ id: {}, timestamp: {}, previous_block_hash: {:?}, creator: {:?}, merkle_root: {:?}, signature: {:?}, graveyard: {}, treasury: {}, total_fees: {}, total_fees_new: {}, total_fees_atr: {}, avg_total_fees: {}, avg_total_fees_new: {}, avg_total_fees_atr: {}, total_payout_routing: {}, total_payout_mining: {}, total_payout_treasury: {}, total_payout_graveyard: {}, total_payout_atr: {}, avg_payout_routing: {}, avg_payout_mining: {}, avg_payout_treasury: {}, avg_payout_graveyard: {}, avg_payout_atr: {}, avg_fee_per_byte: {}, fee_per_byte: {}, avg_nolan_rebroadcast_per_block: {}, burnfee: {}, difficulty: {}, previous_block_unpaid: {}, hash: {:?}, total_work: {}, in_longest_chain: {}, has_golden_ticket: {}, has_issuance_transaction: {}, issuance_transaction_index: {}, has_fee_transaction: {}, has_staking_transaction: {}, golden_ticket_index: {}, fee_transaction_index: {}, total_rebroadcast_slips: {}, total_rebroadcast_nolan: {}, rebroadcast_hash: {}, block_type: {:?}, cv: {}, routed_from_peer_id: {:?} ",
             self.id,
             self.timestamp,
             self.previous_block_hash.to_hex(),
@@ -3421,7 +3566,7 @@ impl Block {
             self.rebroadcast_hash.to_hex(),
             self.block_type,
             self.cv,
-            self.routed_from_peer,
+            self.routed_from_peer_id,
         );
         info!(" transactions : ");
         for (index, tx) in self.transactions.iter().enumerate() {
@@ -3436,7 +3581,7 @@ mod tests {
     use futures::future::join_all;
     use log::info;
 
-    use crate::core::consensus::block::{Block, BlockType};
+    use crate::core::consensus::block::{Block, BlockType, BLOCK_HEADER_SIZE};
 
     use crate::core::consensus::merkle::MerkleTree;
     use crate::core::consensus::slip::{Slip, SlipType};
@@ -3445,7 +3590,7 @@ mod tests {
     use crate::core::defs::{
         Currency, PrintForLog, SaitoHash, SaitoPrivateKey, SaitoPublicKey, NOLAN_PER_SAITO,
     };
-    use crate::core::routing::io::storage::Storage;
+    use crate::core::storage::storage::Storage;
     use crate::core::util::crypto::{generate_keys, verify_signature};
     use crate::core::util::test::node_tester::test::NodeTester;
     use crate::core::util::test::test_manager::test::TestManager;
@@ -3480,7 +3625,7 @@ mod tests {
         assert_eq!(block.block_type, BlockType::Full);
         assert_eq!(block.slips_spent_this_block, AHashMap::new());
         assert_eq!(block.created_hashmap_of_slips_spent_this_block, false);
-        assert_eq!(block.routed_from_peer, None);
+        assert_eq!(block.routed_from_peer_id, 0);
     }
 
     #[test]
@@ -3602,6 +3747,8 @@ mod tests {
             deserialized_block_header.serialize_for_net(BlockType::Full),
             deserialized_block.serialize_for_net(BlockType::Header)
         );
+        assert_eq!(deserialized_block_header.block_type, BlockType::Header);
+        assert!(deserialized_block_header.transactions.is_empty());
 
         assert_eq!(deserialized_block_header.id, 1);
         assert_eq!(deserialized_block_header.timestamp, timestamp);
@@ -3682,6 +3829,53 @@ mod tests {
 
         assert_eq!(block.merkle_root.len(), 32);
         assert_ne!(block.merkle_root, [0; 32]);
+    }
+
+    #[tokio::test]
+    #[serial_test::serial]
+    async fn block_validation_rejects_nonzero_merkle_root_mismatch() {
+        let mut t = TestManager::default();
+        t.initialize(100, 1_000_000_000).await;
+
+        let latest_block = t.get_latest_block().await;
+        let mut valid_block = t
+            .create_block(
+                latest_block.hash,
+                latest_block.timestamp + 120_000,
+                0,
+                0,
+                0,
+                true,
+            )
+            .await;
+        assert_eq!(
+            valid_block.merkle_root,
+            valid_block.generate_merkle_root(false, false)
+        );
+
+        let mut invalid_block = valid_block.clone();
+        invalid_block.merkle_root = [0xff; 32];
+        assert_ne!(
+            invalid_block.merkle_root,
+            invalid_block.generate_merkle_root(false, false)
+        );
+        invalid_block.generate().unwrap();
+        let private_key = t.wallet_lock.read().await.private_key;
+        invalid_block.sign(&private_key);
+        invalid_block.generate_hash();
+
+        let blockchain = t.blockchain_lock.read().await;
+        let configs = t.config_lock.read().await;
+        assert!(
+            !invalid_block
+                .validate(&blockchain, &*configs, &t.storage, false)
+                .await
+        );
+        assert!(
+            valid_block
+                .validate(&blockchain, &*configs, &t.storage, false)
+                .await
+        );
     }
 
     #[tokio::test]
@@ -3868,7 +4062,6 @@ mod tests {
     }
 
     #[tokio::test]
-    #[ignore]
     #[serial_test::serial]
     async fn avg_fee_per_byte_test() {
         // pretty_env_logger::init();
@@ -3909,7 +4102,7 @@ mod tests {
             tx_size,
             block.transactions.len()
         );
-        assert_eq!(block.avg_fee_per_byte, total_fees / tx_size as Currency);
+        assert_eq!(block.fee_per_byte, total_fees / tx_size as Currency);
 
         let mut block = t
             .create_block(
@@ -3940,7 +4133,7 @@ mod tests {
             tx_size,
             block.transactions.len()
         );
-        assert_eq!(block.avg_fee_per_byte, total_fees / tx_size as Currency);
+        assert_eq!(block.fee_per_byte, total_fees / tx_size as Currency);
     }
 
     #[ignore]
@@ -4022,6 +4215,93 @@ mod tests {
         // assert_eq!(cv.burnfee, 1104854);
         assert_eq!(cv.rebroadcasts.len(), 1);
         assert_eq!(cv.avg_nolan_rebroadcast_per_block, 10);
+    }
+
+    /// When the ATR lookback file on disk is header-only, `Block::create` must not
+    /// silently produce a block with empty ATR (see `generate_consensus_values`).
+    #[tokio::test]
+    #[serial_test::serial]
+    async fn atr_lookback_header_on_disk_panics_during_block_create() {
+        let mut t = TestManager::default();
+        const TEST_GENESIS_PERIOD: u64 = 10;
+
+        {
+            let mut configs = t.config_lock.write().await;
+            configs.get_consensus_config_mut().unwrap().genesis_period = TEST_GENESIS_PERIOD;
+        }
+        {
+            let mut blockchain = t.blockchain_lock.write().await;
+            blockchain.genesis_period = TEST_GENESIS_PERIOD;
+            blockchain.blockring =
+                crate::core::consensus::blockring::BlockRing::new(TEST_GENESIS_PERIOD);
+        }
+
+        t.initialize_with_timestamp(100, 10_000, 0).await;
+
+        let genesis_period = t
+            .config_lock
+            .read()
+            .await
+            .get_consensus_config()
+            .unwrap()
+            .genesis_period;
+
+        for _ in 0..=genesis_period {
+            let latest = t.get_latest_block().await;
+            let mut block = t
+                .create_block(
+                    t.latest_block_hash,
+                    latest.timestamp + 10_000,
+                    0,
+                    100,
+                    10,
+                    true,
+                )
+                .await;
+            block.generate().unwrap();
+            t.add_block(block).await;
+        }
+
+        assert_eq!(t.get_latest_block().await.id, genesis_period + 2);
+
+        let (filepath, header_bytes) = {
+            let blockchain = t.blockchain_lock.read().await;
+            let lookback_hash = blockchain
+                .blockring
+                .get_longest_chain_block_hash_at_block_id(2)
+                .expect("lookback block at id 2");
+            let lookback = blockchain
+                .get_block(&lookback_hash)
+                .expect("lookback block in hashmap");
+            let filepath = t.storage.generate_block_filepath(lookback);
+            let header_bytes = lookback.serialize_for_net(BlockType::Header);
+            (filepath, header_bytes)
+        };
+
+        tokio::fs::write(&filepath, &header_bytes)
+            .await
+            .expect("overwrite lookback with header-only bytes");
+
+        let loaded = t
+            .storage
+            .load_block_from_disk(filepath.as_str())
+            .await
+            .expect("lookback file should still load");
+        assert_eq!(loaded.block_type, BlockType::Header);
+        assert!(loaded.transactions.is_empty());
+
+        let parent_hash = t.latest_block_hash;
+        let parent_ts = t.get_latest_block().await.timestamp + 10_000;
+
+        let join = tokio::spawn(async move {
+            t.create_block(parent_hash, parent_ts, 0, 100, 10, false)
+                .await
+        });
+
+        assert!(
+            join.await.is_err(),
+            "Block::create should panic when ATR lookback on disk is Header-only"
+        );
     }
 
     #[tokio::test]
@@ -4139,5 +4419,15 @@ mod tests {
             }
             assert!(have_atr_tx);
         }
+    }
+
+    #[test]
+    fn deserialize_from_net_rejects_empty_buffer() {
+        assert!(Block::deserialize_from_net(&[]).is_err());
+    }
+
+    #[test]
+    fn deserialize_from_net_rejects_short_header() {
+        assert!(Block::deserialize_from_net(&vec![0u8; BLOCK_HEADER_SIZE - 1]).is_err());
     }
 }

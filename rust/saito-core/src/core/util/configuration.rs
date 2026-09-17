@@ -1,6 +1,5 @@
 use crate::core::defs::{BlockId, SaitoHash, Timestamp};
 use crate::core::defs::{Currency, RECOLLECT_EVERY_TX};
-use crate::core::routing::peers::congestion_controller::CongestionStatsDisplay;
 use log::error;
 use serde::Deserialize;
 use serde::Serialize;
@@ -34,10 +33,20 @@ pub struct Endpoint {
 
 #[derive(serde::Deserialize, serde::Serialize, Debug, Clone, Default, PartialEq)]
 pub struct WalletConfig {
-    #[serde(default)]
-    pub publicKey: String,
-    #[serde(default)]
-    pub privateKey: String,
+    #[serde(
+        default,
+        rename = "publicKey",
+        alias = "public_key",
+        alias = "publickey"
+    )]
+    pub public_key: String,
+    #[serde(
+        default,
+        rename = "privateKey",
+        alias = "private_key",
+        alias = "privatekey"
+    )]
+    pub private_key: String,
 }
 
 impl Display for Endpoint {
@@ -128,10 +137,13 @@ fn get_default_stat_timer() -> Timestamp {
     1_000
 }
 fn get_default_social_stake() -> Timestamp {
-    return 0;
+    return 100000000000000;
 }
 fn get_default_social_stake_period() -> Timestamp {
     return 100;
+}
+fn get_default_block_production_disabled() -> bool {
+    return true;
 }
 #[derive(Deserialize, Serialize, Debug, Clone)]
 pub struct Server {
@@ -157,13 +169,6 @@ pub struct Server {
 }
 
 #[derive(Deserialize, Debug, Clone, Serialize, Default)]
-pub enum InitialLoadingStatus {
-    #[default]
-    NotStarted,
-    WaitingFor(Vec<(BlockId, SaitoHash)>),
-    Completed,
-}
-#[derive(Deserialize, Debug, Clone, Serialize, Default)]
 pub struct BlockchainConfig {
     #[serde(default)]
     pub last_block_hash: String,
@@ -183,16 +188,19 @@ pub struct BlockchainConfig {
     pub lowest_acceptable_block_id: BlockId,
     #[serde(default)]
     pub fork_id: String,
-    #[serde(skip)]
-    pub initial_loading_status: InitialLoadingStatus,
     #[serde(default = "get_default_issuance_writing_block_interval")]
     pub issuance_writing_block_interval: BlockId,
+    #[serde(default = "get_default_utxoset_writing_block_interval")]
+    pub utxoset_writing_block_interval: BlockId,
     #[serde(default)]
     pub confirmations: Vec<(BlockId, SaitoHash, BlockId)>,
 }
 
 pub fn get_default_issuance_writing_block_interval() -> BlockId {
     10
+}
+pub fn get_default_utxoset_writing_block_interval() -> BlockId {
+    100
 }
 pub fn get_default_block_confirmation_limit() -> BlockId {
     1
@@ -219,7 +227,7 @@ pub struct ConsensusConfig {
     pub block_confirmation_limit: BlockId,
     #[serde(default = "get_default_recollect_mode")]
     pub recollect_discarded_txs_mode: u8,
-    #[serde(default)]
+    #[serde(default = "get_default_block_production_disabled")]
     pub disable_block_production: bool,
 }
 
@@ -228,13 +236,13 @@ impl Default for ConsensusConfig {
         ConsensusConfig {
             genesis_period: get_default_genesis_period(),
             heartbeat_interval: get_default_heartbeat_period_ms(),
-            prune_after_blocks: 8,
-            max_staker_recursions: 3,
+            prune_after_blocks: get_default_prune_after_blocks(),
+            max_staker_recursions: get_default_max_staker_recursions(),
             default_social_stake: get_default_social_stake(),
             default_social_stake_period: get_default_social_stake_period(),
-            block_confirmation_limit: 1,
+            block_confirmation_limit: get_default_block_confirmation_limit(),
             recollect_discarded_txs_mode: get_default_recollect_mode(),
-            disable_block_production: false,
+            disable_block_production: get_default_block_production_disabled(),
         }
     }
 }
@@ -250,9 +258,6 @@ pub trait Configuration: Debug {
     fn replace(&mut self, config: &dyn Configuration);
     fn get_consensus_config(&self) -> Option<&ConsensusConfig>;
     fn get_consensus_config_mut(&mut self) -> Option<&mut ConsensusConfig>;
-    fn get_congestion_data(&self) -> Option<&CongestionStatsDisplay>;
-    fn set_congestion_data(&mut self, congestion_data: Option<CongestionStatsDisplay>);
-    // fn set_blockchain_configs(&mut self, config: Option<BlockchainConfig>);
     fn get_config_path(&self) -> String;
     fn set_config_path(&mut self, path: String);
     fn save(&self) -> Result<(), Error>;

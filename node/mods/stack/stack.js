@@ -9,7 +9,7 @@ const StackMain = require('./lib/ui/main');
 const ExploreOverlay = require('./lib/ui/overlay/explore');
 const CreatePost = require('./lib/ui/create-post');
 const ViewPost = require('./lib/ui/view-post');
-const { getAccessScriptForIntent } = require('./lib/access/access-scripts');
+const { getAccessScriptForIntent, embedWitnessInScript } = require('./lib/access/access-scripts');
 
 //
 // Stack - Permissioned Blogging Platform
@@ -28,23 +28,23 @@ class Stack extends ModTemplate {
     this.app = app;
     this.name = 'Stack';
     this.slug = 'stack';
-    this.dependencies = ['Scripting'];
     this.description = 'Permissioned blogging platform - an open-source alternative to Substack';
     this.categories = 'Social Media Blogging Publishing';
     this.icon_fa = 'fa-solid fa-newspaper';
+    this.shortlinks_enabled = 1;
 
     this.pending_author_load = null;
     this.pending_post_sig = null;
     this.pending_post_pk = null;
     this.pending_post_loaded = null;
 
-    this.social = {
+    this.social = this.buildSocial({
       twitter: '@SaitoOfficial',
       title: 'Stack - Permissioned Blogging',
-      url: 'https://saito.io/stack',
+      url: '/stack',
       description: 'Open-source subscription-based blogging platform',
       image: 'https://saito.tech/wp-content/uploads/2022/04/saito_card.png'
-    };
+    });
 
     // Cache for posts and subscriptions
     this.postsCache = {
@@ -89,19 +89,95 @@ class Stack extends ModTemplate {
   ////////////////////////////
   // Initialization        //
   ////////////////////////////
-  async initialize(app) {
-    await super.initialize(app);
+	async initialize(app) {
+		await super.initialize(app);
 
-    // Load persistent local UX state
-    this.load();
+		if (this.app.BROWSER) {
+			const SaitoTransactionMonitor = require('../../lib/saito/ui/saito-transaction-monitor/saito-transaction-monitor');
+			this.transaction_monitor = new SaitoTransactionMonitor(this.app, this);
+		}
 
-    // Server: prime transactionCache and postsCache so we can serve posts with initial HTML
-    if (!this.app.BROWSER) {
-      this.prefetchStackCache().catch((err) => {
-        console.debug('Stack: prefetchStackCache failed', err);
-      });
-    }
-  }
+		// Load persistent local UX state
+		this.load();
+
+		// Server: prime transactionCache and postsCache so we can serve posts with initial HTML
+		if (!this.app.BROWSER) {
+			this.prefetchStackCache().catch((err) => {
+				console.debug('Stack: prefetchStackCache failed', err);
+			});
+		}
+	}
+
+	/**
+	 * Ask Profile (if installed) to set or clear the preferred Stack URL.
+	 * Blank address removes the Profile `stack` field. No-op when Profile is absent.
+	 */
+	async updateProfile(address = '') {
+		if (!this.app.BROWSER) {
+			return;
+		}
+
+		const api = this.app.modules.returnFirstRespondTo('profile-update');
+		if (!api || typeof api.update !== 'function') {
+			return;
+		}
+
+		const stack = address == null ? '' : String(address).trim();
+		await api.update({ stack });
+	}
+
+	/**
+	 * Current Profile `stack` field via optional profile-update capability.
+	 */
+	returnProfileStackUrl() {
+		const api = this.app.modules.returnFirstRespondTo?.('profile-update');
+		if (!api || typeof api.get !== 'function') {
+			return '';
+		}
+		try {
+			const profile = api.get() || {};
+			return String(profile.stack || '').trim();
+		} catch (err) {
+			return '';
+		}
+	}
+
+	/**
+	 * Path for a creator Stack feed: /stack/<publickey>
+	 */
+	returnStackPath(publicKey = '') {
+		const key = String(publicKey || '').trim();
+		if (!key) {
+			return '/' + encodeURI(this.returnSlug());
+		}
+		return `/${encodeURI(this.returnSlug())}/${encodeURIComponent(key)}`;
+	}
+
+	/**
+	 * Absolute shareable URL for a creator Stack feed.
+	 */
+	returnStackUrl(publicKey = '') {
+		const path = this.returnStackPath(publicKey);
+		if (this.app.BROWSER && typeof window !== 'undefined' && window.location?.origin) {
+			return `${window.location.origin}${path}`;
+		}
+		return path;
+	}
+
+	shouldAffixCallbackToModule(modname, tx = null) {
+		if (modname === this.name) {
+			return 1;
+		}
+		// Allow the shared transaction monitor to receive NFT mint confirmations.
+		if (
+			this.transaction_monitor?.tx &&
+			tx?.signature &&
+			tx.signature === this.transaction_monitor.tx.signature
+		) {
+			return 1;
+		}
+		return 0;
+	}
 
   /**
    * Server-only: fetch last 5 Saito Official posts and last 5 other recent public Stack posts
@@ -180,6 +256,12 @@ class Stack extends ModTemplate {
     // ========================================================================
     const pathname = window.location.pathname;
     const slug = '/' + this.slug;
+
+    if (pathname === slug && new URLSearchParams(window.location.search).get('publish') === '1') {
+      window.history.replaceState({}, '', slug);
+      await this.main.handleStartWriting();
+      return;
+    }
 
     // Check if pathname starts with /stack
     if (pathname.startsWith(slug)) {
@@ -276,9 +358,9 @@ class Stack extends ModTemplate {
     // Show loading state
     if (container) {
       container.innerHTML = `
-        <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 400px; padding: 4rem 2rem;">
-          <i class="fa-solid fa-spinner fa-spin" style="font-size: 3rem; color: var(--saito-font-color-light); margin-bottom: 1rem;"></i>
-          <p style="color: var(--saito-font-color-light); font-size: 1.6rem;">Loading blog post for you…</p>
+        <div class="stack-status">
+          <i class="fa-solid fa-spinner fa-spin"></i>
+          <p>Loading blog post for you…</p>
         </div>
       `;
     }
@@ -291,45 +373,17 @@ class Stack extends ModTemplate {
         if (container) {
           if (this.pending_post_sig != '' && this.pending_post_loaded != true) {
             container.innerHTML = `
-    <div
-      class="stack-post-loading"
-      style="
-        position: fixed;
-        top: 0;
-        left: 0;
-        width: 100vw;
-        height: 100vh;
-        display: flex;
-        flex-direction: column;
-        align-items: center;
-        justify-content: center;
-        gap: 1.2rem;
-        pointer-events: none;
-        z-index: 10;
-      "
-    >
-      <div
-        class="saito_spinner"
-        style="width:8rem;height:8rem;"
-      ></div>
-
-      <div
-        style="
-          font-size: 2.5rem;
-          color: var(--saito-font-color-light);
-          text-align: center;
-        "
-      >
-        Loading Post from Saito Network
-      </div>
+    <div class="stack-status network">
+      <div class="saito-spinner"></div>
+      <div class="message">Loading Post from Saito Network</div>
     </div>
   `;
           } else {
             container.innerHTML = `
-            <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 400px; padding: 4rem 2rem; text-align: center;">
-              <i class="fa-solid fa-exclamation-triangle" style="font-size: 3rem; color: var(--saito-font-color-light); margin-bottom: 1rem;"></i>
-              <h3 style="font-size: 2rem; font-weight: 600; color: var(--saito-font-color); margin: 0 0 1rem 0;">Unable to load this blog post</h3>
-              <p style="font-size: 1.6rem; color: var(--saito-font-color-light); margin: 0; max-width: 500px; line-height: 1.6;">
+            <div class="stack-status">
+              <i class="fa-solid fa-exclamation-triangle"></i>
+              <h3>Unable to load this blog post</h3>
+              <p>
                 The blog post you're looking for could not be found. It may have been deleted, or you may not have permission to view it.
               </p>
             </div>
@@ -347,10 +401,10 @@ class Stack extends ModTemplate {
       // Show error state
       if (container) {
         container.innerHTML = `
-          <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 400px; padding: 4rem 2rem; text-align: center;">
-            <i class="fa-solid fa-exclamation-triangle" style="font-size: 3rem; color: var(--saito-font-color-light); margin-bottom: 1rem;"></i>
-            <h3 style="font-size: 2rem; font-weight: 600; color: var(--saito-font-color); margin: 0 0 1rem 0;">Unable to load this blog post</h3>
-            <p style="font-size: 1.6rem; color: var(--saito-font-color-light); margin: 0; max-width: 500px; line-height: 1.6;">
+          <div class="stack-status">
+            <i class="fa-solid fa-exclamation-triangle"></i>
+            <h3>Unable to load this blog post</h3>
+            <p>
               An error occurred while loading the blog post. Please try again later.
             </p>
           </div>
@@ -366,10 +420,10 @@ class Stack extends ModTemplate {
     const container = document.querySelector('.saito-container');
     if (container) {
       container.innerHTML = `
-        <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 400px; padding: 4rem 2rem; text-align: center;">
-          <i class="fa-solid fa-exclamation-triangle" style="font-size: 3rem; color: var(--saito-font-color-light); margin-bottom: 1rem;"></i>
-          <h3 style="font-size: 2rem; font-weight: 600; color: var(--saito-font-color); margin: 0 0 1rem 0;">Invalid URL</h3>
-          <p style="font-size: 1.6rem; color: var(--saito-font-color-light); margin: 0; max-width: 500px; line-height: 1.6;">
+        <div class="stack-status">
+          <i class="fa-solid fa-exclamation-triangle"></i>
+          <h3>Invalid URL</h3>
+          <p>
             The URL you requested is not valid. Please check the URL and try again.
           </p>
         </div>
@@ -446,6 +500,47 @@ class Stack extends ModTemplate {
   // Inter-module Communication //
   ////////////////////////////
   respondTo(type = '', obj) {
+    if (type === 'redsquare-profile') {
+      const publicKey = String(obj?.publicKey || '').trim();
+      if (!publicKey) {
+        return null;
+      }
+
+      let link = String(obj?.profile?.stack || '').trim();
+      if (!link) {
+        const api = this.app.modules.returnFirstRespondTo?.('profile-update');
+        if (api && typeof api.get === 'function') {
+          try {
+            const profile = api.get(publicKey) || {};
+            link = String(profile.stack || '').trim();
+          } catch (err) {
+            link = '';
+          }
+        }
+      }
+      if (!link) {
+        return null;
+      }
+
+      return {
+        text: 'Stack',
+        link
+      };
+    }
+
+    if (type === 'redsquare-create') {
+      return {
+        id: 'stack-publish',
+        label: 'Publish',
+        image: '/saito/icons/saito-stack-icon-solid.svg',
+        callback: () => {
+          if (typeof navigateWindow === 'function') {
+            navigateWindow('/stack?publish=1');
+          }
+        }
+      };
+    }
+
     if (type === 'saito-header') {
       let x = [];
       if (!this.browser_active) {
@@ -466,6 +561,7 @@ class Stack extends ModTemplate {
       return {
         text: `View Stack`,
         icon: this.icon_fa,
+        image: '/saito/icons/saito-stack-icon-solid.svg',
         callback: function (app, publicKey) {
           navigateWindow(`/stack/${publicKey}`);
         }
@@ -549,6 +645,27 @@ class Stack extends ModTemplate {
             value_obj.delegate = true;
           }
 
+          //
+          // we want to extend the routing path from the point where *we*
+          // most recently acquired authority over the NFT, not from the
+          // end of the existing routing path. This prevents merchants who
+          // repeatedly sell inventory from accumulating customer history
+          // into future transfers, etc.
+          //
+          const my_publickey = await this_mod.app.wallet.getPublicKey();
+
+          if (Array.isArray(tx.msg.data.path) && tx.msg.data.path.length > 0) {
+            let last_inbound = -1;
+            for (let i = 0; i < tx.msg.data.path.length; i++) {
+              if (tx.msg.data.path[i].to === my_publickey) {
+                last_inbound = i;
+              }
+            }
+            if (last_inbound >= 0) {
+              tx.msg.data.path = tx.msg.data.path.slice(0, last_inbound + 1);
+            }
+          }
+
           const value_json = JSON.stringify(value_obj);
           const value_b64 = Buffer.from(value_json).toString('base64');
 
@@ -590,6 +707,9 @@ class Stack extends ModTemplate {
           }
 
           return null;
+        },
+        returnKeys: () => {
+          return [{ publicKey: this.STACK_OFFICIAL_PUBLICKEY, identifier: 'SaitoOfficial' }];
         }
       };
     }
@@ -653,11 +773,42 @@ class Stack extends ModTemplate {
     }
   }
 
+  buildUnlockAccessScript(publishIntent, witnessData) {
+    const lockingScript = this.getAccessScriptForPublishIntent(publishIntent);
+    if (lockingScript === null) {
+      throw new Error('buildUnlockAccessScript: public posts have no unlock script');
+    }
+
+    const witnessByOpcode = {};
+
+    if (witnessData?.utxokey1 && witnessData?.utxokey2 && witnessData?.utxokey3) {
+      witnessByOpcode.CHECKOWNNFTWHERE = {
+        utxokey1: witnessData.utxokey1,
+        utxokey2: witnessData.utxokey2,
+        utxokey3: witnessData.utxokey3
+      };
+    }
+
+    if (Array.isArray(witnessData?.hops) && witnessData.hops.length > 0) {
+      witnessByOpcode.CHECKPATHHOP = { hops: witnessData.hops };
+    }
+
+    if (witnessData?.duration != null && witnessData?.duration_sig) {
+      witnessByOpcode.IMPORTFIELD = {
+        duration: witnessData.duration,
+        signature: witnessData.duration_sig
+      };
+    }
+
+    const completeScript = embedWitnessInScript(lockingScript, witnessByOpcode);
+    return JSON.stringify(completeScript);
+  }
+
   /**
-   * Hash an access script using canonicalization
+   * Hash an access script using app.core.scripting.hash()
    *
-   * Canonicalizes the script JSON to ensure deterministic hashing.
-   * Same script object will always produce the same hash.
+   * Hashes the witness-free locking script JSON. Same script object will
+   * always produce the same hash via Rust canonicalization.
    *
    * @param {Object|null} script - Access script object, or null
    * @returns {string} Access hash (empty string if script is null)
@@ -667,19 +818,13 @@ class Stack extends ModTemplate {
       return '';
     }
 
-    const scripting_mod = this.app.modules.returnModule('Scripting');
-    if (!scripting_mod) {
-      console.warn('Stack: Scripting module not available - cannot hash access script');
+    if (!this.app.core?.scripting?.hash) {
+      console.warn('Stack: app.core.scripting.hash not available - cannot hash access script');
       return '';
     }
 
-    // Canonicalize the script to ensure deterministic hashing
-    const canonical_script = scripting_mod.canonicalize(script);
-
-    // Hash the canonicalized script
-    const access_hash = scripting_mod.hash(canonical_script);
-
-    return access_hash;
+    const access_script = typeof script === 'string' ? script : JSON.stringify(script);
+    return this.app.core.scripting.hash(access_script);
   }
 
   ////////////////////////////
@@ -789,7 +934,7 @@ class Stack extends ModTemplate {
       // ========================================================================
       // 1. Generate normalized publish intent from post data
       // 2. Map intent to canonical access script template
-      // 3. Canonicalize and hash the script
+      // 3. Hash the locking script
       // 4. Attach access_hash to transaction
       // ========================================================================
 
@@ -832,13 +977,7 @@ class Stack extends ModTemplate {
           access_hash = this.hashAccessScript(access_script);
 
           if (access_hash) {
-            // Canonicalize script for optional local storage (debugging only)
-            const scripting_mod = this.app.modules.returnModule('Scripting');
-            if (scripting_mod) {
-              const canonical_script = scripting_mod.canonicalize(access_script);
-              // Store canonicalized script locally for debugging (not required for access)
-              newtx.msg.access_script = canonical_script;
-            }
+            newtx.msg.access_script = JSON.stringify(access_script);
             newtx.msg.access_hash = access_hash;
           }
         } else {
@@ -1249,14 +1388,15 @@ class Stack extends ModTemplate {
   // Local State Management //
   ////////////////////////////
   /**
-   * Load persistent local UX state from app.options
-   * Initializes app.options.stack if it doesn't exist
-   * This is CLIENT-SIDE STATE ONLY - not authoritative
+   * Load persistent local UX state from app.options.
+   * Initializes app.options.stack defaults if they do not already exist.
+   * This is CLIENT-SIDE STATE ONLY - not authoritative.
    *
    * Structure:
    * app.options.stack = {
    *   posts: [ { sig, publicKey, timestamp, lastEdited, status } ],  // Lightweight references only
-   *   subscriptions: [ { publicKey, addedAt } ]  // List of subscribed creator publicKeys
+   *   subscriptions: [ { publicKey, addedAt } ],  // List of subscribed creator publicKeys
+   *   has_created_keys: false  // Whether user has created Stack access / subscription keys
    * }
    */
   load() {
@@ -1268,6 +1408,9 @@ class Stack extends ModTemplate {
     }
     if (!this.app.options.stack.subscriptions) {
       this.app.options.stack.subscriptions = [];
+    }
+    if (this.app.options.stack.has_created_keys === undefined) {
+      this.app.options.stack.has_created_keys = false;
     }
     // Note: app.options.stack is lightweight - no post bodies, images, or heavy data
     // Full post content must be loaded from archive transactions when needed
@@ -1284,7 +1427,7 @@ class Stack extends ModTemplate {
    * @returns {boolean} - True if added, false if already subscribed
    */
   addSubscription(publicKey) {
-    if (!publicKey || !this.app.wallet.isValidPublicKey(publicKey)) {
+    if (!publicKey || !this.app.crypto.isPublicKey(publicKey)) {
       return false;
     }
 
@@ -1717,6 +1860,47 @@ class Stack extends ModTemplate {
       return 1;
     }
 
+    // Private author-feed load: use the signed peer request as Archive request_tx
+    if (txmsg.request === 'load stack posts for author') {
+      const field1 = txmsg.data?.field1;
+      const field2 = txmsg.data?.field2;
+      const field4 = txmsg.data?.field4;
+      const access_witness = txmsg.data?.access_witness;
+
+      if (!field1 || !field2 || !field4) {
+        mycallback([]);
+        return 1;
+      }
+
+      const query = {
+        field1: field1,
+        field2: field2,
+        field4: field4,
+        request_tx: tx
+      };
+      if (access_witness) {
+        query.access_witness = access_witness;
+      }
+
+      this.app.storage.loadTransactions(
+        query,
+        (txs) => {
+          const serialized = [];
+          if (Array.isArray(txs)) {
+            for (let i = 0; i < txs.length; i++) {
+              if (txs[i]) {
+                serialized.push(txs[i].serialize_to_web(app));
+              }
+            }
+          }
+          mycallback(serialized);
+        },
+        'localhost'
+      );
+
+      return 1;
+    }
+
     // Handle receiving a post transaction from a peer
     // This happens when a peer sends us a post they have cached
     if (txmsg.request === 'stack post transaction') {
@@ -1754,20 +1938,21 @@ class Stack extends ModTemplate {
       }
     }
 
-    // Not a Stack service request
-    return 0;
+    // Let shared module services, including shortlinks, handle the request.
+    return super.handlePeerTransaction(app, tx, peer, mycallback);
   }
 
   ////////////////////////////
   // NFT Access Resolution //
   ////////////////////////////
   /**
-   * Resolves Stack NFT access data from wallet for Archive queries.
-   * Mirrors Vault's pattern: discovers Stack NFTs, loads transactions, extracts slips.
+   * Resolves Stack NFT witness data from wallet for unlock-script construction.
    *
-   * @returns {Object|null} Access data object with access_hash, access_script, access_witness, or null if no NFT found
+   * @param {string|null} authorPublicKey - Post author; when set, selects the Stack NFT
+   *   whose creator matches this key
+   * @returns {Object|null} Structured witness data with legacy `access_witness` JSON string, or null
    */
-  async resolveStackAccessData() {
+  async resolveStackAccessData(authorPublicKey = null) {
     try {
       // Update NFT list to ensure wallet cache is fresh
       await this.app.wallet.updateNFTList();
@@ -1777,18 +1962,32 @@ class Stack extends ModTemplate {
         return null;
       }
 
-      // Find first Stack NFT (type === "stack")
-      let stackNFT = null;
+      const stackCandidates = [];
       for (const rec of nftList) {
         const nftType = this.app.wallet.extractNFTType(rec.slip3?.utxo_key || '');
         if (nftType === 'stack') {
-          stackNFT = rec;
-          break;
+          stackCandidates.push(rec);
         }
       }
 
-      if (!stackNFT) {
+      if (stackCandidates.length === 0) {
         return null;
+      }
+
+      let stackNFT = null;
+      if (authorPublicKey) {
+        for (const rec of stackCandidates) {
+          const creator = rec.slip1?.public_key || '';
+          if (creator === authorPublicKey) {
+            stackNFT = rec;
+            break;
+          }
+        }
+        if (!stackNFT) {
+          return null;
+        }
+      } else {
+        stackNFT = stackCandidates[0];
       }
 
       // Create SaitoNFT object and load transaction to get full slip data
@@ -1796,63 +1995,80 @@ class Stack extends ModTemplate {
       const nft = new SaitoNFT(this.app, this, null, stackNFT, null);
       await nft.fetchTransaction();
 
-      // Extract slip utxo_keys (required for witness)
-      const slip1_utxokey = nft.slip1?.utxo_key || '';
-      const slip2_utxokey = nft.slip2?.utxo_key || '';
-      const slip3_utxokey = nft.slip3?.utxo_key || '';
-      let slips = [];
-      slips.push(slip1_utxokey);
-      slips.push(slip2_utxokey);
-      slips.push(slip3_utxokey);
+      const utxokey1 = nft.slip1?.utxo_key || '';
+      const utxokey2 = nft.slip2?.utxo_key || '';
+      const utxokey3 = nft.slip3?.utxo_key || '';
 
-      if (!slip1_utxokey || !slip2_utxokey || !slip3_utxokey) {
+      if (!utxokey1 || !utxokey2 || !utxokey3) {
         console.warn('Stack: NFT missing required slip utxo_keys');
         return null;
       }
 
-      // 2. Extract routing path from NFT transaction if present
-      let path = [];
+      let hops = [];
+      let duration = null;
+      let duration_sig = null;
       try {
         const nft_txmsg = nft.tx?.returnMessage?.();
         if (Array.isArray(nft_txmsg?.data?.path)) {
-          path = nft_txmsg.data.path;
+          hops = nft_txmsg.data.path;
+        }
+        if (nft_txmsg?.data?.duration != null) {
+          duration = nft_txmsg.data.duration;
+          duration_sig = nft_txmsg.data.duration_sig || null;
         }
       } catch (err) {
-        // Fail silently — absence of path is normal
+        // Absence of path/duration is normal for some NFT states
       }
 
-      // Construct witness data in CHECKOWNNFTWHERE format: { slips: [utxokey1, utxokey2, utxokey3] }
-      let access_witness_obj = [
+      const access_witness_array = [
         {
-          utxokey1: slip1_utxokey,
-          utxokey2: slip2_utxokey,
-          utxokey3: slip3_utxokey
+          utxokey1,
+          utxokey2,
+          utxokey3
         }
       ];
-      if (Array.isArray(path) && path.length > 0) {
-        access_witness_obj.push({
-          hops: path
+      if (Array.isArray(hops) && hops.length > 0) {
+        access_witness_array.push({ hops });
+      }
+      if (duration != null) {
+        access_witness_array.push({
+          duration,
+          signature: duration_sig
         });
       }
-      try {
-        let nft_txmsg = nft.tx?.returnMessage?.();
-        if (nft_txmsg.data.duration) {
-          access_witness_obj.push({
-            duration: nft_txmsg.data.duration,
-            signature: nft_txmsg.data.duration_sig
-          });
-        }
-      } catch (err) {
-        console.log('ERROR attaching duration and sig to witness...');
-      }
-      const access_witness = JSON.stringify(access_witness_obj);
 
-      // Note: access_hash and access_script come from the POST transaction, not the NFT
-      // We return witness data here, and the caller will attach it along with post's access_hash/access_script
-      return {
-        access_witness: access_witness,
-        nft_creator: nft.creator || nft.slip1?.public_key || ''
+      const result = {
+        utxokey1,
+        utxokey2,
+        utxokey3,
+        hops,
+        duration,
+        duration_sig,
+        nft_creator: nft.creator || nft.slip1?.public_key || '',
+        nft_id: nft.id || '',
+        access_witness: JSON.stringify(access_witness_array)
       };
+
+      console.log(
+        '--------------------------------\nSTACK ACCESS WITNESS\n--------------------------------\n\n' +
+          'NFT ID:\n' +
+          (result.nft_id || '') +
+          '\n\n' +
+          'creator publickey:\n' +
+          (result.nft_creator || '') +
+          '\n\n' +
+          'owner publickey:\n' +
+          (nft.slip2?.public_key || '') +
+          '\n\n' +
+          'access_witness:\n' +
+          JSON.stringify(access_witness_array, null, 2) +
+          '\n\n' +
+          'structured object:\n' +
+          JSON.stringify(result, null, 2) +
+          '\n\n--------------------------------'
+      );
+
+      return result;
     } catch (error) {
       console.warn('Stack: Error resolving NFT access data:', error);
       return null;
@@ -2066,7 +2282,7 @@ class Stack extends ModTemplate {
    * @returns {Promise<Array<Transaction>>} Array of Transaction objects, deduplicated by signature
    */
   async loadPostsForAuthor(publicKey, { forceRemote = true } = {}) {
-    if (!publicKey || !this.app.wallet.isValidPublicKey(publicKey)) {
+    if (!publicKey || !this.app.crypto.isPublicKey(publicKey)) {
       return [];
     }
 
@@ -2076,7 +2292,7 @@ class Stack extends ModTemplate {
 
     // PART 1: Resolve Stack NFT access data (mirrors Vault pattern)
     // This provides witness data that can be attached to Archive queries
-    const accessData = await this.resolveStackAccessData();
+    const accessData = await this.resolveStackAccessData(publicKey);
     if (accessData?.access_witness) {
       access_witness = accessData.access_witness;
     }
@@ -2104,6 +2320,28 @@ class Stack extends ModTemplate {
       localQuery.access_witness = access_witness;
     }
 
+    // Private path: one signed proving Transaction for local request_tx and remote peer send
+    let requestTx = null;
+    if (access_witness) {
+      const walletPublicKey = await this.app.wallet.getPublicKey();
+      requestTx = await this.app.wallet.createUnsignedTransaction(
+        walletPublicKey,
+        BigInt(0),
+        BigInt(0)
+      );
+      requestTx.msg = {
+        request: 'load stack posts for author',
+        data: {
+          field1: 'Stack',
+          field2: publicKey,
+          field4: 'stack:post',
+          access_witness: access_witness
+        }
+      };
+      await requestTx.sign();
+      localQuery.request_tx = requestTx;
+    }
+
     const localPosts = await new Promise((resolve) => {
       this.app.storage.loadTransactions(
         localQuery,
@@ -2124,16 +2362,6 @@ class Stack extends ModTemplate {
 
     // PART 2.3: If forceRemote, query remote peers
     if (forceRemote) {
-      // Build remote query with same access data pattern
-      let remoteQuery = {
-        field1: 'Stack',
-        field2: publicKey,
-        field4: 'stack:post'
-      };
-      if (access_witness) {
-        remoteQuery.access_witness = access_witness;
-      }
-
       let peers = await this.app.network.getPeers();
       if (peers.length === 0) {
         // Defer until peers are available
@@ -2141,15 +2369,59 @@ class Stack extends ModTemplate {
         return posts;
       }
 
-      const remotePosts = await new Promise((resolve) => {
-        this.app.storage.loadTransactions(
-          remoteQuery,
-          (txs) => {
-            resolve(txs || []);
-          },
-          null // null = remote peers
-        );
-      });
+      let remotePosts = [];
+      if (access_witness && requestTx) {
+        // Private path: send the same signed Transaction to a Stack peer
+        const peerKeys = Object.keys(this.peers);
+        if (peerKeys.length > 0) {
+          const firstPeerKey = peerKeys[0];
+          const peerObj = this.peers[firstPeerKey]?.peer;
+          if (peerObj && peerObj.publicKey !== undefined) {
+            remotePosts = await new Promise((resolve) => {
+              this.app.network.sendTransactionWithCallback(
+                requestTx,
+                (responseTx) => {
+                  const response = responseTx?.msg;
+                  const txs = [];
+                  if (Array.isArray(response)) {
+                    for (let i = 0; i < response.length; i++) {
+                      try {
+                        const remoteTx = new Transaction();
+                        remoteTx.deserialize_from_web(this.app, response[i]);
+                        txs.push(remoteTx);
+                      } catch (error) {
+                        console.debug(
+                          'Stack.loadPostsForAuthor: Failed to deserialize peer response',
+                          error
+                        );
+                      }
+                    }
+                  }
+                  resolve(txs);
+                },
+                peerObj.publicKey
+              );
+            });
+          }
+        }
+      } else {
+        // Public path: unchanged Archive remote query
+        let remoteQuery = {
+          field1: 'Stack',
+          field2: publicKey,
+          field4: 'stack:post'
+        };
+
+        remotePosts = await new Promise((resolve) => {
+          this.app.storage.loadTransactions(
+            remoteQuery,
+            (txs) => {
+              resolve(txs || []);
+            },
+            null // null = remote peers
+          );
+        });
+      }
 
       for (const tx of remotePosts) {
         seenSignatures.add(tx.signature);
@@ -2349,47 +2621,111 @@ class Stack extends ModTemplate {
     //
     // 2. STACK APP BOOTSTRAP
     //
-    // Explicitly handle:
     //   /stack
     //   /stack/<publickey>
     //   /stack/<publickey>/<txsig>
     //
-    // In ALL cases, we just return the Stack home HTML.
-    // Stack (browser-side) will inspect window.location.pathname
-    // and decide whether to call:
-    //   - loadPostsForAuthor()
-    //   - loadPost()
-    //   - explore logic
+    // Article GET loads the transaction via loadPost() so OG tags in the
+    // initial HTML do not depend on JavaScript or transactionCache.
+    // The browser still hydrates the page from saito.js / __STACK_INITIAL_POST.
     //
-    let html = HomePage(app, stack_self, app.build_number);
-
     expressapp.get(`${uri}`, (req, res) => {
       res.setHeader('Content-type', 'text/html');
       res.charset = 'UTF-8';
-      return res.send(html);
+
+      if (req?.query?.og_img_sig) {
+        let sig = req.query.og_img_sig;
+        app.storage.loadTransactions(
+          { sig, field1: 'Stack' },
+          (txs) => {
+            if (txs?.length > 0) {
+              const tx = txs[0];
+              const txmsg = tx.returnMessage();
+              const img_uri = txmsg.data.image;
+              let img_type = img_uri.substring(img_uri.indexOf(':') + 1, img_uri.indexOf(';'));
+              let base64Data = img_uri.replace(/^data:image\/(png|jpeg|jpg);base64,/, '');
+              let img = Buffer.from(base64Data, 'base64');
+
+              if (img_type == 'image/svg+xml') {
+                img_type = 'image/svg';
+              }
+
+              if (!res.finished) {
+                res.writeHead(200, {
+                  'Content-Type': img_type,
+                  'Content-Length': img.length
+                });
+                return res.end(img);
+              }
+              return;
+            }
+
+            if (!res.finished) {
+              res.status(404).end();
+            }
+          },
+          'localhost'
+        );
+
+        return;
+      }
+
+      return res.send(
+        HomePage(app, stack_self, app.build_number, Object.assign({}, stack_self.social))
+      );
     });
 
     expressapp.get(`${uri}/:publickey`, (req, res) => {
       res.setHeader('Content-type', 'text/html');
       res.charset = 'UTF-8';
-      return res.send(html);
+      const updateSocial = Object.assign({}, stack_self.social);
+      updateSocial.description = `Follow ${app.keychain.returnUsername(req.params.publickey)}`;
+      return res.send(HomePage(app, stack_self, app.build_number, updateSocial));
     });
 
-    expressapp.get(`${uri}/:publickey/:txsig`, (req, res) => {
+    expressapp.get(`${uri}/:publickey/:txsig`, async (req, res) => {
       res.setHeader('Content-type', 'text/html');
       res.charset = 'UTF-8';
+      const publickey = req.params.publickey;
       const txsig = req.params.txsig;
-      const cachedTx = txsig ? stack_self.transactionCache[txsig] : null;
-      if (cachedTx) {
+      const updateSocial = Object.assign({}, stack_self.social);
+      updateSocial.url = stack_self.resolveSocialUrl(`${uri}/${publickey}/${txsig}`);
+
+      const articleTx = txsig ? await stack_self.loadPost(txsig, { peer: 'localhost' }) : null;
+
+      if (articleTx) {
         try {
-          const serializedTx = cachedTx.serialize_to_web(app);
-          const htmlWithPost = HomePage(app, stack_self, app.build_number, {}, serializedTx);
-          return res.send(htmlWithPost);
+          let txmsg = articleTx.returnMessage();
+          if (txmsg?.data?.title) {
+            updateSocial.title = txmsg.data.title;
+          }
+          if (txmsg?.data?.image) {
+            updateSocial.image = stack_self.resolveSocialUrl(`${uri}?og_img_sig=${txsig}`);
+          } else if (txmsg?.data?.imageUrl) {
+            updateSocial.image = stack_self.resolveSocialUrl(txmsg.data.imageUrl);
+          }
+
+          let summary = txmsg?.data?.summary || txmsg?.data?.excerpt || '';
+          if (summary) {
+            updateSocial.description = summary;
+          } else {
+            updateSocial.description =
+              app.keychain.returnUsername(publickey) + ' writes on Saito Stack...';
+          }
         } catch (err) {
           console.debug('Stack: Failed to serialize cached post for initial HTML', err);
         }
       }
-      return res.send(html);
+
+      return res.send(
+        HomePage(
+          app,
+          stack_self,
+          app.build_number,
+          updateSocial,
+          articleTx ? articleTx.serialize_to_web(app) : null
+        )
+      );
     });
   }
 }

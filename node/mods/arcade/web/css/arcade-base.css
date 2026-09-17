@@ -1,334 +1,71 @@
-:root {
-	--saito-arcade-width: 1500px;
+/* Page shell — full-width launcher layout. Appearance from Saito. */
+
+body.arcade-body {
+  font-size: 1.25rem;
+  --arcade-sidebar-width: minmax(16rem, 20rem);
 }
 
-.arcade-container.saito-container {
-	grid-template-columns: auto 33rem;
-	grid-template-rows: minmax(5px, 1fr);
-	padding: 0 calc((100vw - var(--saito-arcade-width)) / 2);
-	padding-left: calc((100vw - var(--saito-arcade-width)) / 4);
-	overflow: hidden;
-	column-gap: 0px;
+body.arcade-body p {
+  font-size: inherit;
 }
 
-/* right sidebar*/
-
-.saito-sidebar.right {
-	grid-column: unset;
-	grid-row: unset;
+/*
+ * Header: Saito defaults center content inside --saito-width.
+ * Arcade is immersive — share the same full-width gutters as the page.
+ */
+body.arcade-body #saito-header.arcade {
+  padding-inline: var(--saito-space-lg);
 }
 
-/* main panel */
-
-.arcade-main {
-	position: relative;
-	padding: 1rem;
-	height: 100%;
+/*
+ * Three-column shell: left nav | game grid | right sidebar (invites + leaderboard).
+ * Side rails share one width token so the center column stays balanced.
+ */
+body.arcade-body #saito-container.arcade-container {
+  grid-template-columns: var(--arcade-sidebar-width) minmax(0, 1fr) var(--arcade-sidebar-width);
+  padding: 0 var(--saito-space-lg);
+  column-gap: var(--saito-space-md);
+  overflow: hidden;
 }
 
-.arcade-scrollable-panel-container {
-	height: 100%;
+body.arcade-body #saito-container.arcade-container > * {
+  min-width: 0;
+  min-height: 0;
+  max-height: 100%;
 }
 
-.arcade-central-panel {
-	max-height: 100%;
-	position: relative;
+@media (max-width: 1100px) {
+  body.arcade-body {
+    --arcade-sidebar-width: minmax(15rem, 18rem);
+  }
+
+  body.arcade-body #saito-header.arcade {
+    padding-inline: var(--saito-space-md);
+  }
+
+  body.arcade-body #saito-container.arcade-container {
+    padding: 0 var(--saito-space-md);
+  }
 }
 
-.arcade-teasers {
-	display: grid;
-	grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-	grid-gap: 1rem;
-	align-content: start;
+@media (max-width: 820px) {
+  body.arcade-body #saito-container.arcade-container {
+    grid-template-columns: minmax(0, 1fr);
+    padding: 0 var(--saito-space-md);
+  }
+
+  body.arcade-body #saito-container.arcade-container > .arcade-sidebar-left,
+  body.arcade-body #saito-container.arcade-container > .arcade-sidebar {
+    display: none;
+  }
 }
 
-.arcade-sidebar .saito-announcement {
-	margin-bottom: 1rem;
-	line-height: 1.25em;
-	background: var(--saito-surface-color);
-	color: var(--saito-surface-text);
-	padding: 1rem;
-}
+@media (max-width: 600px) {
+  body.arcade-body #saito-header.arcade {
+    padding-inline: var(--saito-space-sm);
+  }
 
-.saito-sidebar.arcade-sidebar {
-	height: calc(100 * var(--saito-vh) - var(--saito-header-height));
-	top: 0;
-	overflow: hidden;
-	display: flex;
-	flex-direction: column;
-	gap: 1rem;
-	margin-left: 0px;
-}
-
-/******************************************
- *  Base teaser card styles (restored from
- *  former arcade-game-selector-overlay.css)
- *****************************************/
-
-.arcade-teaser {
-	width: 100%;
-	border: var(--border-thickness-thick) solid var(--saito-border-color);
-	position: relative;
-	cursor: pointer;
-	overflow: hidden;
-	border-radius: var(--saito-border-radius);
-}
-
-.arcade-teaser:hover {
-	border-color: var(--saito-primary);
-}
-
-.arcade-teaser-title {
-	position: absolute;
-	height: 6rem;
-	background-color: #000a;
-	overflow-x: hidden;
-	color: white;
-	width: 100%;
-	top: 0;
-	left: 0;
-	padding: 1.6rem;
-	font-size: 2.5rem;
-	text-transform: uppercase;
-	white-space: nowrap;
-	overflow: hidden;
-	text-overflow: ellipsis;
-}
-
-.arcade-teaser-image {
-	width: 100%;
-	height: 100%;
-}
-
-.arcade-teaser-image > img {
-	width: 100%;
-	height: 100%;
-	object-fit: cover;
-}
-
-.arcade-teaser-footer {
-	position: absolute;
-	bottom: -2px;
-	right: -2px;
-	max-width: 50%;
-	max-height: 25%;
-	height: 3rem;
-	min-width: 5rem;
-}
-
-.arcade-teaser-footer .arcade-invite-badge {
-	width: fit-content;
-	padding: 0 20% 0 33%;
-	max-width: unset;
-}
-
-/******************************************
- *  Teaser grid layout and overrides
- *****************************************/
-
-.arcade-teasers .arcade-teaser {
-	box-shadow: var(--saito-box-shadow);
-	height: min(250px, calc((100vw - 34.5rem) / 4));
-	border-radius: var(--saito-border-radius);
-}
-
-.arcade-teasers .arcade-teaser-title {
-	height: 5rem;
-	display: flex;
-	align-items: center;
-	justify-content: space-between;
-	padding: 0 1.5rem;
-}
-
-.arcade-teaser-title span {
-	font-size: 2.4rem;
-	text-transform: unset;
-	overflow: hidden;
-	white-space: nowrap;
-	text-overflow: ellipsis;
-	flex: 1;
-}
-
-.arcade-container.initializing-game .saito-sidebar.right {
-	display: none;
-}
-
-.arcade-container.initializing-game .arcade-main {
-	grid-column: span 2;
-}
-
-/*************************************
- * Override saito-page-layout 
- * to make arcade better on mobile
-**************************************/
-
-@media screen and (max-width: 1200px) {
-	.arcade-teasers {
-		grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-	}
-}
-
-@media screen and (max-width: 900px) {
-	.saito-container.arcade-container {
-		grid-template-columns: 1fr;
-		grid-template-rows: repeat(auto-fit, minmax(0px, min-content));
-	}
-	.arcade-container .saito-sidebar.right {
-		display: block;
-		visibility: visible;
-		position: unset;
-		grid-row: unset;
-		grid-column-start: unset;
-		padding: 0 1rem;
-		height: unset;
-	}
-	.arcade-container .saito-main {
-		margin: 0;
-		order: 2;
-	}
-	.arcade-sidebar .saito-table-row {
-		padding: 1rem;
-	}
-	.arcade-sidebar .saito-table-body {
-		grid-gap: 0.8rem;
-		font-size: 1.6rem;
-	}
-	.arcade-sidebar .chat-manager {
-		display: none;
-	}
-	.arcade-sidebar .saito-announcement {
-		display: none;
-	}
-	.arcade-teasers .arcade-teaser {
-		height: min(180px, calc(100vw / 3));
-	}
-}
-
-@media screen and (max-width: 600px) {
-	.arcade-main {
-		padding: 0.5rem;
-	}
-	.arcade-teaser-title span {
-		font-size: 1.8rem;
-	}
-}
-
-@media screen and (max-width: 450px) {
-	.arcade-teasers {
-		grid-template-columns: repeat(2, 1fr);
-	}
-}
-
-/* Teaser title responsive (from former overlay) */
-@media screen and (max-width: 1000px) {
-	.arcade-teaser-title {
-		padding: 1.2rem;
-		font-size: 2rem;
-		height: 5rem;
-	}
-}
-
-@media screen and (max-width: 550px) {
-	.arcade-teaser-title {
-		padding: 0.8rem;
-		font-size: 1.8rem;
-		height: 4rem;
-	}
-}
-
-/**************************
- * Fancy scrolling
-**************************/
-
-#top-of-game-list {
-	position: absolute;
-	top: 5rem;
-}
-
-#bottom-of-game-list {
-	position: relative;
-	top: calc(100% - 25px);
-	height: 5px;
-}
-
-.can-scroll-down::before {
-	font-family: FontAwesome;
-	content: '';
-	font-size: 4rem;
-	color: var(--border-color-general-dividers);
-	position: absolute;
-	bottom: 0;
-	left: 0;
-	width: 100%;
-	text-align: center;
-	line-height: 10rem;
-	height: 10rem;
-	text-shadow:
-		-3px -2px 2px var(--saito-border-color),
-		0px 2px 2px var(--saito-border-color),
-		3px -2px 2px var(--saito-border-color);
-	z-index: 5;
-	pointer-events: none;
-	background: linear-gradient(180deg, transparent, var(--saito-background-color) 80%);
-}
-
-.can-scroll-down:hover::before {
-	content: '\f0d7';
-}
-
-/*  "\f0d8"  */
-
-.can-scroll-up::after {
-	font-family: FontAwesome;
-	content: '';
-	font-size: 4rem;
-	color: var(--border-color-general-dividers);
-	position: absolute;
-	top: 0;
-	left: 0;
-	width: 100%;
-	text-align: center;
-	line-height: 10rem;
-	height: 10rem;
-	text-shadow:
-		-3px 2px 2px var(--saito-border-color),
-		0px -2px 2px var(--saito-border-color),
-		3px 2px 2px var(--saito-border-color);
-	z-index: 5;
-	pointer-events: none;
-	background: linear-gradient(0deg, transparent, var(--saito-background-color) 80%);
-}
-
-.can-scroll-up:hover::after {
-	content: '\f0d8';
-}
-
-.arcade-teaser-install .arcade-teaser-footer {
-	bottom: -2px;
-	right: -2px;
-	max-width: 100%;
-	max-height: 75%;
-	height: 3rem;
-	min-width: 10rem;
-	width: 20rem;
-}
-
-.arcade-teaser-install .arcade-teaser-footer::before {
-	content: 'install';
-	position: absolute;
-	bottom: 1rem;
-	left: 50%;
-	transform: translateX(-50%) rotate(-45deg);
-	background: #b90000;
-	color: white;
-	padding: 1rem 20rem;
-	font-family: sans-serif;
-	font-size: 1.8rem;
-	white-space: nowrap;
-	z-index: 1;
-	box-shadow: 0 0 5px rgba(0, 0, 0, 0.2);
-	margin-left: 5rem;
-	margin-bottom: 1.4rem;
-	letter-spacing: 0.2rem;
-	font-weight: bold;
+  body.arcade-body #saito-container.arcade-container {
+    padding: 0 var(--saito-space-sm);
+  }
 }

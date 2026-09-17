@@ -1,132 +1,91 @@
-.sidebar-header {
-	margin-bottom: 8px;
-	font-family: inherit;
-	font-weight: bold;
+/* Namespace: .sidebar — stack + Who to Follow / legal footer.
+ * Right-rail section rhythm: title → panel → next section (gap --saito-space-lg).
+ */
+
+.sidebar {
+  display: flex;
+  flex-direction: column;
+  gap: var(--saito-space-lg);
+  min-width: 0;
 }
 
-.saito-module.saito-game {
-	display: flex;
-	flex-wrap: wrap;
-	row-gap: 1rem;
-	flex-direction: row;
-	justify-content: space-between;
-	position: relative;
-	width: 100%;
-	cursor: pointer;
-	padding: 0.5rem;
-	align-items: center;
-	background-size: cover;
-	background-position: center;
-	background-color: color-mix(in srgb, var(--saito-grey-700) 27%, transparent);
-	background-blend-mode: soft-light;
-	border-radius: 16px;
-	overflow: hidden;
+.sidebar > .redsquare-sidebar:empty {
+  display: none;
 }
 
-.saito-module.saito-game:hover {
-	transform: scale(1.02);
+/* Limbo tightens Spaces for the RS slot — neutralize extra vertical margins. */
+.sidebar .redsquare-sidebar .spaces-list .saito-profile-identity {
+  margin-bottom: 0;
 }
 
-.saito-module-titlebar {
-	max-width: 18rem;
-	min-width: 12rem;
-	width: 18rem;
-	text-overflow: ellipsis;
-	overflow: hidden;
-	white-space: nowrap;
-	overflow-wrap: break-word;
-	opacity: 0.8;
-	background: #000a;
-	border-radius: var(--saito-border-radius);
+.sidebar .redsquare-sidebar .spaces-list .saito-profile-avatar-wrap {
+  margin-top: 0;
 }
 
-.saito-module-titlebar > div {
-	margin: 0.25rem;
+.sidebar .suggestions {
+  display: none;
+  flex-direction: column;
+  gap: var(--saito-space-sm);
+  min-width: 0;
 }
 
-.saito-module-titlebar-title {
-	color: #fff;
-	font-size: 2rem;
+.sidebar .suggestion-list {
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+  min-width: 0;
 }
 
-.saito-module-titlebar-details {
-	font-size: 1.2rem;
-	color: #fff;
+.sidebar .suggestion {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  grid-template-rows: auto auto;
+  column-gap: var(--saito-space-sm);
+  align-items: center;
+  padding-block: var(--saito-space-xs);
 }
 
-.saito-game-identicons {
-	padding: 0.5rem;
-	column-gap: 0.75rem;
-	min-width: min-content;
-	padding: 1rem;
+.sidebar .suggestion .avatar {
+  grid-row: 1 / -1;
+  object-fit: cover;
 }
 
-.saito-game-details {
-	display: flex;
-	flex-direction: row;
-	column-gap: 1rem;
-	align-items: center;
-	flex-grow: 1;
-	justify-content: flex-end;
-	color: var(--saito-white);
+.sidebar .suggestion .name {
+  grid-column: 2;
+  grid-row: 1;
+  min-width: 0;
+  font-family: var(--saito-font-medium);
 }
 
-.saito-identicon-box {
-	width: 36px;
-	height: 36px;
-	overflow: hidden;
-	display: flex;
-	align-items: center;
-	justify-content: center;
-	background-color: #222;
-	flex-shrink: 0;
-	background-color: none;
+.sidebar .suggestion .handle {
+  grid-column: 2;
+  grid-row: 2;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--saito-muted-foreground);
 }
 
-.saito-game-identicons div {
-	border: 1px solid #fff8;
+.sidebar .suggestion .follow {
+  grid-column: 3;
+  grid-row: 1 / -1;
+  margin: 0;
 }
 
-.saito-module-identicon {
-	width: 100%;
-	height: 100%;
-	object-fit: contain;
-	display: block;
-	max-width: 100%;
-	max-height: 100%;
+.sidebar .more {
+  align-self: flex-start;
+  color: var(--saito-muted-foreground);
 }
 
-.redsquare-tweet-icon {
-	display: none;
+.sidebar .footer {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--saito-space-xs) var(--saito-space-sm);
+  color: var(--saito-muted-foreground);
 }
 
-.redsquare-menu .item.redsquare-menu-mobile {
-	display: none;
-}
-
-@media (max-width: 1200px) {
-	.saito-module-title {
-		font-size: 14px;
-	}
-
-	.saito-module-holder {
-		padding: 8px;
-	}
-
-	.saito-sidebar .chat-manager {
-		display: none;
-	}
-
-	.redsquare-menu .item.redsquare-menu-mobile {
-		display: flex;
-	}
-
-	.tweet-button > i + span {
-		display: none;
-	}
-
-	.tweet-button > i {
-		display: block;
-		font-size: 2.4rem;
-	}
+.sidebar .footer a {
+  color: inherit;
 }

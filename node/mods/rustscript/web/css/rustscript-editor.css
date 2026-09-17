@@ -1,0 +1,301 @@
+/*
+ * .rustscript-editor — workstation editor + syntax colours
+ */
+
+.rustscript-editor {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  min-height: 0;
+  min-width: 0;
+  overflow: hidden;
+  background: var(--rustscript-panel);
+  border: 1px solid var(--rustscript-border);
+  border-radius: 6px;
+}
+
+.rustscript-editor-locking {
+  border-color: var(--rustscript-create-edge);
+  box-shadow: inset 0 0 28px var(--rustscript-create-glow);
+}
+
+.rustscript-editor-unlocking {
+  border-color: var(--rustscript-test-edge);
+  box-shadow: inset 0 0 22px var(--rustscript-test-glow);
+}
+
+.rustscript-editor .rs-panel-header {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  min-height: 0;
+  height: auto;
+  padding: 0.28rem 0.45rem 0.28rem 0.7rem;
+}
+
+.rustscript-editor-locking .rs-panel-header {
+  background: rgba(70, 24, 32, 0.28);
+  border-bottom: 1px solid var(--rustscript-create-edge);
+}
+
+.rustscript-editor-unlocking .rs-panel-header {
+  background: rgba(72, 52, 12, 0.2);
+  border-bottom: 1px solid var(--rustscript-test-edge);
+}
+
+.rustscript-editor .rs-panel-title {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  margin: 0;
+  padding: 0;
+  font-size: 0.95em;
+  font-weight: 500;
+  letter-spacing: 0.06em;
+  line-height: 1.2;
+  text-transform: uppercase;
+}
+
+.rustscript-editor-locking .rs-panel-title {
+  color: #d4a8ae;
+}
+
+.rustscript-editor-unlocking .rs-panel-title {
+  color: #b89858;
+}
+
+.rustscript-editor .rs-panel-menu {
+  margin-left: auto;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  line-height: 1;
+}
+
+.rustscript-editor-guided,
+.rustscript-editor textarea.rustscript-editor-expert {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  padding: var(--saito-space-md) var(--saito-space-md) var(--saito-space-md) var(--saito-space-lg);
+  font-size: 1em;
+  line-height: 1.55;
+  font-family: var(--rustscript-font-mono);
+  background: var(--rustscript-background);
+  color: var(--rustscript-text);
+  border: none;
+  border-radius: 0;
+}
+
+.rustscript-editor textarea.rustscript-editor-expert {
+  width: 100%;
+  line-height: 1.5;
+}
+
+.rustscript-editor-locking .rustscript-editor-guided,
+.rustscript-editor-locking textarea.rustscript-editor-expert {
+  background: #100a0c;
+  color: #e8d4d6;
+  box-shadow: inset 0 0 20px rgba(196, 92, 106, 0.08);
+}
+
+.rustscript-editor-unlocking .rustscript-editor-guided,
+.rustscript-editor-unlocking textarea.rustscript-editor-expert {
+  background: #0f0d08;
+  color: #e8e0c8;
+  box-shadow: inset 0 0 20px rgba(252, 163, 17, 0.08);
+}
+
+.rustscript-editor-guided[hidden],
+.rustscript-editor textarea.rustscript-editor-expert[hidden] {
+  display: none !important;
+}
+
+.rs-semantic-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.3em;
+  padding-left: calc(var(--rs-depth, 0) * 1.35ch);
+  min-height: 1.7em;
+  margin: 0 0 0.35em;
+  white-space: pre-wrap;
+  line-height: 1.7em;
+}
+
+.rs-semantic-block-inner {
+  width: 100%;
+  margin-left: 0.35ch;
+  padding-left: 1.5ch;
+  border-left: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.rustscript-editor-locking .rs-semantic-section[data-key='required'] .rs-semantic-block-inner {
+  border-left-color: rgba(196, 92, 106, 0.22);
+}
+
+.rustscript-editor-unlocking .rs-semantic-section[data-key='required'] .rs-semantic-block-inner {
+  border-left-color: rgba(252, 163, 17, 0.24);
+}
+
+.rs-semantic-section {
+  width: 100%;
+}
+
+.rs-semantic-key {
+  color: #8ec5ea;
+}
+
+.rustscript-editor-locking .rs-semantic-key {
+  color: #9eb8e8;
+}
+
+.rustscript-editor-unlocking .rs-semantic-key {
+  color: #e8c878;
+}
+
+.rs-semantic-string {
+  color: #8fd49a;
+}
+
+.rs-semantic-literal {
+  color: #b8a0e0;
+}
+
+.rs-semantic-inherited,
+.rs-semantic-opcode-readonly,
+.rs-semantic-logical-readonly {
+  color: #6a9a72;
+}
+
+.rustscript-editor-unlocking .rs-semantic-inherited {
+  color: #7a7060;
+}
+
+.rs-semantic-placeholder-ghost,
+.rs-semantic-brace,
+.rs-semantic-punct {
+  color: #5a5a5a;
+}
+
+.rs-semantic-opcode,
+.rs-semantic-logical-op {
+  color: #8fd49a;
+  font-weight: 500;
+  letter-spacing: 0.03em;
+  text-decoration: underline;
+  text-decoration-color: transparent;
+  text-underline-offset: 3px;
+  transition:
+    color 0.12s,
+    text-decoration-color 0.12s;
+}
+
+.rs-semantic-opcode:hover,
+.rs-semantic-logical-op:hover {
+  color: #b8f0c0;
+  text-decoration-color: rgba(140, 200, 150, 0.55);
+}
+
+.rs-semantic-logical-readonly {
+  font-weight: 500;
+  letter-spacing: 0.03em;
+}
+
+/* Placeholder / example chips — visually distinct from resolved values */
+.rs-placeholder-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.05em 0.7rem;
+  border-radius: 3px;
+  border: 1px dashed rgba(252, 163, 17, 0.4);
+  background: rgba(252, 163, 17, 0.05);
+  color: #b88840;
+  font-style: italic;
+  font-weight: 400;
+  opacity: 0.92;
+  text-transform: none !important;
+}
+
+.rustscript-editor-locking .rs-placeholder-chip {
+  border-color: rgba(196, 92, 106, 0.42);
+  background: rgba(196, 92, 106, 0.06);
+  color: #b87882;
+}
+
+.rustscript-editor-locking .rs-placeholder-chip:hover {
+  border-style: solid;
+  border-color: rgba(196, 92, 106, 0.65);
+  background: rgba(196, 92, 106, 0.16);
+  color: #f0d0d6;
+  opacity: 1;
+}
+
+.rustscript-editor-unlocking .rs-placeholder-chip:hover {
+  border-style: solid;
+  border-color: rgba(252, 163, 17, 0.65);
+  background: rgba(252, 163, 17, 0.16);
+  color: #ffe0a8;
+  opacity: 1;
+}
+
+.rs-value-resolved {
+  color: #b8d8bc;
+  font-style: normal;
+  text-decoration: underline;
+  text-decoration-color: transparent;
+  text-underline-offset: 3px;
+  transition:
+    color 0.12s,
+    text-decoration-color 0.12s;
+}
+
+.rs-value-resolved:hover {
+  color: #d8f0dc;
+  text-decoration-color: rgba(140, 200, 150, 0.45);
+}
+
+.rustscript-editor-locking .rs-value-resolved {
+  color: #d4b8be;
+}
+
+.rustscript-editor-locking .rs-value-resolved:hover {
+  color: #f0d8dc;
+  text-decoration-color: rgba(196, 92, 106, 0.45);
+}
+
+.rustscript-editor-unlocking .rs-value-resolved {
+  color: #d8c890;
+}
+
+.rustscript-editor-unlocking .rs-value-resolved:hover {
+  color: #f0e0b0;
+  text-decoration-color: rgba(252, 163, 17, 0.45);
+}
+
+.rs-value-resolved-warn {
+  color: #e8b060 !important;
+  text-decoration-color: rgba(252, 163, 17, 0.35);
+}
+
+.rs-value-resolved-complete {
+  color: #98b8a0 !important;
+  text-decoration: none !important;
+  font-weight: 400;
+  opacity: 0.9;
+}
+
+.rustscript-editor-locking .rs-value-resolved-complete {
+  color: #a8a0a4 !important;
+}
+
+.rustscript-editor-unlocking .rs-value-resolved-complete {
+  color: #a8a080 !important;
+}
+
+.rs-value-resolved-complete:hover {
+  text-decoration: underline !important;
+  text-decoration-color: rgba(140, 160, 145, 0.35) !important;
+}

@@ -1,5 +1,4 @@
 const ViewPostTemplate = require('./view-post.template');
-const PostTeaser = require('./post-teaser');
 const SaitoUser = require('./../../../../lib/saito/ui/saito-user/saito-user');
 
 class ViewPost {
@@ -68,7 +67,6 @@ class ViewPost {
     setTimeout(() => {
       this.attachEvents();
       this.renderAuthorBlock();
-      this.addBreadCrumbs();
     }, 25);
   }
 
@@ -99,89 +97,6 @@ class ViewPost {
     saitoUser.render();
   }
 
-  async addBreadCrumbs() {
-    if (!this.tx || !this.authorPublicKey) {
-      return;
-    }
-
-    let otherPosts = this.mod.postsCache.byAuthor.get(this.authorPublicKey);
-
-    if (!otherPosts) {
-      // Pull extras for breadcrumbs
-      await this.mod.loadPostsForAuthor(this.authorPublicKey);
-      otherPosts = this.mod.postsCache.byAuthor.get(this.authorPublicKey);
-    }
-
-    let idx = -1;
-
-    if (otherPosts?.length > 1) {
-      for (let i = 0; i < otherPosts.length; i++) {
-        if (otherPosts[i].signature == this.tx.signature) {
-          idx = i;
-          break;
-        }
-      }
-
-      if (idx >= 0) {
-        if (idx > 0) {
-          const teaser = new PostTeaser(this.app, this.mod, '#next-post', otherPosts[idx - 1]);
-          teaser.render();
-        } else {
-          this.app.browser.addElementToId(
-            `<div class="stack-view-footer-note">This is the most recent post</div>`,
-            'next-post'
-          );
-        }
-
-        if (idx < otherPosts.length - 1) {
-          const teaser = new PostTeaser(this.app, this.mod, '#previous-post', otherPosts[idx + 1]);
-          teaser.render();
-        } else {
-          this.app.browser.addElementToId(
-            `<div class="stack-view-footer-note">This is the earliest available post</div>`,
-            'previous-post'
-          );
-        }
-
-        //attach Events
-
-        const teasers = document.querySelectorAll('.stack-post-teaser');
-        teasers.forEach((teaser) => {
-          // Get transaction signature from DOM (preferred) or fallback to post-id
-          const txSignature =
-            teaser.getAttribute('data-tx-signature') || teaser.getAttribute('data-post-id');
-          if (!txSignature) return;
-
-          // Remove existing click handlers to avoid duplicates
-          const newTeaser = teaser.cloneNode(true);
-          teaser.parentNode.replaceChild(newTeaser, teaser);
-
-          // Attach click handler
-          newTeaser.onclick = async (e) => {
-            e.preventDefault();
-            e.stopPropagation();
-
-            // Resolve transaction from cache
-            // First try this.posts (already loaded)
-            let tx = otherPosts.find((p) => p.signature === txSignature) || null;
-
-            if (tx) {
-              this.render(tx);
-              // Reset scroll position immediately
-              const container = document.querySelector('.saito-container');
-              window.scrollTo({ top: 0, behavior: 'instant' });
-              if (container.scrollTop !== undefined) {
-                container.scrollTop = 0;
-              }
-            } else {
-              siteMessage('Something went wrong...');
-            }
-          };
-        });
-      }
-    }
-  }
-
   attachEvents() {
     try {
       // EDITOR icon (pencil) - only visible to post author, opens editor with post content
@@ -191,14 +106,14 @@ class ViewPost {
 
         if (this.authorPublicKey === currentUserPublicKey && this.authorPublicKey) {
           // Show icon for author
-          editorIcon.style.display = '';
+          editorIcon.classList.remove('is-hidden');
           editorIcon.addEventListener('click', (e) => {
             e.preventDefault();
             this.handleBuildOn();
           });
         } else {
           // Hide icon for non-authors
-          editorIcon.style.display = 'none';
+          editorIcon.classList.add('is-hidden');
         }
       }
 
@@ -207,12 +122,12 @@ class ViewPost {
       if (followIcon) {
         if (this.authorPublicKey !== this.mod.publicKey) {
           if (!this.mod.isSubscribed(this.authorPublicKey)) {
-            followIcon.style.display = '';
+            followIcon.classList.remove('is-hidden');
             followIcon.onclick = (e) => {
               e.preventDefault();
               const added = this.mod.addSubscription(this.authorPublicKey);
               if (added) {
-                followIcon.style.display = 'none';
+                followIcon.classList.add('is-hidden');
                 siteMessage('Subscribed!', 2000);
               } else {
                 console.info(
@@ -229,25 +144,34 @@ class ViewPost {
       // Share icon - generic share
       const shareBtn = document.querySelector('#stack-view-post-share');
       if (shareBtn) {
-        shareBtn.addEventListener('click', (e) => {
+        shareBtn.addEventListener('click', async (e) => {
           e.preventDefault();
 
           if (!this.tx || !this.authorPublicKey) return;
 
-          let shareUrl = window.location.href;
+          let longUrl = window.location.href;
           if (this.authorPublicKey && this.tx.signature) {
-            shareUrl = `/${this.mod.slug}/${this.authorPublicKey}/${this.tx.signature}`;
-            if (!shareUrl.startsWith('http')) {
-              shareUrl = window.location.origin + shareUrl;
+            longUrl = `/${this.mod.slug}/${this.authorPublicKey}/${this.tx.signature}`;
+            if (!longUrl.startsWith('http')) {
+              longUrl = window.location.origin + longUrl;
             }
           }
 
           const msg = this.tx.returnMessage();
 
-          this.app.browser.handleShare({
-            title: msg?.data?.title || 'Stack Post',
-            url: shareUrl
-          });
+          try {
+            const url = await this.mod.createShortLink(longUrl);
+            this.app.browser.handleShare({
+              title: msg?.data?.title || 'Stack Post',
+              url
+            });
+          } catch (err) {
+            console.error('Stack post share failed:', err);
+            this.app.browser.handleShare({
+              title: msg?.data?.title || 'Stack Post',
+              url: longUrl
+            });
+          }
         });
       }
     } catch (err) {
@@ -339,7 +263,7 @@ class ViewPost {
 
               figure.setAttribute('data-block-id', blockId);
               figure.setAttribute('data-block-type', 'image');
-              figure.className = 'stack-image-block';
+              figure.className = 'image-block';
               figure.contentEditable = false;
 
               img.replaceWith(figure);

@@ -1,0 +1,77 @@
+/* Column shells — scrollports and rail insets. */
+
+.redsquare-mobile-view {
+  display: none;
+}
+
+.sidebar-left,
+.sidebar-right {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  overflow-x: hidden;
+  overflow-y: auto;
+  /*
+   * Shared top baseline with the feed: `.tweet` uses padding-top
+   * `--saito-space-md`, which is the visible gap above the first tweet.
+   * Side rails use the same column inset so Home / tweet / Profile align.
+   */
+  padding-top: var(--saito-space-md);
+  padding-bottom: var(--saito-space-sm);
+}
+
+.sidebar-left {
+  gap: var(--saito-space-md);
+  padding-inline: var(--saito-space-md) var(--saito-space-sm);
+}
+
+.sidebar-right {
+  /* Same rhythm as `.sidebar` module stack (Profile → Leaderboard → …). */
+  gap: var(--saito-space-lg);
+  padding-inline: var(--saito-space-sm) var(--saito-space-md);
+}
+
+.sidebar-right > .redsquare-profile,
+.sidebar-right > .redsquare-create,
+.sidebar-right > .sidebar {
+  flex-shrink: 0;
+}
+
+@media (max-width: 1200px) {
+  .sidebar-left {
+    padding-inline: var(--saito-space-xs);
+  }
+}
+
+@media (max-width: 820px) {
+  .sidebar-right {
+    display: none;
+  }
+}
+
+@media (max-width: 600px) {
+  /* Out of grid flow — only `.main` should size the mobile column. */
+  .sidebar-left {
+    position: absolute;
+    width: 0;
+    height: 0;
+    overflow: visible;
+    padding: 0;
+    border: none;
+    background: transparent;
+  }
+
+  .sidebar-left > .chat-manager {
+    display: none;
+  }
+
+  .redsquare-mobile-view:not([hidden]) {
+    display: flex;
+    flex: 1 1 auto;
+    flex-direction: column;
+    width: 100%;
+    min-width: 0;
+    min-height: 0;
+    overflow: hidden;
+  }
+}

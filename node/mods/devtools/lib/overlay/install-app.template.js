@@ -1,31 +1,50 @@
 module.exports = InstallAppOverlayTemplate = (app, mod, this_self) => {
+  const name = this_self.name || 'Untitled Module';
+  const description = this_self.description || '';
+  const version = this_self.version || '—';
+  const image = this_self.image || '';
 
-	return `
-  <div class="saito-module-overlay saito-app-install-overlay">
-    <div class="saito-module-header" style="background-image: url(${this_self.image});">
-      <h1 class="saito-module-titlebar">${this_self.name}</h1>
+  const publisherKey = this_self.tx?.from?.[0]?.publicKey;
+  const publisherHtml = publisherKey
+    ? `<span class="value publisher">${publisherKey}</span>`
+    : `<em class="value unknown">unknown</em>`;
+
+  const mediaHtml = image
+    ? `<img class="preview" src="${image}" alt="" />`
+    : '';
+
+  const descriptionHtml = description
+    ? `<p class="description">${description}</p>`
+    : '';
+
+  return `
+  <div class="saito-overlay-form saito-app-install-overlay">
+    <div class="saito-overlay-form-header">
+      <h2 class="saito-overlay-form-header-title">${name}</h2>
     </div>
 
-      <div class="saito-module-details">
-        <div class="detail-key">Version</div>
-        <div class="detail-value">${this_self.version}</div>
-
-        <div class="detail-key">Publisher</div>
-        <div class="detail-value" id="publisher">
-          <div>${this_self.publisher}</div>
-        </div>
-
-        <div class="detail-key">Categories</div>
-        <div class="detail-value">${this_self.categories}</div>
-
-        <div class="detail-key">Description</div>
-        <div class="detail-value">${this_self.description}</div>
+    <div class="body">
+      <div class="content">
+        ${mediaHtml}
+        ${descriptionHtml}
       </div>
 
-      <button type="submit" class="withdraw-submit saito-button-primary fat saito-overlay-form-submit" id="saito-app-install-btn">Install</button>
+      <div class="footer">
+        <div class="meta">
+          <div class="field">
+            <span class="label">Version</span>
+            <span class="value">${version}</span>
+          </div>
+          <div class="field">
+            <span class="label">Publisher</span>
+            ${publisherHtml}
+          </div>
+        </div>
+        <div class="saito-button-row">
+          <button type="button" class="saito-button-primary" id="saito-app-install-btn">Install</button>
+        </div>
+      </div>
     </div>
-
-
-    
+  </div>
   `;
 };

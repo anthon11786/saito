@@ -1,5 +1,5 @@
 const html2canvas = require('html2canvas');
-const VideoBox = require('../saito-videobox/video-box');
+const SaitoVideoBox = require('../saito-videobox/video-box');
 
 class StreamCapturer {
   constructor(app, mod, logo) {
@@ -981,10 +981,6 @@ class StreamCapturer {
     }
   }
 
-  emitUpdatedCombinedStream() {
-    this.app.connection.emit('screenrecord-update-stream', this.combinedStream);
-  }
-
   async getOrCreateVideoBox(publicKey) {
     if (!this.videoBox) {
       const streams = this.app.modules.getRespondTos('media-request');
@@ -994,9 +990,9 @@ class StreamCapturer {
         video: true
       });
       let stream_id = `stream_${publicKey}`;
-      this.videoBox = new VideoBox(this.app, this, publicKey);
+      this.videoBox = new SaitoVideoBox(this.app, this, publicKey);
       this.videoBox.render(this.videoBoxStream);
-      let videoElement = document.querySelector('.video-box-container-large');
+      let videoElement = document.querySelector('.saito-videobox');
       if (videoElement) {
         videoElement.style.position = 'absolute';
         videoElement.style.top = '100px';

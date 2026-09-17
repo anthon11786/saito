@@ -1,0 +1,13 @@
+/*
+ * explorer-transaction-teaser.css
+ *
+ * Transaction teaser component layout.
+ */
+
+.transaction-teaser .explorer-heading {
+  font-size: var(--explorer-text-sm);
+  font-weight: var(--explorer-font-medium);
+  color: var(--explorer-muted-foreground);
+  letter-spacing: var(--explorer-tracking-wide);
+  text-transform: uppercase;
+}

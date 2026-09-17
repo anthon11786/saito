@@ -1,17 +1,19 @@
 module.exports = (app, mod, league) => {
-	let game = league.game.toLowerCase();
+  let game = String(league.game || '')
+    .toLowerCase()
+    .replace(/[^a-z0-9_-]/g, '');
 
-	let name = app.keychain.returnIdentifierByPublicKey(mod.publicKey, true);
-	if (name == mod.publicKey) {
-		name = 'Anonymous Player';
-	}
+  let name = app.keychain.returnIdentifierByPublicKey(mod.publicKey, true);
+  if (name == mod.publicKey) {
+    name = 'Anonymous Player';
+  }
 
-	let html = `
+  let html = `
 	   <div class="league-join-overlay-box">
         <img src="/${game}/img/arcade/arcade.jpg" />
 	`;
 
-	/*let html = `
+  /*let html = `
      <div class="league-join-overlay-box">
             <div class="join-overlay-header">
           <div class="game-image" style="background-image: url('/${game}/img/arcade/arcade.jpg')"></div>
@@ -26,10 +28,10 @@ module.exports = (app, mod, league) => {
         `;
   */
 
-	if (league.rank >= 0) {
-		return (
-			html +
-			`
+  if (league.rank >= 0) {
+    return (
+      html +
+      `
 	        <div class="title-box">
 		    	<div class="title">League Joined</div>
 			</div>
@@ -42,23 +44,23 @@ module.exports = (app, mod, league) => {
 			</div>
 	    </div>
 	   `
-		);
-	} else {
-		html += `
+    );
+  } else {
+    html += `
 		    <div class="title-box">
-		    	<div class="title">${league.name}</div>
+		    	<div class="title">${app.browser.escapeHTML(String(league.name ?? ''))}</div>
 			</div>
 			<div class="league-join-info">
-				<p>Click below to join this ${league.game} league as <span class="address">"${name}"</span>. If you already have an account, please login before joining.</p>
+				<p>Click below to join this ${app.browser.escapeHTML(String(league.game ?? ''))} league as <span class="address">"${app.browser.escapeHTML(String(name ?? ''))}"</span>. If you already have an account, please login before joining.</p>
 			</div>
 	  	  	<div class="league-join-controls">
 				<div id="login" class="saito-anchor">or login to account</div>
-	        	<button type="button" class="saito-button-primary fat" id="league-join-btn" data-id="${league.id}">JOIN LEAGUE</button>    
+	        	<button type="button" class="saito-button-primary fat" id="league-join-btn" data-id="${app.browser.escapeHTML(String(league.id ?? ''))}">JOIN LEAGUE</button>    
 	      	</div>
 	    </div>
 
 	   `;
-	}
+  }
 
-	return html;
+  return html;
 };

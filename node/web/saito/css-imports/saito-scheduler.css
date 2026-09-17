@@ -1,27 +1,55 @@
-.saito-scheduler {
-  min-width: 50rem;
-  background-color: #fff;
-  border-radius: 1rem;
-  padding: 3rem;
+/* Shared schedule wizard + calendar event-link — layout shell only.
+   Inputs/selects/textareas inherit saito-form-elements. */
+
+.saito-schedule-wizard {
+  display: flex;
+  flex-direction: column;
+  gap: var(--saito-space-md);
+  width: min(550px, 98vw);
+  padding: var(--saito-space-xl) var(--saito-space-xxl);
+  box-sizing: border-box;
+  color: var(--saito-foreground);
 }
 
-input#schedule-datetime-input,
-.saito-scheduler-natural-time {
-  width: 100%;
-  border: none;
-  border-bottom: 1px solid var(--border-color-general-dividers);
-  border-radius: 0;
-  height: 3rem;
-  line-height: 3rem;
+.saito-schedule-wizard h2 {
+  margin: 0;
+  font-size: 2rem;
 }
 
-/*  Responsive */
+.saito-calendar-event-link {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--saito-space-md);
+  padding: var(--saito-space-xl) var(--saito-space-lg);
+  box-sizing: border-box;
+}
 
-@media screen and (max-width: 503px) {
-  .saito-scheduler {
-    min-width: auto;
+.saito-calendar-event-link-body {
+  width: min(550px, 98vw);
+  padding: var(--saito-space-xxl);
+  box-sizing: border-box;
+  border-radius: var(--saito-radius);
+  border: 1px solid var(--saito-border);
+}
+
+.saito-calendar-event-link-body h2 {
+  margin: 0 0 var(--saito-space-lg);
+}
+
+.call-details {
+  margin-bottom: var(--saito-space-lg);
+}
+
+.call-details p {
+  margin: var(--saito-space-sm) 0;
+}
+
+@media screen and (max-width: 600px) {
+  .saito-schedule-wizard,
+  .saito-calendar-event-link-body {
+    width: 100%;
+    padding: var(--saito-space-lg);
   }
-}
-
-@media screen and (max-width: 396px) {
 }

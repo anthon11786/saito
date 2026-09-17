@@ -7,13 +7,16 @@ import Blockchain from "./blockchain";
 import Hop from "./hop";
 
 export default class Factory {
-  constructor() { }
+  constructor() {}
 
   public createBlock(data?: any): Block {
     return new Block(data);
   }
 
   public createTransaction<T extends Transaction>(data?: any): Transaction {
+    if (data instanceof Transaction) {
+      return data;
+    }
     return new Transaction(data);
   }
 

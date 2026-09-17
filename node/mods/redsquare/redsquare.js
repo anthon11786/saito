@@ -1,49 +1,18 @@
-const saito = require('./../../lib/saito/saito');
 const ModTemplate = require('../../lib/templates/modtemplate');
 const SaitoHeader = require('../../lib/saito/ui/saito-header/saito-header');
-const SaitoCamera = require('../../lib/saito/ui/saito-camera/saito-camera');
-const SaitoMain = require('./lib/main');
-const RedSquareMenu = require('./lib/menu');
-const TweetMenu = require('./lib/tweet-menu');
-const Tweet = require('./lib/tweet');
-const redsquareHome = require('./index');
-const Post = require('./lib/post');
 const Transaction = require('../../lib/saito/transaction').default;
-const PeerService = require('saito-js/lib/peer_service').default;
-const SaitoOverlay = require('./../../lib/saito/ui/saito-overlay/saito-overlay');
-const SaitoPost = require('./../../lib/saito/ui/saito-post/saito-post');
-const AppSettings = require('./lib/settings');
-
-////////////////////////////////////////////
-//
-// RedSquare depends on the Archive module for TX storage. This allows the
-// module to fetch tweets from multiple machines using a consistent API,
-// the loadTransactions() function.
-//
-// Transactions are fetched and submitted to the addTweet() function which
-// creates a tweet /lib/tweet.js which is responsible for formatting and
-// displaying itself as and when requested.
-//
-// On initial load the module fetches from localhost. Whenever peers that
-// support Archives are added, they are added to a list of peers from
-// which tweets can be requested.
-//
-/**
- * As of 11/20/2025, RedSquare works thusly:
- *
- * Servers feed a set a tweets in the index.html
- * Browsers generate those and requests tweets from each peer it establishes.
- *
- * Server maintains a list of tweets in memory.
- * As browsers scroll down, they send a peerRequest to RedSquare server for the next ten tweets
- *
- * Server hits Archive to load older tweets into memory as needed
- *
- * Refreshing (checking for new tweets) is a remote (only) Archive fetch
- *
- *
- */
-///////////////////////////////////////////
+const Main = require('./lib/main');
+const Manager = require('./lib/manager');
+const Tweet = require('./lib/tweet');
+const Tweets = require('./lib/tweets');
+const Notifications = require('./lib/notifications');
+const RedSquareApi = require('./lib/redsquare-api');
+const ComposeOverlay = require('./lib/ui/overlays/compose');
+const TweetMenu = require('./lib/ui/overlays/tweet-menu');
+const SettingsOverlay = require('./lib/ui/overlays/settings');
+const Moderate = require('./lib/ui/moderate');
+const SplashTemplate = require('./lib/splash.template');
+const index = require('./index');
 
 class RedSquare extends ModTemplate {
   constructor(app) {
@@ -55,2541 +24,342 @@ class RedSquare extends ModTemplate {
     this.description = 'Open Source Twitter-clone for the Saito Network';
     this.categories = 'Social Entertainment';
     this.icon_fa = 'fas fa-square-full';
-    this.dependencies = ['Archive', 'Registry'];
-
-    this.debug = false;
-
-    this.tweets = []; // time sorted master list of tweets
-    this.cached_tweets = []; // serialized-for-web version of curated_tweets
-    this.last_cache = 0; // to prevent updating cache too frequently
-
-    this.tweets_sigs_hmap = {};
-    this.special_threads_hmap = {};
-    this.unknown_children = [];
-    this.orphan_edits = [];
-
-    this.blogs = [];
-
-    this.peers = [];
-    this.keylist = {};
-
-    this.tweet_count = 0;
-    this.liked_tweets = [];
-    this.retweeted_tweets = [];
-    this.replied_tweets = [];
-    this.hidden_tweets = [];
-
-    this.notifications = [];
-    this.notifications_sigs_hmap = {};
-
-    this.jedi_council = new Map();
 
     //
-    // controls whether non-curated tweets will render
+    // enable shortlinks
     //
-    this.curated = !this.debug;
+    this.shortlinks_enabled = 1;
 
     this.possibleHome = 1;
-
     this.use_floating_plus = 1;
-
-    //
-    // is this a notification?
-    //
-    this.notifications_earliest_tweet_ts = new Date().getTime();
-    this.notifications_earliest_like_ts = new Date().getTime();
-    this.notifications_last_viewed_ts = 0;
-    this.notifications_number_unviewed = 0;
-
-    this.tweets_earliest_ts = new Date().getTime();
 
     this.allowed_upload_types = ['image/png', 'image/jpg', 'image/jpeg', 'image/gif', 'image/webp'];
 
-    this.styles = ['/redsquare/style.css'];
-    this.postScripts = ['/saito/lib/emoji-picker/emoji-picker.js'];
+    //
+    // tweet data structures
+    //
+    this.tweets = {};
+    this.tweets_parents = {};
+    this.tweets_children = {};
+    this.tweets_timeline = [];
+    this.tweets_orphans = {};
+    this.tweets_loading = {};
+    this.profile_tweets = {};
+    this.tweet_archive_saves = {};
+    this.like_archive_saves = {};
+    this.retweet_archive_saves = {};
+    this.like_target_updates = {};
+    this.tweets_earliest_ts = new Date().getTime();
+    this.tweets_latest_ts = 0;
 
-    this.enable_profile_edits = true;
+    //
+    // notifications data structures
+    //
+    this.notifications = {};
+    this.notifications_timeline = [];
+    this.notifications_aggregate = {};
+    this.notifications_unread_count = 0;
+    this.notifications_last_viewed_ts = 0;
+    this.notifications_earliest_like_ts = new Date().getTime();
+    this.notifications_earliest_retweet_ts = new Date().getTime();
+    this.notifications_latest_ts = 0;
+    this.notifications_contact_earliest_ts = {};
+    this.notifications_contact_latest_ts = {};
 
     //
     // This is the default Open Graph Card for Redsquare
     // If we have a link to a specific tweet, we will use a different object to populate the
     // generated html in the webserver
     //
-    this.social = {
+    this.social = this.buildSocial({
       twitter: '@SaitoOfficial',
       title: '🟥 Saito RedSquare - Web3 Social Media',
-      url: 'https://saito.io/redsquare/',
+      url: '/redsquare/',
       description: 'Peer to peer Web3 social media platform',
-      image: 'https://saito.tech/wp-content/uploads/2022/04/saito_card.png' //square image with "Saito" below logo
-      //image: "https://saito.tech/wp-content/uploads/2022/04/saito_card_horizontal.png",
-    };
-
-    this.app.connection.on('saito-render-complete', () => {
-      this.app.connection.emit(
-        'redsquare-update-notifications',
-        this.notifications_number_unviewed
-      );
+      image: 'https://saito.tech/wp-content/uploads/2022/04/saito_card.png'
     });
 
-    this.app.connection.on('redsquare-new-post', (msg) => {
-      let post = new Post(this.app, this);
-      post.render();
-    });
+    this.peers = [];
 
-    this.app.connection.on('redsquare-post-tweet', (data, keys) => {
-      this.sendTweetTransaction(this.app, this, data, keys);
-    });
+    //
+    // UI components
+    //
+    this.header = null;
+    this.main = null;
+    this.profile = null;
+    this.manager = null;
+    this.compose_overlay = new ComposeOverlay(app, this);
+    this.redsquare_api = new RedSquareApi(app, this);
+    this.tweet_menu = new TweetMenu(app, this);
+    this.settings_overlay = new SettingsOverlay(app, this);
+    this.moderate = new Moderate(app, this);
+    this.moderator_mode = false;
 
-    this.app.connection.on('redsquare-home-render-request', () => {
-      if (this.browser_active && this.orphan_edits.length > 0) {
-        let orphans = this.orphan_edits;
-        this.orphan_edits = [];
-        for (let i = 0; i < orphans.length; i++) {
-          this.editTweet(orphans[i].tweet_id, orphans[i].tx, orphans[i].source);
-        }
-        console.debug(
-          `RS.home-render-request ${orphans.length - this.orphan_edits.length} orphaned edits processed!`
-        );
-      }
-    });
+    this.curated = true;
+    this.show_splash = true;
+    this.poll_block_interval = 5;
+    this.blocks_since_poll = 0;
 
-    return this;
+    // Enables banner / description editing via Profile-module events.
+    this.enable_profile_edits = true;
+
+    this.styles = ['/saito/saito.css', '/redsquare/style.css'];
+    this.postScripts = ['/saito/lib/emoji-picker/emoji-picker.js'];
   }
 
   returnServices() {
     let services = [];
+
     if (!this.app.BROWSER || this.offerService) {
       services.push(
         this.app.network.createPeerService(null, 'redsquare', 'RedSquare Tweet Archive')
       );
     }
+
     return services;
   }
 
-  /////////////////////////////////
-  // inter-module communications //
-  /////////////////////////////////
-  respondTo(type = '', obj) {
-    let this_mod = this;
-
-    if (type === 'user-menu') {
-      return {
-        text: `${
-          obj?.publicKey && obj.publicKey === this.publicKey ? 'My' : 'View'
-        } RedSquare Profile`,
-        icon: 'fa fa-user',
-        callback: function (app, publicKey) {
-          if (this_mod?.menu) {
-            this_mod.menu.openProfile(publicKey);
-          } else {
-            navigateWindow(`/redsquare/?user_id=${publicKey}`);
-          }
-        }
-      };
-    }
-
-    if (type === 'saito-header') {
-      let x = [];
-      if (!this.browser_active) {
-        x.push({
-          text: 'RedSquare',
-          icon: 'fa-solid fa-square',
-          rank: 20,
-          type: 'navigation',
-          callback: function (app, id) {
-            navigateWindow('/redsquare');
-          },
-          event: function (id) {
-            this_mod.app.connection.on('redsquare-update-notifications', (unread) => {
-              this_mod.app.browser.addNotificationToId(unread, id);
-              this_mod.app.connection.emit('saito-header-notification', 'redsquare', unread);
-            });
-          }
-        });
-      } else {
-        if (this.app.browser.isMobileBrowser() || window.innerWidth < 600) {
-          x.push({
-            text: 'RedSquare Home',
-            icon: 'fa-solid fa-house',
-            rank: 21,
-            type: 'appspace',
-            callback: function (app, id) {
-              document.querySelector('.redsquare-menu-home').click();
-            }
-          });
-          x.push({
-            text: 'Notifications',
-            icon: 'fas fa-bell',
-            rank: 23,
-            type: 'appspace',
-            callback: function (app, id) {
-              document.querySelector('.redsquare-menu-notifications').click();
-            },
-            event: function (id) {
-              this_mod.app.connection.on('redsquare-update-notifications', (unread) => {
-                this_mod.app.browser.addNotificationToId(unread, id);
-                this_mod.app.connection.emit('saito-header-notification', 'redsquare', unread);
-              });
-            }
-          });
-          x.push({
-            text: 'Profile',
-            icon: 'fas fa-user',
-            rank: 26,
-            type: 'appspace',
-            callback: function (app, id) {
-              document.querySelector('.redsquare-menu-profile').click();
-            }
-          });
-        }
-      }
-
-      return x;
-    }
-
-    if (type === 'saito-floating-menu') {
-      let x = [];
-      x.push({
-        text: 'Tweet',
-        icon: 'fa-solid fa-pen',
-        is_active: this.browser_active,
-        disallowed_mods: ['arcade'],
-        rank: 10,
-        callback: function (app, id) {
-          let post = new Post(app, this_mod);
-          post.render();
-        }
-      });
-
-      x.push({
-        text: 'Tweet Camera',
-        icon: 'fas fa-camera',
-        is_active: this.browser_active,
-        disallowed_mods: ['arcade'],
-        rank: 30,
-        callback: function (app, id) {
-          let post = new Post(app, this_mod);
-          let camera = new SaitoCamera(app, this_mod, (img) => {
-            post.render();
-            post.addImg(img);
-          });
-          camera.render();
-        }
-      });
-
-      x.push({
-        text: 'Tweet Image',
-        icon: 'fas fa-image',
-        is_active: this.browser_active,
-        disallowed_mods: ['arcade'],
-        rank: 20,
-        callback: function (app, id) {
-          let post = new Post(app, this_mod);
-          post.render();
-          post.triggerClick('#hidden_file_element_tweet-overlay');
-        }
-      });
-      return x;
-    }
-
-    if (type == 'game-menu') {
-      //this.attachStyleSheets();
-      //super.render(this.app, this);
-      return {
-        //id: 'game-share',
-        //text: 'Share',
-        submenus: [
-          {
-            parent: 'game-share',
-            text: 'Tweet',
-            id: 'game-tweet',
-            class: 'game-tweet',
-            callback: function (app, game_mod) {
-              game_mod.menu.hideSubMenus();
-              let post = new Post(app, this_mod);
-              post.render();
-            }
-          }
-        ]
-      };
-    }
-
-    if (type === 'post-content') {
-      return {
-        icon: this_mod.icon_fa,
-        text: 'Continue with post to RedSquare',
-        callback: async (content, image) => {
-          this_mod.app.connection.emit('continue-with-redsquare');
-        }
-      };
-    }
-
-    //
-    // curation / moderation functions
-    //
-    // all tweets received are passed through this function, which indicates whether they
-    // pass the curation function. -1 = fail / 0 = unsure / 1 = pass
-    //
-    if (type === 'saito-moderation-app') {
-      return {
-        //
-        // default curation logic...
-        //
-        filter_func: (mod = null, tx = null) => {
-          if (tx == null || mod == null || !tx?.from) {
-            return 0;
-          }
-
-          if (mod.name !== this.name) {
-            return 0;
-          }
-
-          if (this.hidden_tweets.includes(tx.signature)) {
-            console.log('HIDDEN TWEET!!!!!');
-            return -1;
-          }
-
-          return 0;
-        }
-      };
-    }
-
-    return null;
-  }
-
-  ////////////////////
-  // initialization //
-  ////////////////////
-  //
-  // this function runs whenever the browser or application is loaded. note that
-  // at this point we probably do not have any network connections to any peers
-  // so most of the work is pre-network init.
-  //
   async initialize(app) {
-    //
-    // database setup etc.
-    //
     await super.initialize(app);
 
-    if (this.app.BROWSER && !this.browser_active) {
-      this.debug = false;
-    }
-
-    //
-    // ensure easy-access in non-awaitable
-    //
-    this.publicKey = await app.wallet.getPublicKey();
-
-    //
-    // fetch content from options file
-    //
-    this.loadOptions();
-
-    if (!app.BROWSER) {
-      //////////////////////////////////
-      // Special processing for servers
-      //////////////////////////////////
-
-      let pr = this.addPeer('localhost', 100);
-
-      this.loadTweets(
-        'earlier',
-        (tx_count) => {
-          // Use curation to bootstrap jedi council
-          for (let tweet of this.tweets) {
-            if (tweet.curated == 1) {
-              this.addToCouncil(tweet.tx.from[0].publicKey);
-            }
-          }
-
-          // Create cache to serve with index.js
-          this.cacheRecentTweets();
-          console.debug(`RS -- Preloaded ${tx_count} transactions ~~ ${this.tweets.length} tweets`);
-        },
-        pr
-      );
-
-      ///
-      // We just want the metadata from the archive, lol
-      ///
-      /*let archive_mod = this.app.modules.returnModule('Archive');
-      if (archive_mod) {
-        archive_mod.loadTransactionsWithCallback({ field1: 'Blog', limit: 50 }, (res) => {
-          for (let i = 0; i < res.length; i++) {
-            this.blogs.push({
-              ts: res[i].updated_at,
-              publicKey: res[i].field2,
-              tx_id: res[i].sig
-            });
-          }
-
-          this.addBlogPseudoTweets();
-        });
-      }*/
-
-      return;
-    }
-
-    //
-    // add myself as peer...
-    //
-    this.addPeer('localhost');
-
-    //
-    // check tweets in pending txs
-    //
-    try {
-      let user_id = this.app.browser.returnURLParameter('user_id');
-      let tweet_id = this.app.browser.returnURLParameter('tweet_id');
-      if (!tweet_id || !user_id) {
-        let pending = await app.wallet.getPendingTransactions();
-        for (let i = 0; i < pending.length; i++) {
-          let tx = pending[i];
-          let txmsg = tx.returnMessage();
-          if (txmsg && txmsg.module == this.name) {
-            if (txmsg.request === 'create tweet') {
-              this.addTweet(tx, { type: 'pending_tx', node: 'wallet' });
-            }
-          }
-        }
-      }
-    } catch (err) {
-      // console.error('RS.initialize: Error while checking pending txs: ', err);
-    }
-  }
-
-  ////////////
-  // render //
-  ////////////
-  //
-  // browsers run this to render the page. this also runs before the network is
-  // likely functional, so it focuses on writing the components to the screen rather
-  // that fetching content.
-  //
-  // content is loaded from the local cache, and then the "loading new tweets" indicator
-  // is enabled, and when onPeerServiceUp() triggers we run a postcache-render-request
-  // to update the page if it is in a state where that is permitted.
-  //
-  async render() {
-    //
-    // browsers only!
-    //
-    if (!this.app.BROWSER || !this.browser_active) {
-      return;
-    }
-
-    // Create here so only in browser_active browsers...
-    this.sPost = new SaitoPost(this.app, this);
-
-    if (window?.tweets?.length) {
-      for (let z = 0; z < window.tweets.length; z++) {
-        let newtx = new Transaction();
-        newtx.deserialize_from_web(this.app, window.tweets[z]);
-        this.addTweet(newtx, { type: 'server-cache', node: 'server' } /*, 1*/);
-      }
-    }
-
-    //
-    // create and render components
-    //
-    if (this.main == null) {
-      this.main = new SaitoMain(this.app, this);
-      this.header = new SaitoHeader(this.app, this);
-      await this.header.initialize(this.app);
-      this.menu = new RedSquareMenu(this.app, this, '.saito-sidebar.left');
-      this.tweetMenu = new TweetMenu(this.app, this);
-
-      this.addComponent(this.header);
-      this.addComponent(this.main);
-      this.addComponent(this.menu);
-
-      //
-      // chat manager goes in left-sidebar
-      //
-      for (const mod of this.app.modules.returnModulesRespondingTo('chat-manager')) {
-        let cm = mod.respondTo('chat-manager');
-        cm.container = '.saito-sidebar.left';
-        cm.render_manager_to_screen = 1;
-        this.addComponent(cm);
-      }
-    }
-
-    await super.render();
-
-    //
-    // render right-sidebar components
-    //
-    this.app.modules.renderInto('.redsquare-sidebar');
-
-    if (!this.app.modules.returnModule('Archive')) {
-      salert('RedSquare will not work without Archive installed!');
-    }
-  }
-
-  /////////////////////
-  // peer management //
-  /////////////////////
-  addPeer(peer, tweet_limit = 10) {
-    let publicKey = peer?.publicKey || this.publicKey;
-
-    let peer_idx = -1;
-
-    for (let i = 0; i < this.peers.length; i++) {
-      if (this.peers[i].publicKey === publicKey) {
-        peer_idx = i;
-      }
-    }
-
-    let peer_obj;
-
-    if (peer_idx == -1) {
-      peer_obj = {
-        peer: peer,
-        publicKey: publicKey,
-        tweets_earliest_ts: new Date().getTime(),
-        tweets_latest_ts: 0,
-        tweets_limit: tweet_limit,
+    if (this.publicKey) {
+      this.peers.unshift({
+        peer: 'localhost',
+        publicKey: this.publicKey,
+        tweets_earliest_ts: this.tweets_earliest_ts,
+        tweets_latest_ts: this.tweets_latest_ts,
+        tweets_limit: 10,
         busy: {}
+      });
+    }
+
+    if (app.BROWSER) {
+      this.manager = new Manager(app, this);
+
+      this.app.connection.on('redsquare-new-post', () => {
+        this.compose_overlay?.open();
+      });
+
+      this.app.connection.on('redsquare-post-tweet', async (data, keys = []) => {
+        const tx = await this.createTweetTransaction(data, keys);
+        await tx.sign();
+        await this.app.network.propagateTransaction(tx);
+      });
+
+      const key = this.publicKey || '';
+      this.profile = {
+        publicKey: key,
+        name: key
+          ? this.app.keychain.returnUsername(key) || `Anon-${key.slice(0, 6)}`
+          : 'Anonymous',
+        handle: '',
+        bio: '',
+        avatar: key
+          ? this.app.keychain.returnIdenticon(key) || '/saito/img/dreamscape.png'
+          : '/saito/img/dreamscape.png',
+        banner: '',
+        can_edit: Boolean(this.enable_profile_edits && key)
       };
-      this.peers.push(peer_obj);
-    } else {
-      this.peers[peer_idx].peer = peer;
-      peer_obj = this.peers[peer_idx];
-      // console.log('RS.addPeer: peer refreshed -- ', peer_obj);
-      return peer_obj;
-    }
 
-    // Only set interval on new peers, (so we aren't setting multiple on network instability)
-    if (this.browser_active) {
-      this.loadTweets(
-        'later',
-        (tx_count) => {
-          this.app.connection.emit('redsquare-home-postcache-render-request', tx_count);
-        },
-        peer_obj
-      );
+      this.loadOptions();
 
-      //
-      // auto-poll for new tweets, on 5 minute interval
-      //
-      if (peer.publicKey !== this.publicKey) {
-        setInterval(() => {
-          this.loadTweets(
-            'later',
-            (tx_count) => {
-              this.app.connection.emit('redsquare-home-postcache-render-request', tx_count);
-            },
-            peer_obj
-          );
-        }, 300000);
-      }
-    }
+      this.app.connection.on('modtools-lists-updated', () => {
+        this.applyModerationUpdates();
+      });
 
-    return peer_obj;
-  }
+      this.app.connection.on('modtools-on-server-whitelist', () => {
+        this.enterModeratorMode();
+      });
 
-  ////////////////////////
-  // when peer connects //
-  ////////////////////////
-  async onPeerServiceUp(app, peer, service = {}) {
-    //
-    // avoid network overhead if in other apps
-    //
-    if (!this.browser_active) {
-      return;
-    }
+      this.app.connection.on('saito-notification', (data = {}) => {
+        const id = data.id != null ? String(data.id) : '';
 
-    //
-    // redsquare -- load tweets
-    //
-    if (service.service === 'redsquare') {
-      //
-      // add service peer, query and set up interval to poll every 5 minutes
-      //
+        if (id !== 'store-moderation') {
+          return;
+        }
 
-      this.addPeer(peer);
+        const pending = Math.max(0, Number(data.pending) || 0);
+        const signature = 'store-moderation';
 
-      this.archive_connected = true;
-
-      if (this.browser_active) {
-        //siteMessage('Syncing Redsquare...', 2000);
-        this.main.render();
-      }
-    }
-  }
-
-  ///////////////////////
-  // network functions //
-  ///////////////////////
-  async handlePeerTransaction(app, tx = null, peer, mycallback) {
-    if (tx == null) {
-      return 0;
-    }
-
-    let txmsg = tx.returnMessage();
-
-    if (!txmsg.request || !mycallback) {
-      return 0;
-    }
-
-    let txs = [];
-
-    if (txmsg.request === 'load thread') {
-      let thread_id = txmsg.data.sig;
-      let by_thread = false;
-      console.log('========> LOAD THREAD REQUEST ===========');
-      let tweet = this.returnTweet(thread_id);
-
-      if (tweet) {
-        if (tweet.thread_id == thread_id) {
-          if (tweet.isLoaded()) {
-            return mycallback(this.packTweetThread(tweet));
-          }
-          by_thread = true;
+        if (pending <= 0) {
+          this.removeNotification(signature);
+          this.removeTweet(signature);
         } else {
-          console.log('========> Provided sig not the THREAD ROOT =============');
-          thread_id = tweet.thread_id;
-          let root_tweet = this.returnTweet(tweet.thread_id);
-          if (root_tweet) {
-            if (root_tweet.isLoaded()) {
-              return mycallback(this.packTweetThread(root_tweet));
+          const text =
+            data.text != null && String(data.text).trim() !== ''
+              ? String(data.text)
+              : 'There are new listings on the Store to moderate.';
+          const href =
+            data.href != null && String(data.href).trim() !== ''
+              ? String(data.href).trim()
+              : '/store/moderate';
+          const storeMod = this.app.modules.returnModule('Store');
+          const actorPublicKey = storeMod?.store_public_key || storeMod?.publicKey || '';
+          const existing = this.getTweet(signature);
+          const timestamp = Number(existing?.created_at) || Date.now();
+          const msg = {
+            module: this.name,
+            request: 'create tweet',
+            data: {
+              text,
+              ephemeral: true,
+              href
             }
-            by_thread = true;
-          }
-        }
-      }
-
-      console.log('========> HITTING ARCHIVES! ===========');
-      if (by_thread) {
-        this.app.storage.loadTransactions(
-          {
-            field1: 'RedSquare',
-            field5: thread_id,
-            flagged: 0,
-            limit: 100
-          },
-          (txs) => {
-            if (txs.length > 0) {
-              console.log('========> ARCHIVES FOUND THREAD =====');
-              mycallback(txs);
+          };
+          const tweet = this.addTweet({
+            signature,
+            timestamp,
+            from: actorPublicKey ? [{ publicKey: actorPublicKey }] : [],
+            msg,
+            returnMessage() {
+              return msg;
             }
-          },
-          'localhost',
-          0
-        );
-      } else {
-        this.app.storage.loadTransactions(
-          { sig: thread_id, field1: 'RedSquare' },
-          (txs) => {
-            if (txs.length > 0) {
-              txs[0].decryptMessage(this.app);
-              let archive_returned_tweet = new Tweet(this.app, this, txs[0]);
-              this.app.storage.loadTransactions(
-                {
-                  field1: 'RedSquare',
-                  field5: archive_returned_tweet.thread_id,
-                  flagged: 0,
-                  limit: 100
-                },
-                (txs) => {
-                  if (txs.length > 0) {
-                    console.log('========> ARCHIVES FOUND THREAD AFTER TWEET LOOKUP =====');
-                    mycallback(txs);
-                  }
-                },
-                'localhost',
-                0
-              );
-            }
-          },
-          'localhost'
-        );
-      }
-      return 1;
-    }
+          });
 
-    //////////////////////////////////////////
-    // Redsquare server attempts to respond based on its memory, with fallback to DB operation
-    //////////////////////////////////////////
-    if (txmsg.request === 'load tweets') {
-      console.log('Peer Request to load tweets....');
-      if (txmsg.data.created_earlier_than != undefined) {
-        let need_to_check_archive = true;
-
-        for (let i = 0; i < this.tweets.length; i++) {
-          if (this.tweets[i].created_at < txmsg.data.created_earlier_than) {
-            txs.push(this.tweets[i].tx.serialize_to_web(app));
-            if (txs.length == 10) {
-              need_to_check_archive = false;
-              break;
-            }
-          }
-        }
-
-        if (need_to_check_archive) {
-          console.log('Pulling earlier tweets from archive to give to peer');
-          let last_index = this.tweets.length;
-
-          need_to_check_archive = this.loadTweets(
-            'earlier',
-            (count, peer) => {
-              /*
-            let optjson = JSON.stringify(this.tweets, (key, value) => {
-              if (key == 'app') return 'app';
-              if (key == 'mod') return 'mod';
-              return typeof value === 'bigint' ? value.toString() : value; // return everything else unchanged
+          if (tweet) {
+            this.addNotification({
+              signature,
+              tweet_signature: signature,
+              type: 'store-moderation',
+              actor_publicKey: actorPublicKey,
+              actor_name: 'Store',
+              text,
+              created_at: timestamp
             });
-            console.debug(
-            `\n===\nEstimated RS Cache -- Memory load -- ${this.tweets.length} tweets, ${(optjson.length / 1048576).toFixed(3)}MB\n===\n`
-            );
-            */
-
-              for (let i = last_index; i < this.tweets.length; i++) {
-                txs.push(this.tweets[i].tx.serialize_to_web(app));
-                if (txs.length == 10) {
-                  break;
-                }
-              }
-
-              //
-              // I guess it is possible *not* to hit the full 10 even after pulling 50 txs...
-              //
-              mycallback(txs);
-
-              this.addBlogPseudoTweets();
-            },
-            this.peers[0]
-          );
-        }
-
-        // Call user callback on either the tweets that the server has in memory, or
-        // on the empty [] if the server's local archive taps out of results...
-        if (!need_to_check_archive) {
-          return mycallback(txs);
-        }
-
-        return 1;
-      }
-    }
-
-    return super.handlePeerTransaction(app, tx, peer, mycallback);
-  }
-
-  //
-  // messages arrive on-chain over the network here
-  //
-  async onConfirmation(blk, tx, conf) {
-    let txmsg = tx.returnMessage();
-
-    if (conf == 0) {
-      if (txmsg.request === 'delete tweet') {
-        await this.receiveDeleteTransaction(blk, tx, conf, this.app);
-        return;
-      }
-      if (txmsg.request === 'edit tweet') {
-        await this.receiveEditTransaction(blk, tx, conf, this.app);
-        return;
-      }
-
-      if (this.app.BROWSER) {
-        this.addNotification(tx);
-      }
-
-      if (txmsg.request === 'create tweet') {
-        await this.receiveTweetTransaction(blk, tx, conf, this.app);
-        this.addTweet(tx, { type: 'on chain', node: blk.id });
-      }
-      if (txmsg.request === 'like tweet') {
-        await this.receiveLikeTransaction(blk, tx, conf, this.app);
-      }
-      if (txmsg.request === 'flag tweet') {
-        await this.receiveFlagTransaction(blk, tx, conf, this.app);
-      }
-      if (txmsg.request === 'retweet') {
-        await this.receiveRetweetTransaction(blk, tx, conf, this.app);
-      }
-    }
-  }
-
-  ///////////////////////////////
-  // content loading functions //
-  ///////////////////////////////
-  //
-  // there are three major functions that are called to fetch more content:
-  //
-  // - loadProfile()
-  // - loadTweets()
-  // - loadNotifications()
-  //
-  // these will trigger calls to all of the peers that have been added and
-  // fetch more content from all of them up until there is no more content
-  // to fetch and display. this content will be fetched and returned in the
-  // form of transactions that can be fed to addTweets()
-  //
-
-  loadTweets(created_at = 'earlier', mycallback, peer = null) {
-    //
-    // Instead of just passing the txs to the callback, we count how many of these txs
-    // are new to us so we can have a better UX
-    //
-    let peer_count = 0;
-
-    for (let i = 0; i < this.peers.length; i++) {
-      if (!peer || peer.publicKey == this.peers[i].publicKey) {
-        if (
-          (created_at == 'earlier' &&
-            this.peers[i].tweets_earliest_ts >= this.tweets_earliest_ts &&
-            this.peers[i].tweets_earliest_ts > 0) ||
-          (created_at == 'later' && (this.peers[i].publicKey !== this.publicKey || peer))
-        ) {
-          peer_count++;
-
-          if (this.peers[i].busy[created_at]) {
-            this.peers[i].busy[created_at].push(mycallback);
-            console.warn('RS.loadTweets already waiting on a response from this peer!');
-            continue;
-          }
-
-          this.peers[i].busy[created_at] = [mycallback];
-
-          //
-          // Use the "fast load" method for scrolling DOWN the feed
-          //
-          if (created_at == 'earlier' && this.peers[i].publicKey !== this.publicKey) {
-            let obj = {
-              created_earlier_than: this.peers[i].tweets_earliest_ts
-            };
-
-            this.app.network.sendRequestAsTransaction(
-              'load tweets',
-              obj,
-              (txs) => {
-                for (let t = 0; t < txs.length; t++) {
-                  let tx = new Transaction();
-                  tx.deserialize_from_web(this.app, txs[t]);
-                  txs[t] = tx;
-                }
-
-                let count = this.processTweetsFromPeer(this.peers[i], txs);
-
-                if (txs.length == 0) {
-                  console.debug('RS: Mark remote peer as tapped out...');
-                  this.peers[i].tweets_earliest_ts = 0;
-                  //this.tweets_earliest_ts = 0;
-                }
-
-                console.debug(
-                  `RS.loadTweets remote [${created_at}] returned ${count}. New feed length: ${this.tweets.length}`
-                );
-
-                for (let cb of this.peers[i].busy[created_at]) {
-                  if (typeof cb === 'function') {
-                    cb(count, this.peers[i]);
-                  }
-                }
-                this.peers[i].busy[created_at] = null;
-              },
-              this.peers[i].peer.publicKey
-            );
-          } else {
-            console.debug(`RS.loadTweets requesting ${created_at} tweets from archive...`);
-
-            let obj = {
-              field1: 'RedSquare',
-              flagged: 0,
-              //tx_size_less_than: 1330000,
-              limit: this.peers[i].tweets_limit
-            };
-
-            if (created_at == 'earlier') {
-              obj.created_earlier_than = this.peers[i].tweets_earliest_ts;
-            } else if (created_at == 'later') {
-              obj.updated_later_than = this.peers[i].tweets_latest_ts;
-            }
-
-            this.app.storage.loadTransactions(
-              obj,
-              (txs) => {
-                let count = this.processTweetsFromPeer(this.peers[i], txs);
-
-                if (txs.length == 0) {
-                  if (created_at === 'earlier') {
-                    console.debug('RS: Mark peer as tapped out: ' + created_at);
-                    this.peers[i].tweets_earliest_ts = 0;
-                    this.tweets_earliest_ts = 0;
-                  }
-                }
-
-                console.debug(
-                  `RS.loadTweets ${this.peers[i].publicKey == this.publicKey ? 'localhost' : this.peers[i].publicKey.substring(0, 6)} [${created_at}] returned ${count}/${txs.length}. New feed length: ${this.tweets.length}`
-                );
-
-                for (let cb of this.peers[i].busy[created_at]) {
-                  if (typeof cb === 'function') {
-                    cb(count, this.peers[i]);
-                  }
-                }
-                this.peers[i].busy[created_at] = null;
-              },
-              this.peers[i].peer
-            );
-          }
-        }
-      }
-    }
-
-    if (!peer_count) {
-      console.debug(
-        'Ignore load tweets because no peers available: ',
-        JSON.parse(JSON.stringify(this.peers)),
-        created_at,
-        this.tweets_earliest_ts
-      );
-    }
-
-    return peer_count;
-  }
-
-  processTweetsFromPeer(peer, txs) {
-    let count = 0;
-
-    //
-    // sanity-check in case blocked tweets have come through via
-    // saving in local-storage or whitelisting by peers.
-    //
-    if (this.debug) {
-      console.debug(
-        `RS.processTweetsFromPeer: checking ${txs.length} tweet transaction against my current ${this.tweets.length}`
-      );
-    }
-
-    for (let z = 0; z < txs.length; z++) {
-      txs[z].decryptMessage(this.app);
-
-      //////////////////////////////////////////////////
-      // if (this.browser_active) console.log(txs[z].timestamp, txs[z].updated_at);
-      //////////////////////////////////////////////////
-      let created_at = txs[z].timestamp;
-      let updated_at = txs[z].optional?.updated_at || created_at;
-
-      if (created_at < peer.tweets_earliest_ts) {
-        peer.tweets_earliest_ts = created_at;
-
-        this.tweets_earliest_ts = Math.min(this.tweets_earliest_ts, peer.tweets_earliest_ts);
-      }
-      if (updated_at > peer.tweets_latest_ts) {
-        peer.tweets_latest_ts = updated_at;
-      }
-
-      let source = {
-        type: 'archive',
-        node: peer.publicKey || peer
-      };
-
-      if (peer.publicKey == this.publicKey) {
-        source.node = 'localhost';
-      }
-
-      let added = this.addTweet(txs[z], source);
-      let tweet = this.returnTweet(txs[z].signature);
-
-      if (tweet && added > 0) {
-        //
-        // save w. metadata
-        //
-        if (peer.publicKey != this.publicKey) {
-          this.saveTweet(tweet, 0);
-        }
-
-        count += added;
-      }
-    }
-
-    return count;
-  }
-
-  //
-  // We have two types of notifications that are slightly differently indexed, so
-  // we are doing some fancy work to load all the transactions into one big list and then
-  // process it at once. We are only looking at local archive storage because browsers should
-  // be saving the txs that are addressed to them (i.e. notifications), but we can easily expand this
-  // logic to also query remote sources (by changing return_count to the 2x number of peers)
-  //
-  loadNotifications(mycallback = null) {
-    let notifications = [];
-    let return_count = 0;
-
-    //
-    // This is the callback to process the returned tweets,
-    // which we DONT want to just insert into the feed
-    //
-    const middle_callback = () => {
-      let new_notifications = [];
-
-      console.info(
-        `RS.loadNotifications: process ${notifications.length} combined tweet and like notifications`
-      );
-
-      if (notifications.length > 0) {
-        for (let z = 0; z < notifications.length; z++) {
-          notifications[z].decryptMessage(this.app);
-
-          if (this.addNotification(notifications[z])) {
-            new_notifications.push(notifications[z]);
-          }
-        }
-      } else {
-        console.info('RS.loadNotifications: last notification fetch returned nothing');
-        this.notifications_earliest_ts = 0;
-      }
-
-      console.info(
-        `RS.loadNotifications: Appending ${new_notifications.length} new notification notices to the page`
-      );
-
-      if (mycallback) {
-        mycallback(new_notifications);
-      }
-    };
-
-    if (this.notifications_earliest_tweet_ts) {
-      return_count++;
-
-      //if (this.debug) {
-      console.debug(`RS.loadNotifications: query tweet notifications`);
-      // }
-
-      this.app.storage.loadTransactions(
-        {
-          field1: 'RedSquare',
-          field3: this.publicKey,
-          created_earlier_than: this.notifications_earliest_tweet_ts
-        },
-        (txs) => {
-          for (let tx of txs) {
-            if (tx.timestamp < this.notifications_earliest_tweet_ts) {
-              this.notifications_earliest_tweet_ts = tx.timestamp;
-            }
-            notifications.push(tx);
-          }
-
-          //if (this.debug) {
-          console.debug(`RS.loadNotifications: Found ${txs.length} tweets`);
-          //}
-
-          return_count--;
-          if (return_count == 0) {
-            middle_callback();
-          } else {
-            console.debug('Process tweets first!');
-          }
-        },
-        'localhost'
-      );
-    }
-
-    if (this.notifications_earliest_like_ts) {
-      return_count++;
-
-      console.debug(`RS.loadNotifications: query like notifications`);
-
-      //
-      // Okay, so using a special like tag to make profile loading easier
-      // complicates notifications loading... it would be nice if our arbitrary
-      // archive fields weren't completely occupied by module/from/to...
-      // This will need fixing if/when we change the archive schema (13 Nov 2023)
-      //
-      this.app.storage.loadTransactions(
-        {
-          field1: 'RedSquareLike',
-          field3: this.publicKey,
-          created_earlier_than: this.notifications_earliest_like_ts
-        },
-        (txs) => {
-          for (let tx of txs) {
-            if (tx.timestamp < this.notifications_earliest_like_ts) {
-              this.notifications_earliest_like_ts = tx.timestamp;
-            }
-            notifications.push(tx);
-          }
-
-          //if (this.debug) {
-          console.debug(`RS.loadNotifications: Found ${txs.length} likes`);
-          //}
-
-          return_count--;
-          if (return_count == 0) {
-            middle_callback();
-          }
-        },
-        'localhost'
-      );
-    }
-
-    if (!this.notifications_earliest_like_ts && !this.notifications_earliest_tweet_ts) {
-      //
-      // Just return empty array if we don't query the peers again
-      //
-      if (mycallback) {
-        mycallback([]);
-      }
-    }
-  }
-
-  loadTweetThread(thread_id, mycallback = null) {
-    if (!mycallback) {
-      return;
-    }
-
-    siteMessage(`Checking peers for more replies...`, 1000);
-
-    let peer_count = this.peers.length;
-
-    for (let j = 0; j < this.peers.length; j++) {
-      if (this.peers[j].peer !== 'localhost') {
-        this.app.network.sendRequestAsTransaction(
-          'load thread',
-          { sig: thread_id },
-          (txs) => {
-            console.log('Thread tweets loaded: ', txs.length);
-            for (let i = 0; i < txs.length; i++) {
-              let tx = new Transaction();
-              tx.deserialize_from_web(this.app, txs[i]);
-              tx.decryptMessage(this.app);
-
-              this.addTweet(tx, { type: 'tweet_thread', node: this.peers[j].publicKey });
-            }
-
-            peer_count--;
-            if (peer_count == 0) {
-              // Validate reply counts
-              this.validateThread(thread_id);
-
-              // Run callback (to render thread)
-              mycallback(txs);
-            }
-          },
-          this.peers[j].peer.publicKey
-        );
-      } else {
-        peer_count--;
-      }
-    }
-  }
-
-  //
-  // Prioritize looking for the specific tweet
-  // 1) in my tweet list
-  // 2) in my local archive
-  // 3) in my peer archives
-  //  It would be useful if we could convert everything to async and have a return value
-  //  so that we can avoid callback hell when we really want to get that tweet to process something on it
-  //
-  loadTweetWithSig(sig, mycallback = null) {
-    let redsquare_self = this;
-
-    if (mycallback == null) {
-      return;
-    }
-
-    let t = this.returnTweet(sig);
-
-    if (t != null) {
-      mycallback([t.tx]);
-      return;
-    }
-
-    this.app.storage.loadTransactions(
-      { sig, field1: 'RedSquare' },
-      (txs) => {
-        if (txs.length > 0) {
-          for (let z = 0; z < txs.length; z++) {
-            txs[z].decryptMessage(this.app);
-            this.addTweet(txs[z], { type: 'loadTweetWithSig', node: 'localhost' });
-          }
-          mycallback(txs);
-        } else {
-          for (let i = 0; i < this.peers.length; i++) {
-            if (this.peers[i].publicKey !== this.publicKey) {
-              this.app.storage.loadTransactions(
-                { sig, field1: 'RedSquare' },
-                (txs) => {
-                  if (txs.length > 0) {
-                    for (let z = 0; z < txs.length; z++) {
-                      txs[z].decryptMessage(this.app);
-                      this.addTweet(txs[z], {
-                        type: 'loadTweetWithSig',
-                        node: this.peers[i].publicKey
-                      });
-                    }
-                    mycallback(txs);
-                  } else {
-                    console.error(
-                      "Couldn't find tweet with sig: " + sig + ' on local or remote archives'
-                    );
-                  }
-                },
-                this.peers[i].peer
-              );
-            }
-          }
-        }
-      },
-      'localhost'
-    );
-  }
-
-  ///////////////
-  // add tweet //
-  ///////////////
-  //
-  // this creates the tweet and adds it to the internal list that we maintain of
-  // the tweets that holds them in a structured tree (parents hold children, etc.)
-  // while also maintaining a separate list of the notifications, etc. this function
-  // also indexes the tweets as needed in the various hashmaps so they can be
-  // retrieved by returnTweet()
-  //
-  // this does not DISPLAY any tweets, although it makes sure that when they are
-  // added they will render into the TWEET MANAGER component.
-  //
-  // returns 1 if this is a new tweet that can be displayed
-  //
-  addTweet(tx, source = null, override_curation = 0) {
-    //
-    // if this is a like or flag tx, it isn't anything to add to the feed so stop here
-    //
-    let txmsg = tx.returnMessage();
-
-    if (source) {
-      source.ts = new Date().getTime();
-      if (tx.optional) {
-        source.optional = Object.assign({}, tx.optional);
-      }
-    }
-
-    if (
-      txmsg.request === 'like tweet' ||
-      txmsg.request === 'flag tweet' ||
-      txmsg.request === 'retweet'
-    ) {
-      if (this.debug) {
-        console.debug("RS.addTweet -- Don't process " + txmsg.request);
-      }
-      return 0;
-    }
-
-    if (txmsg.request === 'delete tweet' && this.app.BROWSER) {
-      if (this.debug) {
-        console.debug('RS.addTweet -- process ' + txmsg.request);
-      }
-      this.receiveDeleteTransaction(0, tx, 0, this.app);
-      return 0;
-    }
-
-    if (txmsg.request === 'edit tweet') {
-      if (this.debug) {
-        console.debug('RS.addTweet -- process ' + txmsg.request);
-      }
-
-      this.editTweet(txmsg.data.tweet_id, tx, source);
-      return 0;
-    }
-
-    //
-    // we may be attempting to add a tweet that we already have in our hashmap, in
-    // this case we want to load our existing tweet and update the stats for it that
-    // already exist in our memory, such as updated an edited version of the text.
-    // once we have updated the tweet information, we can optionally signal whether
-    // we want to re-render it.
-    //
-    if (this.tweets_sigs_hmap[tx.signature]) {
-      let t = this.returnTweet(tx.signature);
-
-      if (!t) {
-        console.warn('RS.addTweet: tweet in hmap by not returned...');
-        console.debug(txmsg);
-        return 0;
-      }
-
-      if (this.debug) {
-        console.debug(
-          `RS.addTweet: Duplicate! Feed length: (${this.tweets.length}) -- `,
-          t?.text,
-          source // includes stats from the new tx
-        );
-      }
-
-      //
-      // We push this additional source for record keeping
-      //
-      t.sources.push(source);
-
-      if (tx.optional) {
-        let should_rerender = false;
-
-        if (tx.optional.num_replies > t.tx.optional.num_replies) {
-          t.tx.optional.num_replies = tx.optional.num_replies;
-        }
-        if (tx.optional.num_retweets > t.tx.optional.num_retweets) {
-          t.tx.optional.num_retweets = tx.optional.num_retweets;
-          t.tx.optional.retweeters = tx.optional.retweeters;
-          should_rerender = true;
-        }
-        if (tx.optional.num_likes > t.tx.optional.num_likes) {
-          t.tx.optional.num_likes = tx.optional.num_likes;
-        }
-        if (tx.optional.update_tx) {
-          t.tx.optional.update_tx = tx.optional.update_tx;
-          should_rerender = true;
-        }
-        let tx_updated_at = tx.optional.updated_at || tx.timestamp;
-        if (tx_updated_at > t.updated_at) {
-          t.updated_at = Math.max(t.updated_at, tx_updated_at);
-          should_rerender = true;
-          if (tx.optional.link_properties) {
-            t.tx.optional.link_properties = tx.optional.link_properties;
           }
         }
 
-        t.tx.optional.updated_at = tx.optional.updated_at;
-
-        if (tx.optional.curated && !t.curated) {
-          // Update curation value if (1/-1)
-          t.tx.optional.curated = tx.optional.curated;
-          t.curated = tx.optional.curated;
-
-          delete t.curation_check;
-
-          if (tx.optional.curation_check !== 'undefined') {
-            t.tx.optional.curation_check = tx.optional.curation_check;
-          }
-          should_rerender = true;
+        if (this.manager?.mode === 'notifications') {
+          this.manager.render();
         }
+      });
 
-        t.rerenderControls(should_rerender);
+      const store = this.app.modules.returnModule('Store');
 
-        //this.updateSavedTweet(tx.signature);
-      }
-
-      return 0;
-    }
-
-    //
-    // create the tweet
-    //
-    let tweet = new Tweet(this.app, this, tx);
-
-    if (!tweet?.tx) {
-      console.warn('RS.addTweet -- Created a tweet with a null tx');
-      return 0;
-    }
-
-    if (source.type == 'tweet_thread') {
-      console.log('Add thread tweet', tweet.tx.signature, tweet.text);
-    }
-
-    //
-    // This should be the first, primary source
-    //
-    tweet.sources.push(source);
-
-    //
-    // curation: accept the curated parameter if 1, or fallback on algorithmic curation
-    //
-    tweet.curated = override_curation || this.curate(tx);
-    // So we don't lose our curation if rerendering tweet after an archival pull
-    tweet.tx.optional.curated = tweet.curated;
-
-    if (tweet.curation_check) {
-      if (tweet.curated == 1) {
-        console.log('We already accept the tweet to test!');
-        delete tweet.curation_check;
-        delete tweet.tx.optional.curation_check;
+      if (store) {
+        this.app.connection.emit('saito-notification', {
+          id: 'store-moderation',
+          text: 'There are new listings on the Store to moderate.',
+          href: '/store/moderate',
+          pending: store.listings_to_moderate
+        });
       }
     }
-
-    //
-    // new tweet added, so we gives modules freedom-to-annotate
-    //
-    for (let xmod of this.app.modules.respondTo('redsquare-add-tweet')) {
-      tweet = xmod.respondTo('redsquare-add-tweet').processTweet(tweet);
-    }
-
-    if (tweet.rethread) {
-      //
-      // Flag tweet as rethread and null thread_id --> do not display!
-      //
-      if (!tweet.thread_id) {
-        if (this.debug) {
-          console.debug('RS.addTweet -- ignore marked tweet');
-        }
-
-        // I am not sure we need to mark this as such...
-        // it does lead to a bunch more warnings in the logs down the way
-        //this.tweets_sigs_hmap[tweet.tx.signature] = 2;
-        return 0;
-      }
-
-      //
-      //  keep track of list of special threads
-      //
-      if (this.special_threads_hmap[tweet.thread_id]) {
-        if (this.debug) {
-          console.debug(
-            'RS.addTweet -- inserting marked tweet into existing thread',
-            tweet?.thread_id
-          );
-        }
-        for (let i = 0; i < this.tweets.length; i++) {
-          if (this.tweets[i].thread_id == tweet.thread_id) {
-            this.tweets_sigs_hmap[tweet.tx.signature] = 1;
-
-            if (tweet.created_at > this.tweets[i].created_at) {
-              this.tweets[i].parent_id = tweet.tx.signature;
-              let should_render = this.tweets[i].isRendered();
-              this.tweets[i].remove();
-              tweet.addTweet(this.tweets[i]);
-              if (should_render) {
-                tweet.render(true);
-              }
-
-              this.tweets.splice(i, 1);
-
-              let insertion_index = 0;
-              for (let j = 0; i < this.tweets.length; i++) {
-                if (this.tweets[j].created_at > tweet.created_at) {
-                  insertion_index++;
-                } else {
-                  this.out_of_order = true;
-                  break;
-                }
-              }
-              this.tweets.splice(insertion_index, 0, tweet);
-            } else {
-              tweet.parent_id = this.tweets[i].tx.signature;
-              this.tweets[i].addTweet(tweet);
-              this.tweets[i].rerenderControls(true);
-            }
-            return -1;
-          }
-        }
-
-        console.warn('RS.addTweet -- Thread not found! Not adding special tweet to feed');
-        return 0;
-      }
-      if (this.debug) {
-        console.debug('RS.addTweet -- new special tweet thread', tweet?.thread_id);
-      }
-      this.special_threads_hmap[tweet.thread_id] = 1;
-
-      // Insert as normal
-    }
-
-    //
-    // tweets are displayed in chronological order
-    //
-    if (!tweet.parent_id) {
-      let insertion_index = 0;
-      for (let i = 0; i < this.tweets.length; i++) {
-        if (this.tweets[i].created_at > tweet.created_at) {
-          insertion_index++;
-        } else {
-          this.out_of_order = true;
-          break;
-        }
-      }
-
-      this.tweets.splice(insertion_index, 0, tweet);
-      this.tweets_sigs_hmap[tweet.tx.signature] = 1;
-
-      for (let i = 0; i < this.unknown_children.length; i++) {
-        if (this.unknown_children[i].thread_id === tweet.tx.signature) {
-          tweet.addTweet(this.unknown_children[i]);
-          this.unknown_children.splice(i, 1);
-          i--;
-        }
-      }
-
-      if (this.debug) {
-        console.debug(
-          `\n===\nRS.addTweet Success! Feed has (${this.tweets.length}) -- `,
-          tweet.text.substring(0, 50),
-          source.node,
-          `Curated: ${tweet.curated}`
-        );
-      }
-
-      return 1;
-
-      //
-      // this is a comment / reply
-      //
-      // we find the tweet that is the parent and push it into the array
-      // at that point. otherwise, we mark it as an unknown_child which
-      // means we know it HAS a parent but we do not -- as of yet -- have
-      // a copy of that tweet.
-      //
-    } else {
-      for (let i = 0; i < this.tweets.length; i++) {
-        if (this.tweets[i].tx.signature === tweet.thread_id) {
-          this.tweets[i].addTweet(tweet);
-          this.tweets_sigs_hmap[tweet.tx.signature] = 1;
-
-          if (this.debug) {
-            console.debug(
-              `RS.addTweet: child tweet success! Feed length: (${this.tweets.length}) -- `,
-              tweet.text,
-              source
-            );
-          }
-
-          return -1;
-        }
-      }
-
-      this.unknown_children.push(tweet);
-      this.tweets_sigs_hmap[tweet.tx.signature] = 1;
-
-      if (this.debug) {
-        console.debug(
-          `RS.addTweet: unknown child! Feed length: (${this.tweets.length}) -- `,
-          tweet.text,
-          source
-        );
-      }
-
-      return -1;
-    }
-  }
-
-  //
-  // addTweets adds notifications, but we have a separate function here
-  // for cached notifications, because we don't want to show all of the
-  // cached notifications in the main thread automatically, and we want a
-  // dedicated function that tells us if this notification is new or not
-  //
-  addNotification(tx) {
-    if (tx.isTo(this.publicKey)) {
-      if (!tx.isFrom(this.publicKey)) {
-        //
-        // only insert notification if doesn't already exist
-        //
-        if (this.notifications_sigs_hmap[tx.signature] != 1) {
-          if (this.debug) {
-            console.debug('RS.addNotification', tx.msg, tx.timestamp);
-          }
-
-          let insertion_index = 0;
-
-          for (let i = 0; i < this.notifications.length; i++) {
-            if (tx.timestamp > this.notifications[i].timestamp) {
-              break;
-            } else {
-              insertion_index++;
-            }
-          }
-
-          this.notifications.splice(insertion_index, 0, tx);
-          this.notifications_sigs_hmap[tx.signature] = 1;
-
-          if (tx.timestamp > this.notifications_last_viewed_ts) {
-            this.notifications_number_unviewed = this.notifications_number_unviewed + 1;
-            this.app.connection.emit(
-              'redsquare-update-notifications',
-              this.notifications_number_unviewed
-            );
-          }
-
-          this.saveOptions();
-
-          return 1;
-        } else {
-          console.debug('RS.addNotification duplicate notification');
-        }
-      }
-    }
-
-    return 0;
-  }
-
-  resetNotifications() {
-    this.notifications_last_viewed_ts = new Date().getTime();
-    this.notifications_number_unviewed = 0;
-    this.saveOptions();
-
-    this.app.connection.emit('redsquare-update-notifications', this.notifications_number_unviewed);
-  }
-
-  returnTweet(tweet_sig = null) {
-    if (tweet_sig == null) {
-      return null;
-    }
-
-    if (!this.tweets_sigs_hmap[tweet_sig] && !this.special_threads_hmap[tweet_sig]) {
-      return null;
-    }
-
-    for (let i = 0; i < this.tweets.length; i++) {
-      if (this.tweets[i].tx.signature === tweet_sig) {
-        return this.tweets[i];
-      }
-      if (this.tweets[i].hasChildTweet(tweet_sig)) {
-        return this.tweets[i].returnChildTweet(tweet_sig);
-      }
-
-      // special thread_ids...
-      if (this.tweets[i].thread_id === tweet_sig) {
-        return this.tweets[i];
-      }
-    }
-
-    for (let j = 0; j < this.unknown_children.length; j++) {
-      if (this.unknown_children[j].tx.signature === tweet_sig) {
-        return this.unknown_children[j];
-      }
-    }
-
-    return null;
-  }
-
-  removeTweet(tweet_sig = null) {
-    if (!tweet_sig || !this.tweets_sigs_hmap[tweet_sig]) {
-      return;
-    }
-
-    this.tweets_sigs_hmap[tweet_sig] = 0;
-
-    for (let i = 0; i < this.tweets.length; i++) {
-      if (this.tweets[i].tx.signature === tweet_sig) {
-        this.tweets[i].remove();
-        this.tweets.splice(i, 1);
-        return;
-      }
-
-      if (this.tweets[i].hasChildTweet(tweet_sig)) {
-        this.tweets[i].removeChildTweet(tweet_sig);
-        return;
-      }
-    }
-
-    for (let j = 0; j < this.unknown_children.length; j++) {
-      if (this.unknown_children[j].tx.signature === tweet_sig) {
-        this.unknown_children.splice(j, 1);
-        return;
-      }
-    }
-  }
-
-  pruneTweets() {
-    this.unknown_children = [];
-    let pruned = [];
-    let count = 0;
-    if (this.tweets.length > 100) {
-      for (let i = 0; count < 90 && i < this.tweets.length; i++) {
-        if (this.tweets[i].curated == 1) {
-          pruned.push(this.tweets[i]);
-          count++;
-        }
-      }
-    }
-    this.tweets = pruned;
-  }
-
-  returnNotification(tweet_sig = null) {
-    if (tweet_sig == null) {
-      return null;
-    }
-
-    if (!this.notifications_sigs_hmap[tweet_sig]) {
-      return null;
-    }
-
-    for (let i = 0; i < this.notifications.length; i++) {
-      if (this.notifications[i].signature === tweet_sig) {
-        return this.notifications[i];
-      }
-    }
-
-    return null;
-  }
-
-  returnThreadSigs(tweet_id) {
-    let sigs = [];
-
-    while (tweet_id) {
-      let tweet = this.returnTweet(tweet_id);
-      if (!tweet) {
-        console.warn('Incomplete tweet thread!');
-        return sigs;
-      }
-
-      sigs.push(tweet_id);
-
-      tweet_id = tweet.parent_id;
-    }
-
-    return sigs;
-  }
-
-  validateThread(tweet_id) {
-    let tweet = this.returnTweet(tweet_id);
-
-    if (tweet) {
-      if (tweet.num_replies !== tweet.children.length) {
-        console.debug(
-          `manually correct reply count: ${tweet.num_replies} -> ${tweet.children.length}`
-        );
-        tweet.tx.optional.num_replies = tweet.children.length;
-        tweet.num_replies = tweet.children.length;
-
-        // Make sure the tweet in the main thread updates its reply count too
-        // refreshStat fixes the stat for the tweet anywhere (even hidden) on the page
-        tweet.refreshStat('comment', tweet.num_replies);
-      }
-
-      for (let child of tweet.children) {
-        this.validateThread(child.tx.signature);
-      }
-    }
-  }
-
-  ///////////////////////
-  // network functions //
-  ///////////////////////
-  async sendLikeTransaction(app, mod, data, tx) {
-    let redsquare_self = this;
-
-    let obj = {
-      module: redsquare_self.name,
-      request: 'like tweet',
-      data: {}
-    };
-    for (let key in data) {
-      obj.data[key] = data[key];
-    }
-
-    let newtx = await redsquare_self.app.wallet.createUnsignedTransaction(tx.from[0]?.publicKey);
-
-    //
-    // All tweets include the sender in the to, but add the from first so they are in first position
-    //
-    for (let i = 0; i < tx.to.length; i++) {
-      if (tx.to[i].publicKey !== this.publicKey) {
-        newtx.addTo(tx.to[i].publicKey);
-      }
-    }
-
-    newtx.msg = obj;
-    await newtx.sign();
-    await redsquare_self.app.network.propagateTransaction(newtx);
-
-    return newtx;
-  }
-
-  addToCouncil(key) {
-    let trust_rating = this.jedi_council.has(key) ? this.jedi_council.get(key) : 0;
-    trust_rating++;
-    this.jedi_council.set(key, trust_rating);
-    if (trust_rating > 12) {
-      this.app.connection.emit('saito-whitelist', { publicKey: key });
-    }
-  }
-
-  updateTweetCuration(tweet, interaction_tx) {
-    //
-    // set as curated if liked by moderator, but ignore blacklisted people
-    //
-    let new_curation = Math.max(0, this.curate(interaction_tx));
-
-    if (new_curation == 1) {
-      //console.debug('RS move tweet to curated by trusted like/retweet!');
-      this.addToCouncil(tweet.tx.from[0].publicKey);
-    }
-
-    tweet.curated = new_curation || tweet.curated;
-  }
-
-  async updateTweetStat(tweet_tx, ts, stat, tweet = null) {
-    if (!tweet_tx.optional) {
-      tweet_tx.optional = {};
-    }
-
-    if (!tweet_tx.optional[stat]) {
-      tweet_tx.optional[stat] = 0;
-    }
-
-    let tweet_ts = tweet?.updated_at || tweet_tx.optional.updated_at || tweet_tx.timestamp;
-
-    if (ts > tweet_ts) {
-      tweet_tx.optional[stat]++;
-
-      //
-      // Adjust the updated_at field in memory (already set in archive via update tx above)
-      //
-      if (tweet) {
-        tweet.potential_new_ts = Math.max(ts, tweet_ts, tweet.potential_new_ts || 0);
-        if (tweet.timeout) {
-          clearTimeout(tweet.timeout);
-        }
-        tweet.timeout = setTimeout(() => {
-          this.app.storage.updateTransaction(
-            tweet_tx,
-            { updated_at: tweet.potential_new_ts },
-            'localhost'
-          );
-          tweet.updated_at = tweet.potential_new_ts;
-          delete tweet.timeout;
-          delete tweet.potential_new_ts;
-        }, 2000);
-      } else {
-        let obj = { updated_at: ts };
-        await this.app.storage.updateTransaction(tweet_tx, obj, 'localhost');
-      }
-    }
-  }
-
-  async receiveLikeTransaction(blk, tx, conf, app) {
-    let txmsg = tx.returnMessage();
-
-    let liked_tweet = this.returnTweet(txmsg.data.signature);
-
-    //console.debug('Receive like transaction', tx.timestamp, liked_tweet?.text);
-
-    //
-    // save optional likes
-    //
-    if (liked_tweet?.tx) {
-      this.updateTweetCuration(liked_tweet, tx);
-      await this.updateTweetStat(liked_tweet.tx, tx.timestamp, 'num_likes', liked_tweet);
-
-      liked_tweet.rerenderControls();
-    } else if (!this.app.BROWSER) {
-      //
-      // fetch original
-      //
-      // servers load from themselves
-      //
-      // servers update their TX.updated_at timestamps based on current_time, since they won't be
-      // fetching the blockchain transiently afterwards while viewing tweets that have loaded from
-      // others. this permits browsers to avoid double-liking tweets that show up with pre-calculated
-      // likes, as those will also have pre-updated updated_at values.
-      //
-      // this isn't an ironclad way of avoiding browsers saving likes 2x, but last_updated is not a
-      // consensus variable and if they're loading tweets from server-archives uncritically it is a
-      // sensible set of defaults.
-      //
-      await this.app.storage.loadTransactions(
-        { sig: txmsg.data.signature, field1: 'RedSquare' },
-        async (txs) => {
-          if (txs?.length > 0) {
-            // Keep this in our memory...
-            this.addTweet(
-              txs[0],
-              { type: 'on_chain_like', node: 'localhost' },
-              Math.max(0, this.curate(tx))
-            );
-
-            let tweet = this.returnTweet(txs[0].signature);
-            if (tweet) {
-              await this.updateTweetStat(tweet.tx, tx.timestamp, 'num_likes', tweet);
-            }
-          }
-        },
-        'localhost'
-      );
-    }
-
-    //
-    // Save locally -- indexed to myKey so it is accessible as a notification
-    //
-    // I'm not sure we really want to save these like this... but it may work out for profile views...
-    //
-    await this.app.storage.saveTransaction(tx, { field1: 'RedSquareLike' }, 'localhost', blk);
-
-    return;
-  }
-
-  async sendRetweetTransaction(app, mod, data, tx) {
-    let redsquare_self = this;
-
-    let obj = {
-      module: redsquare_self.name,
-      request: 'retweet',
-      data: {}
-    };
-    for (let key in data) {
-      obj.data[key] = data[key];
-    }
-
-    let newtx = await redsquare_self.app.wallet.createUnsignedTransaction(tx.from[0]?.publicKey);
-
-    //
-    // All tweets include the sender in the to, but add the from first so they are in first position
-    //
-    for (let i = 0; i < tx.to.length; i++) {
-      if (tx.to[i].publicKey !== this.publicKey) {
-        newtx.addTo(tx.to[i].publicKey);
-      }
-    }
-    // Make sure I am also a recipient
-    newtx.addTo(this.publicKey);
-
-    newtx.msg = obj;
-    await newtx.sign();
-    await redsquare_self.app.network.propagateTransaction(newtx);
-
-    return newtx;
-  }
-
-  async incrementRetweets(localTx, receivedTx) {
-    if (!localTx.optional) {
-      localTx.optional = {};
-    }
-
-    if (!localTx.optional.num_retweets) {
-      localTx.optional.num_retweets = 0;
-    }
-    if (!localTx.optional.retweeters) {
-      localTx.optional.retweeters = [];
-    }
-
-    let localTx_updated_at = localTx.updated_at || localTx.timestamp;
-
-    if (receivedTx.timestamp > localTx_updated_at) {
-      localTx.optional.num_retweets++;
-
-      if (!localTx.optional.retweeters.includes(receivedTx.from[0].publicKey)) {
-        localTx.optional.retweeters.unshift(receivedTx.from[0].publicKey);
-      }
-
-      localTx.optional.retweeted_at = receivedTx.timestamp;
-
-      await this.app.storage.updateTransaction(
-        localTx,
-        { updated_at: receivedTx.timestamp },
-        'localhost'
-      );
-    } else {
-      console.warn(
-        'RS.incrementRetweets: transaction received after archive load',
-        localTx,
-        receivedTx
-      );
-    }
-  }
-
-  async receiveRetweetTransaction(blk, tx, conf, app) {
-    let txmsg = tx.returnMessage();
-
-    let retweeted_tweet = this.returnTweet(txmsg.data.signature);
-
-    //
-    // save optional likes
-    //
-
-    if (retweeted_tweet?.tx) {
-      await this.incrementRetweets(retweeted_tweet.tx, tx);
-
-      //
-      // set as curated if liked by moderator
-      //
-      this.updateTweetCuration(retweeted_tweet, tx);
-
-      retweeted_tweet.rerenderControls(true);
-
-      ///
-      ///>>> move to top of tweet list...
-      ///
-      for (let i = 0; i < this.tweets.length; i++) {
-        if (this.tweets[i].tx.signature == retweeted_tweet.tx.signature) {
-          this.tweets.splice(i, 1);
-          break;
-        }
-      }
-      this.tweets.unshift(retweeted_tweet);
-    } else {
-      //
-      // fetch original to update
-      //
-      await this.app.storage.loadTransactions(
-        { sig: txmsg.data.signature, field1: 'RedSquare' },
-        async (txs) => {
-          if (txs?.length > 0) {
-            this.incrementRetweets(txs[0], tx);
-          } else {
-            console.warn('RS.receiveRetweet: Original tweet not found');
-          }
-        },
-        'localhost'
-      );
-    }
-
-    return;
-  }
-
-  async sendEditTransaction(app, mod, data, keys = []) {
-    let redsquare_self = this;
-
-    let obj = {
-      module: redsquare_self.name,
-      request: 'edit tweet',
-      data: {}
-    };
-    for (let key in data) {
-      obj.data[key] = data[key];
-    }
-
-    let newtx = await redsquare_self.app.wallet.createUnsignedTransaction();
-    newtx.msg = obj;
-
-    for (let i = 0; i < keys.length; i++) {
-      newtx.addTo(keys[i]);
-    }
-
-    await newtx.sign();
-    await redsquare_self.app.network.propagateTransaction(newtx);
-
-    return newtx;
-  }
-
-  async sendDeleteTransaction(app, mod, data, keys = []) {
-    let redsquare_self = this;
-
-    let obj = {
-      module: redsquare_self.name,
-      request: 'delete tweet',
-      data: {}
-    };
-    for (let key in data) {
-      obj.data[key] = data[key];
-    }
-
-    let newtx = await redsquare_self.app.wallet.createUnsignedTransaction();
-    newtx.msg = obj;
-
-    for (let i = 0; i < keys.length; i++) {
-      newtx.addTo(keys[i]);
-    }
-
-    await newtx.sign();
-    await redsquare_self.app.network.propagateTransaction(newtx);
-
-    return newtx;
-  }
-
-  async sendTweetTransaction(app, mod, data, keys = []) {
-    let redsquare_self = this;
-
-    let obj = {
-      module: redsquare_self.name,
-      request: 'create tweet',
-      data: {}
-    };
-    for (let key in data) {
-      obj.data[key] = data[key];
-    }
-
-    //let wallet_balance = await this.app.wallet.getBalance('SAITO');
-
-    //let amount_to_send = /*wallet_balance > 1 ? BigInt(1) :*/ BigInt(0);
-
-    let newtx = await redsquare_self.app.wallet.createUnsignedTransaction();
-
-    newtx.msg = obj;
-
-    for (let i = 0; i < keys.length; i++) {
-      if (keys[i] !== this.publicKey) {
-        newtx.addTo(keys[i]);
-      }
-    }
-
-    await newtx.sign();
-    await redsquare_self.app.network.propagateTransaction(newtx);
-
-    return newtx;
   }
 
   /**
-   *  @param tweet_id : transaction signature of the tweet to edit
-   *  @param tx: edit tweet transaction with new message
-   *  @param source: where we found this edit tweet tx
-   *
-   *  If the tweet-to-edit is in memory, we save the edit tx and ts in the tweet-to-edit's original
-   *  tx iff this is the most recent edit.
-   *
-   *  Create a new Tweet with the updated original tx, which will automatically replace the text and add
-   *  markup to show when the tweet was edited
-   *
-   *  Otherwise, save it as an "orphan"
+   * Trusted by connected server — load flagged tweets for the review queue.
    */
-  editTweet(tweet_id, tx, source) {
-    let edited_tweet = this.returnTweet(tweet_id);
-
-    if (edited_tweet) {
-      let orig_tx = edited_tweet.tx;
-      if (!orig_tx.optional) {
-        orig_tx.optional = {};
-      }
-
-      // What if there are multiple edits?
-      if (tx.timestamp > (orig_tx.optional?.edit_ts || 0)) {
-        orig_tx.optional.update_tx = tx.serialize_to_web(this.app);
-        orig_tx.optional.edit_ts = tx.timestamp;
-
-        // To-Do -- shouldn't we replace the tweet?
-        let new_tweet = new Tweet(this.app, this, orig_tx, edited_tweet.container);
-
-        //
-        // Information on the edit becomes part of the source history...
-        //
-        new_tweet.sources.push(source);
-        //
-        // update keys from (optional) and completely rerender
-        //
-        new_tweet.rerenderControls(true);
-      }
-    } else {
-      this.orphan_edits.push({ tweet_id, tx, source });
-    }
-  }
-
-  async receiveEditTransaction(blk, tx, conf, app) {
-    try {
-      let txmsg = tx.returnMessage();
-
-      if (!txmsg.data?.tweet_id) {
-        console.warn('RS.receiveEdit: no tweet id to edit');
-        return;
-      }
-
-      console.info('RS.receiveEdit: transaction received');
-
-      // See above
-      this.editTweet(txmsg.data.tweet_id, tx, `onchain-edit-${tx.from[0].publicKey}`);
-
-      await this.app.storage.loadTransactions(
-        { sig: txmsg.data.tweet_id, field1: 'RedSquare' },
-        async (txs) => {
-          if (txs?.length) {
-            //
-            // only update first copy??
-            //
-            let oldtx = txs[0];
-            //
-            // save the tx
-            //
-            if (oldtx.from[0].publicKey === tx.from[0].publicKey) {
-              if (!oldtx.optional) {
-                oldtx.optional = {};
-              }
-
-              if (tx.timestamp > (oldtx.optional?.edit_ts || 0)) {
-                oldtx.optional.update_tx = tx.serialize_to_web(this.app);
-                oldtx.optional.edit_ts = tx.timestamp;
-              }
-
-              await this.app.storage.updateTransaction(
-                oldtx,
-                { updated_at: tx.timestamp },
-                'localhost'
-              );
-            }
-          }
-        },
-        'localhost'
-      );
-    } catch (err) {
-      // console.error('RedSquare: error editing tweet', err);
-      // console.log(tx);
-    }
-  }
-
-  //
-  // We should remove the tweet in question from memory (if we have it)
-  // remove it from the archives and update the archives of linked tweets so that the stats
-  // decrement accordingly
-  // To-do: implement live updating of reply/retweet counts (currently requires a refresh)
-  //
-  async receiveDeleteTransaction(blk, tx, conf, app) {
-    console.info('RS.receiveDelete: transaction received');
-
-    let txmsg = tx.returnMessage();
-
-    if (!txmsg.data) {
-      return;
-    }
-    if (!txmsg.data.tweet_id) {
+  async enterModeratorMode() {
+    if (!this.app.BROWSER) {
       return;
     }
 
-    this.removeTweet(txmsg.data.tweet_id);
+    this.moderator_mode = true;
 
-    await this.app.storage.loadTransactions(
-      { sig: txmsg.data.tweet_id },
-      async (txs) => {
-        if (txs?.length) {
-          //
-          // only update first copy??
-          //
-          let oldtx = txs[0];
-
-          //
-          // save the tx
-          //
-          if (oldtx.from[0].publicKey === tx.from[0].publicKey) {
-            await this.app.storage.deleteTransaction(oldtx, {}, 'localhost');
-
-            let tweet = new Tweet(this.app, this, oldtx, '');
-
-            // Delete tweet is a reply
-            if (tweet.tx.optional.parent_id) {
-              await this.app.storage.loadTransactions(
-                { sig: tweet.tx.optional.parent_id, field1: 'RedSquare' },
-                async (txs) => {
-                  if (txs?.length) {
-                    if (txs[0]?.optional?.num_replies) {
-                      txs[0].optional.num_replies--;
-                      await this.app.storage.updateTransaction(
-                        txs[0],
-                        { updated_at: tx.timestamp },
-                        'localhost'
-                      );
-                    }
-                  }
-                },
-                'localhost'
-              );
-            }
-
-            // Deleted tweet is a retweet
-            if (tweet.retweet_tx) {
-              await this.app.storage.loadTransactions(
-                { sig: tweet.retweet.tx.signature, field1: 'RedSquare' },
-                async (txs) => {
-                  if (txs?.length) {
-                    if (txs[0].optional?.num_retweets) {
-                      txs[0].optional.num_retweets--;
-                      await this.app.storage.updateTransaction(
-                        txs[0],
-                        { updated_at: tx.timestamp },
-                        'localhost'
-                      );
-                    }
-                  }
-                },
-                'localhost'
-              );
-            }
-          }
-        }
-      },
-      'localhost'
+    const peers = this.returnTweetArchivePeers();
+    const results = await Promise.all(
+      peers.map((peer) =>
+        this.loadArchiveTransactions({ field1: 'RedSquare', flagged: 1, limit: 10 }, peer)
+      )
     );
 
-    //Save the transaction with command to delete
-    if (!app.BROWSER) {
-      await this.app.storage.saveTransaction(tx, { field1: 'RedSquare' }, 'localhost', blk);
-    }
-  }
+    const bySignature = new Map();
 
-  async receiveTweetTransaction(blk, tx, conf, app) {
-    console.info('##################\n#################\nRS.receiveTweet: transaction received');
+    for (const txs of results) {
+      for (const tx of txs || []) {
+        if (!tx) {
+          continue;
+        }
 
-    try {
-      let tweet = new Tweet(app, this, tx);
-      let other_tweet = null;
-      let txmsg = tx.returnMessage();
+        if (typeof tx.decryptMessage === 'function') {
+          await tx.decryptMessage(this.app);
+        }
 
-      //
-      // save this transaction in our archives as a redsquare transaction that is owned by ME (the server), so that I
-      // can deliver it to users who want to fetch RedSquare transactions from the archives instead of just through the
-      // sql database -- this is done by specifying that I -- "localhost" am the peer required.
-      //
+        const signature = tx.signature != null ? String(tx.signature) : '';
 
-      //
-      // servers -- get open graph properties
-      //
-      tweet = await tweet.analyseTweetLinks(1);
-
-      this.saveTweet(tweet, 1, blk);
-
-      //
-      // Includes retweeted tweet
-      //
-      if (tweet.retweet_tx != null) {
-        other_tweet = this.returnTweet(tweet.signature);
-
-        if (other_tweet) {
-          await this.incrementRetweets(other_tweet.tx, tx);
-          this.updateTweetCuration(other_tweet, tx);
-          other_tweet.rerenderControls();
-        } else {
-          //
-          // fetch archived copy
-          //
-          // servers load from themselves
-          //
-          await this.app.storage.loadTransactions(
-            { sig: tweet.signature, field1: 'RedSquare' },
-            async (txs) => {
-              if (txs?.length) {
-                this.incrementRetweets(txs[0], tx);
-              }
-            },
-            'localhost'
-          );
+        if (signature && !bySignature.has(signature)) {
+          bySignature.set(signature, tx);
         }
       }
+    }
 
-      //
-      // Is a reply
-      //
-      if (tweet.parent_id && tweet.parent_id !== tweet.tx.signature) {
-        //
-        // if we have the parent tweet in memory...
-        //
-        other_tweet = this.returnTweet(tweet.parent_id);
+    this.moderate.setTransactions(Array.from(bySignature.values()));
+    this.updateNotificationBadge();
 
-        if (other_tweet) {
-          await this.updateTweetStat(other_tweet.tx, tx.timestamp, 'num_replies', other_tweet);
-          other_tweet.rerenderControls();
-        } else {
-          //
-          // ...otherwise, hit up the archive first
-          //
-          await this.app.storage.loadTransactions(
-            { sig: tweet.parent_id, field1: 'RedSquare' },
-            async (txs) => {
-              if (txs?.length) {
-                await this.updateTweetStat(txs[0], tx.timestamp, 'num_replies');
-              }
-            },
-            'localhost'
-          );
-        }
-      }
-    } catch (err) {
-      // console.error('RS.receiveTweetsTransaction ERROR: ', err);
+    if (this.manager?.mode === 'notifications') {
+      this.moderate.render(`${this.manager.container} .list[data-panel="notifications"]`);
     }
   }
 
-  //
-  // How does this work with the archive module???
-  //
-  async sendFlagTransaction(app, mod, data, tx) {
-    let redsquare_self = this;
-
-    let obj = {
-      module: redsquare_self.name,
-      request: 'flag tweet',
-      data: {}
-    };
-
-    //
-    // data = {signature : tx.signature }
-    //
-    for (let key in data) {
-      obj.data[key] = data[key];
-    }
-
-    let newtx = await redsquare_self.app.wallet.createUnsignedTransaction();
-
-    newtx.msg = obj;
-    await newtx.sign();
-    await redsquare_self.app.network.propagateTransaction(newtx);
-
-    return newtx;
-  }
-
-  //
-  // We have a lot of work to do here....
-  // ...an interface for users to delete their own tweets
-  // ...an interface for moderators to review tweets
-  //
-  async receiveFlagTransaction(blk, tx, conf, app) {
-    let txmsg = tx.returnMessage();
-
-    let flagged_tweet = this.returnTweet(txmsg.data.signature);
-
-    let process_action = tx.isFrom(this.publicKey);
-
-    let modScore = this.app.modules.moderate(tx);
-
-    if (modScore == -1) {
-      // Ignore blacklisted people
-      return;
-    } else if (modScore == 1) {
-      // Trusted moderator
-      process_action = true;
-    }
-
-    if (flagged_tweet) {
-      // two people who are not moderators have flagged it
-      if (flagged_tweet.flagged) {
-        process_action = true;
-      } else {
-        // add a note that this was flagged, but don't necessarily update the database
-        flagged_tweet.flagged = true;
-      }
-
-      //Move off curation list
-      flagged_tweet.curated = -1;
-      flagged_tweet.optional.curated = -1;
-      this.cacheRecentTweets(true);
-    }
-
-    //
-    // we will "soft delete" the tweet for the person who flagged it and in the central archives
-    //
-    if (process_action) {
-      if (flagged_tweet?.tx) {
-        await this.app.storage.updateTransaction(
-          flagged_tweet.tx,
-          { updated_at: tx.timestamp, flagged: 1 },
-          'localhost'
-        );
-      } else {
-        await this.app.storage.loadTransactions(
-          { sig: txmsg.data.signature, field1: 'RedSquare' },
-          async (txs) => {
-            if (txs?.length > 0) {
-              let archived_tx = txs[0];
-
-              archived_tx.optional.curated = -1;
-
-              await this.app.storage.updateTransaction(
-                archived_tx,
-                { updated_at: tx.timestamp, flagged: 1 },
-                'localhost'
-              );
-            }
-          },
-          'localhost'
-        );
-      }
-    }
-
-    //
-    // let both users know that something happened
-    //
-    if (app.BROWSER == 1) {
-      if (tx.isTo(this.publicKey)) {
-        if (tx.isFrom(this.publicKey)) {
-          siteMessage('Tweet successfully flagged for review', 3000);
-        } else {
-          siteMessage('One of your tweets was flagged for review', 10000);
-        }
-      } else {
-        console.info(
-          `RS.receiveFlagTransaction: Your friend [${this.app.keychain.returnUsername(tx.from[0].publicKey)}] flagged a tweet -- `,
-          flagged_tweet.text
-        );
-      }
-    }
-
-    return;
-  }
-
-  saveTweet(tweet, preserve = 1, blk = null) {
-    if (!tweet) {
-      console.warn('RS.saveTweet: no tweet!');
+  /**
+   * Re-check stored tweets after ModTools lists change.
+   * Marks moderated tweets and refreshes only those nodes — no timeline rebuild.
+   */
+  applyModerationUpdates() {
+    if (!this.app.BROWSER) {
       return;
     }
 
-    if (!tweet.thread_id) {
-      // Don't save ...
-      return;
+    const bySignature = new Map();
+
+    for (const tweet of Object.values(this.tweets || {})) {
+      if (tweet?.signature) {
+        bySignature.set(tweet.signature, tweet);
+      }
     }
 
-    //
-    // if i interact with a tweet, mark it as curated
-    //
-    if (preserve) {
-      tweet.tx.optional.curated = 1;
+    for (const tweet of Object.values(this.profile_tweets || {})) {
+      if (tweet?.signature && !bySignature.has(tweet.signature)) {
+        bySignature.set(tweet.signature, tweet);
+      }
     }
 
-    //
-    // this transaction is TO me, but I may not be the tx.to[0].publicKey address, and thus the archive
-    // module may not index this transaction for me in a way that makes it very easy to fetch (field3 = MY_KEY}
-    // thus we override the defaults by setting field3 explicitly to our publickey so that loading transactions
-    // from archives by fetching on field3 will get this.
-    //
-    let opt = {
-      field1: 'RedSquare', //defaults to module.name, but just to make sure we match the capitalization with our loadTweets
-      preserve,
-      field4: tweet.parent_id || '',
-      field5: tweet.thread_id
-    };
+    for (const tweet of bySignature.values()) {
+      if (!tweet.tx) {
+        continue;
+      }
 
-    /*console.log({
-      sig: tweet.tx.signature,
-      text: tweet.text,
-      parent: tweet.parent_id,
-      thread: tweet.thread_id
-    });*/
+      const blocked = this.app.modules?.moderate?.(tweet.tx, this.name) === -1;
 
-    if (tweet.tx.isTo(this.publicKey)) {
-      //
-      // when a browser stores tweets, it is storing tweets it sent or were sent to it
-      // this will help use with notifications (to) and profile (from)
-      //
-      opt['field3'] = this.publicKey;
+      if (blocked === Boolean(tweet.moderated)) {
+        continue;
+      }
+
+      tweet.moderated = blocked;
+
+      if (!blocked) {
+        tweet.moderated_revealed = false;
+      }
+
+      if (typeof tweet.refresh === 'function') {
+        tweet.refresh();
+      }
     }
-
-    //
-    // Save the modified tx so we have open graph properties available
-    //
-
-    this.app.storage.loadTransactions(
-      { field1: 'RedSquare', sig: tweet.tx.signature },
-      (txs) => {
-        if (txs?.length > 0) {
-          this.app.storage.updateTransaction(tweet.tx, opt, 'localhost', 1);
-        } else {
-          this.app.storage.saveTransaction(tweet.tx, opt, 'localhost', blk);
-        }
-      },
-      'localhost'
-    );
   }
 
-  updateSavedTweet(sig) {
-    let tweet = this.returnTweet(sig);
-
-    if (!tweet) {
-      console.warn('RS.updateTweet: tweet not found!', sig);
-      return;
-    }
-
-    this.app.storage.updateTransaction(tweet.tx, {}, 'localhost');
-  }
-
-  /////////////////////////////////////
-  // saving and loading wallet state //
-  /////////////////////////////////////
   loadOptions() {
     if (!this.app.BROWSER) {
       return;
     }
 
-    if (this.app.options.redsquare) {
-      const rso = this.app.options.redsquare;
+    const rso = this.app.options.redsquare;
 
-      this.notifications_last_viewed_ts = rso?.notifications_last_viewed_ts || 0;
-      this.notifications_number_unviewed = rso?.notifications_number_unviewed || 0;
-      this.tweet_count = rso?.tweet_count || 0;
-
-      this.liked_tweets = rso?.liked_tweets || [];
-      this.retweeted_tweets = rso?.retweeted_tweets || [];
-      this.replied_tweets = rso?.replied_tweets || [];
-      this.hidden_tweets = rso?.hidden_tweets || [];
-
-      if (rso?.curated == 0) {
-        this.curated = false;
-      }
+    if (!rso) {
+      return;
     }
 
-    this.saveOptions();
+    if (rso.curated === false || rso.curated === 0) {
+      this.curated = false;
+    }
+
+    this.show_splash = Object.prototype.hasOwnProperty.call(rso, 'show-splash')
+      ? rso['show-splash']
+      : true;
+
+    if (document?.querySelector) {
+      document.querySelector('#saito-container')?.classList.toggle('active-curation', this.curated);
+    }
   }
 
   saveOptions() {
@@ -2597,442 +367,2723 @@ class RedSquare extends ModTemplate {
       return;
     }
 
-    let rso = {};
+    if (!this.app.options.redsquare) {
+      this.app.options.redsquare = {};
+    }
 
-    rso.notifications_last_viewed_ts = this.notifications_last_viewed_ts;
-    rso.notifications_number_unviewed = this.notifications_number_unviewed;
-    rso.tweet_count = this.tweet_count;
-
-    rso.liked_tweets = this.liked_tweets.slice(-100);
-    rso.retweeted_tweets = this.retweeted_tweets.slice(-100);
-    rso.replied_tweets = this.replied_tweets.slice(-100);
-    rso.hidden_tweets = this.hidden_tweets;
-
-    rso.curated = this.curated;
-
-    this.app.options.redsquare = rso;
-
+    this.app.options.redsquare.curated = this.curated;
+    this.app.options.redsquare['show-splash'] = this.show_splash;
     this.app.storage.saveOptions();
   }
 
-  //////////////
-  // remember //
-  //////////////
-  likeTweet(tweet) {
-    if (!tweet?.tx?.signature) {
-      return;
-    }
-    if (!this.liked_tweets.includes(tweet.tx.signature)) {
-      this.liked_tweets.push(tweet.tx.signature);
-      this.saveTweet(tweet);
-    }
-    this.saveOptions();
-  }
-
-  retweetTweet(tweet) {
-    if (!tweet?.tx?.signature) {
-      return;
-    }
-    if (!this.retweeted_tweets.includes(tweet.tx.signature)) {
-      this.retweeted_tweets.push(tweet.tx.signature);
-      this.saveTweet(tweet);
-    }
-    this.saveOptions();
-  }
-
-  replyTweet(tweet) {
-    if (!tweet?.tx?.signature) {
-      return;
-    }
-    if (!this.replied_tweets.includes(tweet.tx.signature)) {
-      this.replied_tweets.push(tweet.tx.signature);
-      this.saveTweet(tweet);
-    }
-    this.saveOptions();
-  }
-
-  addBlogPseudoTweets() {
-    for (let b of this.blogs) {
-      if (b.ts > this.tweets_earliest_ts && !this.tweets_sigs_hmap[b.tx_id]) {
-        // "Add Tweet"
-      }
-    }
-  }
-
-  cacheRecentTweets(force_caching = false) {
-    if (this.app.BROWSER) {
+  //
+  // Primary browser startup path — fires when a peer advertising "redsquare" connects.
+  // (Saito hook name is onPeerServiceUp, invoked once per peer service.)
+  //
+  async onPeerServiceUp(app, peer, service = {}) {
+    if (!app.BROWSER || !this.browser_active) {
       return;
     }
 
-    let ts = new Date().getTime();
-    if (!force_caching && this.last_cache + 300000 > ts) {
-      /*console.debug(
-        '###\n### RS.cacheRecentTweets -- too soon to recalculate! \n###\n###',
-        this.cached_tweets.length
-      );*/
+    if (service.service !== 'redsquare') {
       return;
     }
 
-    this.last_cache = ts;
-
-    this.cached_tweets = [];
-
-    for (let tweet of this.tweets) {
-      //
-      // Update curation (because we maybe have more named keys)
-      //
-      tweet.curated = this.curate(tweet.tx);
-
-      if (tweet.curated == 1) {
-        tweet.tx.optional.curated = 1;
-
-        if (!tweet.game){
-          this.cached_tweets.push(tweet.tx.serialize_to_web(this.app));  
-        }
-        
-      }
-    }
-
-    if (this.debug) {
-      console.debug(
-        `###\n### RS.cacheRecentTweets -- Tweets: ${this.tweets.length} Cached: ${this.cached_tweets.length} \n###`
-      );
-    }
-
-    // Keep at most 9 curated tweets
-    this.cached_tweets = this.cached_tweets.slice(0, 9);
-
-    let test_tweet = true;
-
-    // Add at least 1 non-curated tweets
-    if (this.cached_tweets.length < 10) {
-      for (let z = 0; z < this.tweets.length && this.cached_tweets.length < 10; z++) {
-        if (this.tweets[z].curated == 0) {
-          if (test_tweet) {
-            //
-            // We add the most recent 'curated = 0' tweet as a test tweet
-            //
-            test_tweet = false;
-            this.tweets[z].tx.optional.curated = 0;
-            this.tweets[z].tx.optional.curation_check = true;
-            this.cached_tweets.push(this.tweets[z].tx.serialize_to_web(this.app));
-          } else {
-            //
-            // For the fallback, let's keep some automated standards to pull out better content
-            // Theoretically, we should only have a problem the first time this code is deployed
-            // afterwards we will have seeded enough whitelisted keys and positively curated tweets
-            // that repeated deployments will pick up the vetted content
-            //
-            let score = Math.log(this.tweets[z].num_likes + 1);
-            score += this.tweets[z].num_retweets;
-            score += Math.log(this.tweets[z].num_replies + 1) / Math.log(2);
-            if (this.tweets[z].images?.length) {
-              score += 3 * this.tweets[z].images.length;
-            }
-            if (score > 10) {
-              this.tweets[z].tx.optional.curated = 0;
-              this.cached_tweets.push(this.tweets[z].tx.serialize_to_web(this.app));
-            }
-          }
-        }
-      }
-    }
+    this.registerPeer(peer);
+    this.manager?.onPeersUpdated?.();
   }
 
-  fetchMissingUsernames(mycallback = null) {
-    let keylist = [];
-
-    for (let i = 0; i < this.tweets.length; i++) {
-      if (!keylist.includes(this.tweets[i].tx.from[0].publicKey)) {
-        keylist.push(this.tweets[i].tx.from[0].publicKey);
-      }
+  onNewBlock(blk, lc) {
+    if (!this.app.BROWSER || !this.browser_active) {
+      this.blocks_since_poll = 0;
+      return;
     }
 
-    let rMod = this.app.modules.returnModule('Registry');
-    if (rMod) {
-      rMod.fetchManyIdentifiers(keylist, (answer) => {
-        if (mycallback != null) {
-          mycallback(answer);
-        }
+    if (!lc) {
+      return;
+    }
+
+    this.blocks_since_poll++;
+
+    if (this.blocks_since_poll < this.poll_block_interval) {
+      return;
+    }
+
+    this.blocks_since_poll = 0;
+
+    if (this.peers.length > 0) {
+      this.loadTransactions('tweets', 'newer', (result) => {
+        this.manager?.onNewerContentLoaded?.(result, { announce: true });
       });
-    } else {
-      console.warn('No Registry');
+    }
+
+    if (this.publicKey) {
+      this.loadTransactions('notifications', 'newer', (result) => {
+        this.manager?.onNewerContentLoaded?.(result);
+      });
     }
   }
 
-  /******************************
-   * Make RedSquare Curation Settings
-   * visibile outside of RS
-   *****************************/
-  hasSettings() {
-    return true;
-  }
+  registerPeer(peer) {
+    const publicKey = peer?.publicKey || '';
 
-  loadSettings(container = null) {
-    if (!container) {
-      let overlay = new SaitoOverlay(this.app, this.mod);
-      overlay.show(`<div class="module-settings-overlay"><h2>Redsquare Settings</h2></div>`);
-      container = '.module-settings-overlay';
-    }
-    let as = new AppSettings(this.app, this, container);
-    as.render();
-  }
-
-  ///////////////
-  // webserver //
-  ///////////////
-  webServer(app, expressapp, express, alternative_slug = null) {
-    const webdir = `${__dirname}/../../mods/${this.dirname}/web`;
-    const uri = alternative_slug || '/' + encodeURI(this.returnSlug());
-    const redsquare_self = this;
-
-    expressapp.use(uri, express.static(webdir));
-
-    expressapp.get(uri, async function (req, res) {
-      let reqBaseURL = req.protocol + '://' + req.headers.host + '/';
-
-      try {
-        if (Object.keys(req.query).length > 0) {
-          let query_params = req.query;
-
-          let sig = query_params?.tweet_id || query_params?.thread_id;
-
-          if (sig) {
-            app.storage.loadTransactions(
-              { sig, field1: 'RedSquare' },
-              (txs) => {
-                if (txs.length > 0) {
-                  let tx = txs.shift();
-
-                  tx.decryptMessage(app);
-
-                  const returned_tweet = new Tweet(app, redsquare_self, tx);
-
-                  let updated_social = redsquare_self.social;
-
-                  let text = returned_tweet.text;
-                  let user = app.keychain.returnUsername(tx.from[0].publicKey);
-
-                  //
-                  // We need adequate protection here
-                  //
-                  let url = reqBaseURL + encodeURI(redsquare_self.returnSlug());
-                  let image = url + '?og_img_sig=' + sig;
-
-                  updated_social = {
-                    twitter: '@SaitoOfficial',
-                    title: user + ' posted on Saito 🟥',
-                    url: url,
-                    description: app.browser.escapeHTML(text),
-                    image: image
-                  };
-
-                  app.storage.loadTransactions(
-                    {
-                      field1: 'RedSquare',
-                      field5: returned_tweet.thread_id,
-                      flagged: 0,
-                      limit: 100
-                    },
-                    (raw_txs) => {
-                      let html = redsquareHome(
-                        app,
-                        redsquare_self,
-                        app.build_number,
-                        updated_social,
-                        raw_txs
-                      );
-                      if (!res.finished) {
-                        res.setHeader('Content-type', 'text/html');
-                        res.charset = 'UTF-8';
-                        return res.send(html);
-                      }
-                    },
-                    'localhost',
-                    0
-                  );
-                }
-              },
-              'localhost'
-            );
-
-            return;
-          }
-
-          /* Return associated tweet image for rendering open graph */
-          if (typeof query_params.og_img_sig != 'undefined') {
-            let sig = query_params.og_img_sig;
-
-            redsquare_self.loadTweetWithSig(sig, (txs) => {
-              for (let i = 0; i < txs.length; i++) {
-                let tx = txs[i];
-                let txmsg = tx.returnMessage();
-                let img = '';
-                let img_type;
-
-                if (txmsg.data?.images?.length > 0) {
-                  let img_uri = txmsg.data.images[0];
-                  img_type = img_uri.substring(img_uri.indexOf(':') + 1, img_uri.indexOf(';'));
-                  let base64Data = img_uri.replace(/^data:image\/(png|jpeg|jpg);base64,/, '');
-                  img = Buffer.from(base64Data, 'base64');
-                } else {
-                  let publicKey = tx.from[0].publicKey;
-                  let img_uri = app.keychain.returnIdenticon(publicKey, 'png');
-                  let base64Data = img_uri.replace(/^data:image\/png;base64,/, '');
-                  img = Buffer.from(base64Data, 'base64');
-                  img_type = img_uri.substring(img_uri.indexOf(':') + 1, img_uri.indexOf(';'));
-                }
-
-                if (img_type == 'image/svg+xml') {
-                  img_type = 'image/svg';
-                }
-
-                if (!res.finished) {
-                  res.writeHead(200, {
-                    'Content-Type': img_type,
-                    'Content-Length': img.length
-                  });
-                  return res.end(img);
-                }
-              }
-            });
-
-            return;
-          }
-        }
-      } catch (err) {
-        // console.error('RS.webServer: Loading OG data failed with error: ', err);
-      }
-
-      redsquare_self.cacheRecentTweets();
-
-      if (!res.finished) {
-        let html = redsquareHome(
-          app,
-          redsquare_self,
-          app.build_number,
-          redsquare_self.social,
-          redsquare_self.cached_tweets
-        );
-        res.setHeader('Content-type', 'text/html');
-        res.charset = 'UTF-8';
-        return res.send(html);
-      }
+    if (!publicKey) {
       return;
+    }
+
+    const existing = this.peers.find((p) => p.publicKey === publicKey);
+
+    if (existing) {
+      existing.peer = peer;
+      return;
+    }
+
+    this.peers.push({
+      peer,
+      publicKey,
+      tweets_earliest_ts: new Date().getTime(),
+      tweets_latest_ts: 0,
+      tweets_limit: 10,
+      busy: {}
     });
   }
 
-  // This needs to be a separate function from basic moderation, because users
-  // will want to toggle it on/off, but moderation happens at the core and blocks
-  // even receiving transactions
-  curate(tx) {
-    // MODERATE first
-    // accept black and white lists as authoritative before defaulting to tweet analysis
+  //
+  // Canonical remote loading entry point.
+  //
+  loadTransactions(type, direction, callback) {
+    if (typeof callback !== 'function') {
+      return;
+    }
+
+    if (type !== 'tweets' && type !== 'notifications') {
+      callback({
+        type,
+        direction,
+        added: [],
+        updated: [],
+        ignored: [],
+        exhausted: true
+      });
+      return;
+    }
+
+    if (direction !== 'older' && direction !== 'newer') {
+      callback({
+        type,
+        direction,
+        added: [],
+        updated: [],
+        ignored: [],
+        exhausted: true
+      });
+      return;
+    }
+
+    const isOlder = direction === 'older';
+
+    if (type === 'tweets') {
+      const busyKey = `tweets:${direction}`;
+
+      if (!this._load_busy) {
+        this._load_busy = {};
+      }
+
+      if (this._load_busy[busyKey]) {
+        this._load_busy[busyKey].push(callback);
+        return;
+      }
+
+      this._load_busy[busyKey] = [callback];
+
+      const added = [];
+      const new_tweets = [];
+      const updated = [];
+      const ignored = [];
+      const peer_exhausted = [];
+      // Polling uses updated_at so liked posts are returned too. Only creation time
+      // determines whether a downloaded post is new enough to announce.
+      const newest_known_tweet_ts = this.tweets_timeline.reduce((latest, signature) => {
+        const tweet = this.getTweet(signature);
+        return Math.max(latest, Number(tweet?.created_at) || 0);
+      }, 0);
+      let peers_remaining = 0;
+
+      const finishTweets = () => {
+        const exhausted =
+          added.length === 0 && peer_exhausted.length > 0 && peer_exhausted.every(Boolean);
+        const result = {
+          type,
+          direction,
+          added: added.slice(),
+          new_tweets: new_tweets.slice(),
+          updated: updated.slice(),
+          ignored: ignored.slice(),
+          exhausted
+        };
+        const callbacks = this._load_busy[busyKey] || [];
+
+        this._load_busy[busyKey] = null;
+
+        for (const cb of callbacks) {
+          cb(result);
+        }
+      };
+
+      const processTweetTxs = (peer_obj, txs, older, updateEarliest) => {
+        for (let i = 0; i < txs.length; i++) {
+          const tx = txs[i];
+
+          if (!tx) {
+            continue;
+          }
+
+          const working =
+            typeof tx.toJson === 'function' ? new Transaction(undefined, tx.toJson()) : tx;
+
+          if (!working) {
+            continue;
+          }
+
+          if (working !== tx) {
+            working.optional =
+              tx.optional && typeof tx.optional === 'object' ? { ...tx.optional } : {};
+          }
+
+          if (typeof working.decryptMessage === 'function') {
+            working.decryptMessage(this.app);
+          }
+
+          const signature = working.signature != null ? String(working.signature) : '';
+
+          if (!signature) {
+            continue;
+          }
+
+          const created_at = Number(tx.timestamp) || Date.now();
+          const updated_at = Number(tx.optional?.updated_at) || created_at;
+          const hadTweet = this.hasTweet(signature);
+          const tweet = this.addTweet(working);
+
+          if (!tweet) {
+            if (!ignored.includes(signature)) {
+              ignored.push(signature);
+            }
+          } else if (!hadTweet) {
+            if (!added.includes(signature)) {
+              added.push(signature);
+            }
+            if (this.app.BROWSER) {
+              this.addNotification(working);
+            }
+            if (!older && created_at > newest_known_tweet_ts && !new_tweets.includes(signature)) {
+              new_tweets.push(signature);
+            }
+          } else if (!updated.includes(signature)) {
+            updated.push(signature);
+          }
+
+          if (updateEarliest && created_at < peer_obj.tweets_earliest_ts) {
+            peer_obj.tweets_earliest_ts = created_at;
+            this.tweets_earliest_ts = Math.min(
+              this.tweets_earliest_ts,
+              peer_obj.tweets_earliest_ts
+            );
+          }
+
+          if (updated_at > peer_obj.tweets_latest_ts) {
+            peer_obj.tweets_latest_ts = updated_at;
+            this.tweets_latest_ts = Math.max(this.tweets_latest_ts, updated_at);
+          }
+        }
+      };
+
+      const onPeerComplete = (peer_obj, txs, older, peerIndex, updateEarliest = older) => {
+        const empty = !txs || txs.length === 0;
+
+        if (empty && updateEarliest) {
+          peer_obj.tweets_earliest_ts = 0;
+
+          if (peer_obj.publicKey === this.publicKey) {
+            this.tweets_earliest_ts = 0;
+          }
+        }
+
+        peer_exhausted[peerIndex] = empty;
+        processTweetTxs(peer_obj, txs || [], older, updateEarliest);
+        peers_remaining--;
+
+        if (peers_remaining <= 0) {
+          finishTweets();
+        }
+      };
+
+      for (let i = 0; i < this.peers.length; i++) {
+        const peer_obj = this.peers[i];
+        const initialHydration = !isOlder && peer_obj.tweets_latest_ts === 0;
+        const eligible =
+          (isOlder &&
+            peer_obj.tweets_earliest_ts >= this.tweets_earliest_ts &&
+            peer_obj.tweets_earliest_ts > 0) ||
+          (!isOlder && (peer_obj.publicKey !== this.publicKey || peer_obj.peer === 'localhost'));
+
+        if (!eligible) {
+          continue;
+        }
+
+        const peerIndex = peers_remaining;
+        peers_remaining++;
+        peer_exhausted[peerIndex] = false;
+
+        if (isOlder && peer_obj.publicKey !== this.publicKey) {
+          this.app.network.sendRequestAsTransaction(
+            'load tweets',
+            { created_earlier_than: peer_obj.tweets_earliest_ts },
+            (txs) => {
+              const deserialized = [];
+
+              for (let t = 0; t < (txs || []).length; t++) {
+                const tx = new Transaction();
+                tx.deserialize_from_web(this.app, txs[t]);
+                deserialized.push(tx);
+              }
+
+              onPeerComplete(peer_obj, deserialized, true, peerIndex);
+            },
+            peer_obj.peer.publicKey
+          );
+        } else {
+          const obj = {
+            field1: 'RedSquare',
+            flagged_ne: 1,
+            limit: peer_obj.tweets_limit
+          };
+
+          if (isOlder || initialHydration) {
+            obj.created_earlier_than = peer_obj.tweets_earliest_ts;
+          } else {
+            obj.updated_later_than = peer_obj.tweets_latest_ts;
+          }
+
+          const archivePeer = peer_obj.peer === 'localhost' ? 'localhost' : peer_obj.peer;
+
+          this.app.storage.loadTransactions(
+            obj,
+            (txs) => {
+              onPeerComplete(
+                peer_obj,
+                txs || [],
+                isOlder,
+                peerIndex,
+                isOlder || initialHydration
+              );
+            },
+            archivePeer
+          );
+        }
+      }
+
+      if (peers_remaining === 0) {
+        const callbacks = this._load_busy[busyKey] || [];
+        this._load_busy[busyKey] = null;
+
+        for (const cb of callbacks) {
+          cb({
+            type,
+            direction,
+            added: [],
+            new_tweets: [],
+            updated: [],
+            ignored: [],
+            exhausted: true
+          });
+        }
+      }
+
+      return;
+    }
+
     //
+    // -------------------------------------------------------------------------
+    // notifications (localhost archive only)
+    // -------------------------------------------------------------------------
+    //
+    const busyKey = `notifications:${direction}`;
 
-    let moderation_score = this.app.modules.moderate(tx, this.name);
-
-    if (moderation_score == 1) {
-      return 1;
-    }
-    if (moderation_score == -1) {
-      return -1;
-    }
-
-    // My contacts get through
-    if (this.app.keychain.hasPublicKey(tx.from[0].publicKey)) {
-      return 1;
+    if (!this._load_busy) {
+      this._load_busy = {};
     }
 
-    if (tx.to[0].amount) {
-      //console.log('Auto approve moneyed tweets: ', tx.to[0].amount);
-      return 1;
+    if (this._load_busy[busyKey]) {
+      this._load_busy[busyKey].push(callback);
+      return;
     }
 
-    // Allow us to cache curated status (preferably just "1") in local archives
-    if (tx.optional.curated !== undefined) {
-      return tx.optional.curated;
-    }
+    this._load_busy[busyKey] = [callback];
 
-    return 0;
-  }
+    const collected = [];
+    const added = [];
+    const updated = [];
+    const ignored = [];
+    const contactKeys = Array.from(
+      new Set(
+        (this.app.keychain?.returnKeys?.() || [])
+          .map((key) => key?.publicKey)
+          .filter((publicKey) => publicKey && publicKey !== this.publicKey)
+      )
+    );
+    const contactArchivePeer = this.peers[0]?.peer || 'localhost';
+    let exhausted = false;
+    let queries = 0;
+    let queries_done = 0;
 
-  packTweetThread(tweet) {
-    let txs = [];
+    const finishNotifications = () => {
+      if (collected.length === 0) {
+        if (isOlder) {
+          this.notifications_earliest_like_ts = 0;
+          this.notifications_earliest_retweet_ts = 0;
+        }
+        exhausted = true;
+      }
 
-    const processTX = (tweet) => {
-      // tweet.updated_at may get updated independently of the optional...
-      tweet.tx.optional.updated_at = tweet.updated_at;
-      let r = tweet.tx.serialize_to_web(tweet.app);
-      return r;
+      for (let z = 0; z < collected.length; z++) {
+        const tx = collected[z];
+
+        if (!tx) {
+          continue;
+        }
+
+        const working =
+          typeof tx.toJson === 'function' ? new Transaction(undefined, tx.toJson()) : tx;
+
+        if (!working) {
+          continue;
+        }
+
+        if (typeof working.decryptMessage === 'function') {
+          working.decryptMessage(this.app);
+        }
+
+        const signature = working.signature != null ? String(working.signature) : '';
+
+        if (!signature) {
+          continue;
+        }
+
+        const ts = Number(tx.timestamp) || Date.now();
+        const hadNotification = this.hasNotification(signature);
+        const notification = this.addNotification(working);
+
+        if (!notification) {
+          if (!ignored.includes(signature)) {
+            ignored.push(signature);
+          }
+        } else if (notification.signature === signature && !hadNotification) {
+          if (!added.includes(signature)) {
+            added.push(signature);
+          }
+        } else if (notification.signature === signature && hadNotification) {
+          if (!updated.includes(signature)) {
+            updated.push(signature);
+          }
+        } else {
+          if (!updated.includes(notification.signature)) {
+            updated.push(notification.signature);
+          }
+
+          if (!ignored.includes(signature)) {
+            ignored.push(signature);
+          }
+        }
+
+        if (isOlder) {
+          const txmsg = tx.returnMessage ? tx.returnMessage() : tx.msg || {};
+
+          if (txmsg.request === 'like tweet') {
+            if (ts < this.notifications_earliest_like_ts) {
+              this.notifications_earliest_like_ts = ts;
+            }
+          } else if (txmsg.request === 'retweet') {
+            if (ts < this.notifications_earliest_retweet_ts) {
+              this.notifications_earliest_retweet_ts = ts;
+            }
+          }
+        } else if (ts > this.notifications_latest_ts) {
+          this.notifications_latest_ts = ts;
+        }
+      }
+
+      const result = {
+        type,
+        direction,
+        added: added.slice(),
+        updated: updated.slice(),
+        ignored: ignored.slice(),
+        exhausted
+      };
+      const callbacks = this._load_busy[busyKey] || [];
+
+      this._load_busy[busyKey] = null;
+
+      for (const cb of callbacks) {
+        cb(result);
+      }
     };
 
-    txs.push(processTX(tweet));
+    const onNotificationQueryDone = () => {
+      queries_done++;
 
-    for (let i = 0; i < tweet.children.length; i++) {
-      txs = txs.concat(this.packTweetThread(tweet.children[i]));
+      if (queries_done >= queries) {
+        finishNotifications();
+      }
+    };
+
+    if (isOlder) {
+      for (const publicKey of contactKeys) {
+        if (
+          !Object.prototype.hasOwnProperty.call(this.notifications_contact_earliest_ts, publicKey)
+        ) {
+          this.notifications_contact_earliest_ts[publicKey] = Date.now();
+        }
+
+        const earliestTs = this.notifications_contact_earliest_ts[publicKey];
+
+        if (!earliestTs) {
+          continue;
+        }
+
+        queries++;
+
+        this.app.storage.loadTransactions(
+          {
+            field1: 'RedSquare',
+            field2: publicKey,
+            created_earlier_than: earliestTs,
+            limit: 10
+          },
+          (txs) => {
+            const rows = txs || [];
+
+            if (rows.length === 0) {
+              this.notifications_contact_earliest_ts[publicKey] = 0;
+            }
+
+            for (const tx of rows) {
+              if (tx.timestamp < this.notifications_contact_earliest_ts[publicKey]) {
+                this.notifications_contact_earliest_ts[publicKey] = tx.timestamp;
+              }
+              collected.push(tx);
+            }
+            onNotificationQueryDone();
+          },
+          contactArchivePeer
+        );
+      }
+
+      if (this.notifications_earliest_like_ts) {
+        queries++;
+
+        this.app.storage.loadTransactions(
+          {
+            field1: 'RedSquareLike',
+            field3: this.publicKey,
+            created_earlier_than: this.notifications_earliest_like_ts,
+            limit: 10
+          },
+          (txs) => {
+            for (const tx of txs || []) {
+              if (tx.timestamp < this.notifications_earliest_like_ts) {
+                this.notifications_earliest_like_ts = tx.timestamp;
+              }
+              collected.push(tx);
+            }
+            onNotificationQueryDone();
+          },
+          'localhost'
+        );
+      }
+
+      if (this.notifications_earliest_retweet_ts) {
+        queries++;
+
+        this.app.storage.loadTransactions(
+          {
+            field1: 'RedSquareRetweet',
+            field3: this.publicKey,
+            created_earlier_than: this.notifications_earliest_retweet_ts,
+            limit: 10
+          },
+          (txs) => {
+            for (const tx of txs || []) {
+              if (tx.timestamp < this.notifications_earliest_retweet_ts) {
+                this.notifications_earliest_retweet_ts = tx.timestamp;
+              }
+              collected.push(tx);
+            }
+            onNotificationQueryDone();
+          },
+          'localhost'
+        );
+      }
+    } else {
+      for (const publicKey of contactKeys) {
+        const latestTs = this.notifications_contact_latest_ts[publicKey] || 0;
+
+        queries++;
+
+        this.app.storage.loadTransactions(
+          {
+            field1: 'RedSquare',
+            field2: publicKey,
+            created_later_than: latestTs,
+            limit: 10
+          },
+          (txs) => {
+            for (const tx of txs || []) {
+              const ts = Number(tx.timestamp) || 0;
+
+              if (ts > (this.notifications_contact_latest_ts[publicKey] || 0)) {
+                this.notifications_contact_latest_ts[publicKey] = ts;
+              }
+
+              collected.push(tx);
+            }
+            onNotificationQueryDone();
+          },
+          contactArchivePeer
+        );
+      }
+
+      queries++;
+
+      this.app.storage.loadTransactions(
+        {
+          field1: 'RedSquareLike',
+          field3: this.publicKey,
+          updated_later_than: this.notifications_latest_ts,
+          limit: 10
+        },
+        (txs) => {
+          for (const tx of txs || []) {
+            collected.push(tx);
+          }
+          onNotificationQueryDone();
+        },
+        'localhost'
+      );
+
+      queries++;
+
+      this.app.storage.loadTransactions(
+        {
+          field1: 'RedSquareRetweet',
+          field3: this.publicKey,
+          updated_later_than: this.notifications_latest_ts,
+          limit: 10
+        },
+        (txs) => {
+          for (const tx of txs || []) {
+            collected.push(tx);
+          }
+          onNotificationQueryDone();
+        },
+        'localhost'
+      );
     }
 
-    return txs;
+    if (queries === 0) {
+      const callbacks = this._load_busy[busyKey] || [];
+      this._load_busy[busyKey] = null;
+
+      for (const cb of callbacks) {
+        cb({
+          type,
+          direction,
+          added: [],
+          updated: [],
+          ignored: [],
+          exhausted: true
+        });
+      }
+    }
   }
 
-  async dbCleanUp(earlier_than = Date.now()) {
-    this.app.storage.loadTransactions(
-      {
+  async handlePeerTransaction(app, tx = null, peer, mycallback) {
+    if (tx == null) {
+      return 0;
+    }
+
+    const txmsg = tx.returnMessage();
+
+    if (!txmsg.request) {
+      return 0;
+    }
+
+    if (!txmsg.module || txmsg.module === this.name) {
+      switch (txmsg.request) {
+        case 'like tweet':
+          await this.receiveLikeTweetTransaction(tx);
+          if (mycallback) {
+            mycallback({});
+          }
+          return 1;
+        case 'retweet':
+          await this.receiveRetweetTransaction(tx);
+          if (mycallback) {
+            mycallback({});
+          }
+          return 1;
+        case 'flag tweet':
+          await this.receiveFlagTweetTransaction(tx);
+          if (mycallback) {
+            mycallback({});
+          }
+          return 1;
+        case 'review tweet':
+          await this.receiveReviewTweetTransaction(tx);
+          if (mycallback) {
+            mycallback({});
+          }
+          return 1;
+        case 'edit tweet':
+          await this.receiveEditTweetTransaction(tx);
+          if (mycallback) {
+            mycallback({});
+          }
+          return 1;
+        case 'delete tweet':
+          await this.receiveDeleteTweetTransaction(tx);
+          if (mycallback) {
+            mycallback({});
+          }
+          return 1;
+        default:
+          break;
+      }
+    }
+
+    if (txmsg.request === 'load tweets' && txmsg.data?.created_earlier_than != undefined) {
+      if (!mycallback) {
+        return 0;
+      }
+
+      const obj = {
         field1: 'RedSquare',
-        field5: '',
-        created_earlier_than: earlier_than,
-        limit: 100
-      },
-      async (txs) => {
-        let counts = {
-          total: 0,
-          game: 0,
-          reply: 0,
-          feed: 0
-        };
-        for (let tx of txs) {
-          let txmsg = tx.returnMessage();
-          if (txmsg.request === 'create tweet') {
-            let tweet = new Tweet(this.app, this, tx);
+        flagged_ne: 1,
+        limit: 10,
+        created_earlier_than: txmsg.data.created_earlier_than
+      };
 
-            for (let xmod of this.app.modules.respondTo('redsquare-add-tweet')) {
-              tweet = xmod.respondTo('redsquare-add-tweet').processTweet(tweet);
-            }
+      this.app.storage.loadTransactions(
+        obj,
+        (txs) => {
+          const serialized = [];
 
-            counts.total++;
-            if (tweet.game) {
-              counts.game++;
-            }
-            if (tweet.parent_id) {
-              counts.reply++;
-            } else {
-              counts.feed++;
-            }
-
-            this.saveTweet(tweet);
+          for (const row of txs || []) {
+            serialized.push(row.serialize_to_web(this.app));
           }
 
-          if (tx.timestamp < earlier_than) {
-            earlier_than = tx.timestamp;
-          }
-        }
+          mycallback(serialized);
+        },
+        'localhost'
+      );
 
-        if (txs.length) {
-          console.log(
-            `Batch processed: ${counts.total} transactions... ${counts.game} games, ${counts.reply} replies`
-          );
-          setTimeout(() => {
-            this.dbCleanUp(earlier_than);
-          }, 15000);
-        } else {
-          console.log(
-            '######################## \n \n Finished !!!!!!!!!!! \n \n ###########################'
-          );
-        }
-      },
+      return 1;
+    }
+
+    return super.handlePeerTransaction(app, tx, peer, mycallback);
+  }
+
+  //
+  // Tweet transaction construction
+  //
+
+  async createTweetTransaction(data = {}, keys = []) {
+    const payload = {};
+
+    if (data && typeof data === 'object') {
+      for (const key of Object.keys(data)) {
+        payload[key] = data[key];
+      }
+    }
+
+    if (payload.text != null) {
+      payload.text = String(payload.text);
+    }
+
+    if (payload.parent_id != null) {
+      payload.parent_id = String(payload.parent_id);
+    }
+
+    if (payload.thread_id != null) {
+      payload.thread_id = String(payload.thread_id);
+    }
+
+    if (payload.images != null) {
+      payload.images = Array.isArray(payload.images) ? payload.images.slice() : [payload.images];
+    }
+
+    if (payload.mentions != null) {
+      payload.mentions = Array.isArray(payload.mentions)
+        ? payload.mentions.slice()
+        : [payload.mentions];
+    }
+
+    const newtx = await this.app.wallet.createUnsignedTransaction();
+    newtx.msg = {
+      module: this.name,
+      request: 'create tweet',
+      data: payload
+    };
+
+    for (const key of keys) {
+      if (key && key !== this.publicKey) {
+        newtx.addTo(key);
+      }
+    }
+
+    return newtx;
+  }
+
+  async createLikeTweetTransaction(data = {}, keys = []) {
+    const payload = {};
+
+    if (data && typeof data === 'object') {
+      for (const key of Object.keys(data)) {
+        payload[key] = data[key];
+      }
+    }
+
+    if (payload.signature != null) {
+      payload.signature = String(payload.signature);
+    }
+
+    const newtx = await this.app.wallet.createUnsignedTransaction();
+    newtx.msg = {
+      module: this.name,
+      request: 'like tweet',
+      data: payload
+    };
+
+    for (const key of keys) {
+      if (key && key !== this.publicKey) {
+        newtx.addTo(key);
+      }
+    }
+
+    return newtx;
+  }
+
+  async createRetweetTransaction(data = {}, keys = []) {
+    const payload = {};
+
+    if (data && typeof data === 'object') {
+      for (const key of Object.keys(data)) {
+        payload[key] = data[key];
+      }
+    }
+
+    if (payload.signature != null) {
+      payload.signature = String(payload.signature);
+    }
+
+    const newtx = await this.app.wallet.createUnsignedTransaction();
+    newtx.msg = {
+      module: this.name,
+      request: 'retweet',
+      data: payload
+    };
+
+    for (const key of keys) {
+      if (key && key !== this.publicKey) {
+        newtx.addTo(key);
+      }
+    }
+
+    return newtx;
+  }
+
+  async createFlagTweetTransaction(data = {}, keys = []) {
+    const payload = {};
+
+    if (data && typeof data === 'object') {
+      for (const key of Object.keys(data)) {
+        payload[key] = data[key];
+      }
+    }
+
+    if (payload.signature != null) {
+      payload.signature = String(payload.signature);
+    }
+
+    const newtx = await this.app.wallet.createUnsignedTransaction();
+    newtx.msg = {
+      module: this.name,
+      request: 'flag tweet',
+      data: payload
+    };
+
+    for (const key of keys) {
+      if (key && key !== this.publicKey) {
+        newtx.addTo(key);
+      }
+    }
+
+    return newtx;
+  }
+
+  async createReviewTweetTransaction(data = {}, keys = []) {
+    const payload = {};
+
+    if (data && typeof data === 'object') {
+      for (const key of Object.keys(data)) {
+        payload[key] = data[key];
+      }
+    }
+
+    if (payload.signature != null) {
+      payload.signature = String(payload.signature);
+    }
+
+    if (payload.decision != null) {
+      payload.decision = String(payload.decision);
+    }
+
+    const newtx = await this.app.wallet.createUnsignedTransaction();
+    newtx.msg = {
+      module: this.name,
+      request: 'review tweet',
+      data: payload
+    };
+
+    for (const key of keys) {
+      if (key && key !== this.publicKey) {
+        newtx.addTo(key);
+      }
+    }
+
+    return newtx;
+  }
+
+  async createEditTweetTransaction(data = {}, keys = []) {
+    const payload = {};
+
+    if (data && typeof data === 'object') {
+      for (const key of Object.keys(data)) {
+        payload[key] = data[key];
+      }
+    }
+
+    if (payload.text != null) {
+      payload.text = String(payload.text);
+    }
+
+    if (payload.tweet_id != null) {
+      payload.tweet_id = String(payload.tweet_id);
+    }
+
+    const newtx = await this.app.wallet.createUnsignedTransaction();
+    newtx.msg = {
+      module: this.name,
+      request: 'edit tweet',
+      data: payload
+    };
+
+    for (const key of keys) {
+      if (key && key !== this.publicKey) {
+        newtx.addTo(key);
+      }
+    }
+
+    return newtx;
+  }
+
+  async createDeleteTweetTransaction(data = {}, keys = []) {
+    const payload = {};
+
+    if (data && typeof data === 'object') {
+      for (const key of Object.keys(data)) {
+        payload[key] = data[key];
+      }
+    }
+
+    if (payload.tweet_id != null) {
+      payload.tweet_id = String(payload.tweet_id);
+    }
+
+    const newtx = await this.app.wallet.createUnsignedTransaction();
+    newtx.msg = {
+      module: this.name,
+      request: 'delete tweet',
+      data: payload
+    };
+
+    for (const key of keys) {
+      if (key && key !== this.publicKey) {
+        newtx.addTo(key);
+      }
+    }
+
+    return newtx;
+  }
+
+  returnInteractionTargetPublicKey(tx) {
+    const actorPublicKey = tx?.from?.[0]?.publicKey || '';
+    // The wallet's sender output precedes recipients in tx.to.
+    const target = tx?.to?.find((slip) => slip?.publicKey && slip.publicKey !== actorPublicKey);
+
+    return target?.publicKey || '';
+  }
+
+  async saveTweet(tweet, blk = null) {
+    if (tweet?.ephemeral) {
+      return;
+    }
+
+    const signature = tweet?.tx?.signature;
+
+    if (!signature || !tweet.thread_id) {
+      return;
+    }
+
+    const previousSave = this.tweet_archive_saves[signature] || Promise.resolve();
+    const archiveSave = previousSave
+      .catch(() => {})
+      .then(() => this.saveTweetToArchive(tweet, blk));
+
+    this.tweet_archive_saves[signature] = archiveSave;
+
+    try {
+      await archiveSave;
+    } finally {
+      if (this.tweet_archive_saves[signature] === archiveSave) {
+        delete this.tweet_archive_saves[signature];
+      }
+    }
+  }
+
+  async saveTweetToArchive(tweet, blk = null) {
+    const signature = tweet.tx.signature;
+
+    const archiveOptions = {
+      field1: 'RedSquare',
+      preserve: 0,
+      field4: tweet.parent_id || '',
+      field5: tweet.thread_id,
+      updated_at:
+        Number(tweet.tx.optional?.updated_at) ||
+        Number(tweet.updated_at) ||
+        Number(tweet.tx.timestamp) ||
+        Date.now()
+    };
+    const targetPublicKey = this.returnInteractionTargetPublicKey(tweet.tx);
+
+    if (tweet.parent_id && targetPublicKey) {
+      archiveOptions.field3 = targetPublicKey;
+    }
+
+    if (blk) {
+      archiveOptions.block_hash = blk.hash;
+      archiveOptions.block_id = Number(blk.id);
+    }
+
+    const archivedTweets = await this.app.storage.loadTransactions(
+      { field1: 'RedSquare', sig: signature },
+      (txs) => txs || [],
       'localhost'
     );
+
+    if (archivedTweets?.length) {
+      await this.app.storage.updateTransaction(tweet.tx, archiveOptions, 'localhost', 1);
+      return;
+    }
+
+    await this.app.storage.saveTransaction(tweet.tx, archiveOptions, 'localhost', blk);
+  }
+
+  async saveLike(tx, blk = null) {
+    const signature = tx?.signature;
+
+    if (!signature) {
+      return false;
+    }
+
+    const previousSave = this.like_archive_saves[signature] || Promise.resolve();
+    const archiveSave = previousSave.catch(() => {}).then(() => this.saveLikeToArchive(tx, blk));
+
+    this.like_archive_saves[signature] = archiveSave;
+
+    try {
+      return await archiveSave;
+    } finally {
+      if (this.like_archive_saves[signature] === archiveSave) {
+        delete this.like_archive_saves[signature];
+      }
+    }
+  }
+
+  async saveLikeToArchive(tx, blk = null) {
+    const txmsg = tx?.returnMessage?.() || tx?.msg || {};
+    const targetSignature = txmsg?.data?.signature != null ? String(txmsg.data.signature) : '';
+    const archiveOptions = {
+      field1: 'RedSquareLike',
+      preserve: 0,
+      field3: this.returnInteractionTargetPublicKey(tx),
+      field4: targetSignature
+    };
+
+    if (blk) {
+      archiveOptions.block_hash = blk.hash;
+      archiveOptions.block_id = Number(blk.id);
+    }
+
+    const archivedLikes = await this.app.storage.loadTransactions(
+      { field1: 'RedSquareLike', sig: tx.signature },
+      (txs) => txs || [],
+      'localhost'
+    );
+
+    if (archivedLikes?.length) {
+      await this.app.storage.updateTransaction(tx, archiveOptions, 'localhost', 1);
+      return false;
+    }
+
+    await this.app.storage.saveTransaction(tx, archiveOptions, 'localhost', blk);
+    return true;
+  }
+
+  async saveRetweet(tx, blk = null) {
+    const signature = tx?.signature;
+    const txmsg = tx?.returnMessage?.() || tx?.msg || {};
+    const targetSignature = txmsg?.data?.signature != null ? String(txmsg.data.signature) : '';
+
+    if (!signature || !targetSignature) {
+      return;
+    }
+
+    const previousSave = this.retweet_archive_saves[signature] || Promise.resolve();
+    const archiveSave = previousSave
+      .catch(() => {})
+      .then(async () => {
+        const archiveOptions = {
+          field1: 'RedSquareRetweet',
+          preserve: 0,
+          field3: this.returnInteractionTargetPublicKey(tx),
+          field4: targetSignature
+        };
+
+        if (blk) {
+          archiveOptions.block_hash = blk.hash;
+          archiveOptions.block_id = Number(blk.id);
+        }
+
+        const archivedRetweets = await this.app.storage.loadTransactions(
+          { field1: 'RedSquareRetweet', sig: signature },
+          (txs) => txs || [],
+          'localhost'
+        );
+
+        if (archivedRetweets?.length) {
+          await this.app.storage.updateTransaction(tx, archiveOptions, 'localhost', 1);
+          return;
+        }
+
+        await this.app.storage.saveTransaction(tx, archiveOptions, 'localhost', blk);
+      });
+
+    this.retweet_archive_saves[signature] = archiveSave;
+
+    try {
+      await archiveSave;
+    } finally {
+      if (this.retweet_archive_saves[signature] === archiveSave) {
+        delete this.retweet_archive_saves[signature];
+      }
+    }
+  }
+
+  async receiveTweetTransaction(tx, blk = null) {
+    const tweet = this.addTweet(tx);
+
+    if (tweet && !this.app.BROWSER) {
+      await tweet.analyseTweetLinks(true);
+    }
+
+    await this.saveTweet(tweet, blk);
+
+    if (this.app.BROWSER) {
+      this.addNotification(tx);
+    }
+
+    if (tweet?.parent_id && tweet.parent_id !== tweet.signature) {
+      const parent = this.getTweet(tweet.parent_id);
+      const interactionTs = Number(tx.timestamp) || Date.now();
+
+      if (parent?.tx) {
+        const parentTx = parent.tx;
+
+        if (!parentTx.optional || typeof parentTx.optional !== 'object') {
+          parentTx.optional = {};
+        }
+
+        const parentTs =
+          Number(parent.updated_at) ||
+          Number(parentTx.optional.updated_at) ||
+          Number(parentTx.timestamp) ||
+          0;
+
+        if (interactionTs > parentTs) {
+          parentTx.optional.num_replies = Number(parentTx.optional.num_replies) || 0;
+          parentTx.optional.num_replies += 1;
+          parentTx.optional.updated_at = interactionTs;
+          parent.replies = parentTx.optional.num_replies;
+          parent.updated_at = interactionTs;
+
+          await this.app.storage.updateTransaction(
+            parentTx,
+            { updated_at: interactionTs },
+            'localhost'
+          );
+
+          parent.refreshControls();
+        }
+      } else {
+        await new Promise((resolve) => {
+          this.app.storage.loadTransactions(
+            { sig: tweet.parent_id, field1: 'RedSquare' },
+            async (txs) => {
+              if (txs?.length > 0) {
+                const parentTx = txs[0];
+
+                if (!parentTx.optional || typeof parentTx.optional !== 'object') {
+                  parentTx.optional = {};
+                }
+
+                const parentTs =
+                  Number(parentTx.optional.updated_at) || Number(parentTx.timestamp) || 0;
+
+                if (interactionTs > parentTs) {
+                  parentTx.optional.num_replies = Number(parentTx.optional.num_replies) || 0;
+                  parentTx.optional.num_replies += 1;
+
+                  await this.app.storage.updateTransaction(
+                    parentTx,
+                    { updated_at: interactionTs },
+                    'localhost'
+                  );
+                }
+              }
+
+              resolve();
+            },
+            'localhost'
+          );
+        });
+      }
+    }
+
+    return tweet;
+  }
+
+  async receiveLikeTweetTransaction(tx, blk = null) {
+    const txmsg = tx?.returnMessage?.() || tx?.msg || {};
+    const targetSignature = txmsg?.data?.signature != null ? String(txmsg.data.signature) : '';
+
+    if (!targetSignature) {
+      return null;
+    }
+
+    const previousUpdate = this.like_target_updates[targetSignature] || Promise.resolve();
+    const targetUpdate = previousUpdate
+      .catch(() => {})
+      .then(() => this.applyLikeTweetTransaction(tx, blk, targetSignature));
+
+    this.like_target_updates[targetSignature] = targetUpdate;
+
+    try {
+      return await targetUpdate;
+    } finally {
+      if (this.like_target_updates[targetSignature] === targetUpdate) {
+        delete this.like_target_updates[targetSignature];
+      }
+    }
+  }
+
+  async applyLikeTweetTransaction(tx, blk, targetSignature) {
+    // Archive signatures deduplicate optimistic delivery and confirmation without
+    // preventing the same user from submitting another signed like transaction.
+    const isNewLike = await this.saveLike(tx, blk);
+
+    const interactionTs = Number(tx.timestamp) || Date.now();
+    const likerKey =
+      tx.from && tx.from[0] && tx.from[0].publicKey ? String(tx.from[0].publicKey) : '';
+    const tweet = this.getTweet(targetSignature);
+
+    if (tweet?.tx) {
+      const targetTx = tweet.tx;
+
+      if (!targetTx.optional || typeof targetTx.optional !== 'object') {
+        targetTx.optional = {};
+      }
+
+      const targetTs =
+        Number(tweet.updated_at) ||
+        Number(targetTx.optional.updated_at) ||
+        Number(targetTx.timestamp) ||
+        0;
+      const likers = Array.isArray(targetTx.optional.likers) ? targetTx.optional.likers : [];
+
+      if (isNewLike) {
+        targetTx.optional.num_likes = Number(targetTx.optional.num_likes) || 0;
+        targetTx.optional.num_likes += 1;
+
+        if (likerKey && !likers.includes(likerKey)) {
+          likers.unshift(likerKey);
+          targetTx.optional.likers = likers;
+        }
+
+        // Archive polling uses a strict updated_later_than cursor.
+        const updatedAt = Math.max(targetTs + 1, interactionTs);
+        targetTx.optional.updated_at = updatedAt;
+        tweet.likes = targetTx.optional.num_likes;
+        tweet.likers = likers.slice();
+        tweet.updated_at = updatedAt;
+
+        // Peer-loaded tweets may not exist in the local archive yet.
+        await this.saveTweet(tweet);
+
+        tweet.refreshControls();
+      }
+    } else {
+      await new Promise((resolve) => {
+        this.app.storage.loadTransactions(
+          { sig: targetSignature, field1: 'RedSquare' },
+          async (txs) => {
+            if (txs?.length > 0) {
+              const targetTx = txs[0];
+
+              if (!targetTx.optional || typeof targetTx.optional !== 'object') {
+                targetTx.optional = {};
+              }
+
+              const targetTs =
+                Number(targetTx.optional.updated_at) || Number(targetTx.timestamp) || 0;
+              const likers = Array.isArray(targetTx.optional.likers)
+                ? targetTx.optional.likers
+                : [];
+
+              if (isNewLike) {
+                targetTx.optional.num_likes = Number(targetTx.optional.num_likes) || 0;
+                targetTx.optional.num_likes += 1;
+
+                if (likerKey && !likers.includes(likerKey)) {
+                  likers.unshift(likerKey);
+                  targetTx.optional.likers = likers;
+                }
+
+                const updatedAt = Math.max(targetTs + 1, interactionTs);
+
+                await this.app.storage.updateTransaction(
+                  targetTx,
+                  { updated_at: updatedAt },
+                  'localhost'
+                );
+              }
+            }
+
+            resolve();
+          },
+          'localhost'
+        );
+      });
+    }
+
+    if (this.app.BROWSER) {
+      this.addNotification(tx);
+    }
+
+    return tweet;
+  }
+
+  async receiveRetweetTransaction(tx, blk = null) {
+    const txmsg = tx?.returnMessage?.() || tx?.msg || {};
+    const targetSignature = txmsg?.data?.signature != null ? String(txmsg.data.signature) : '';
+
+    if (!targetSignature) {
+      return null;
+    }
+
+    await this.saveRetweet(tx, blk);
+
+    const interactionTs = Number(tx.timestamp) || Date.now();
+    const retweeterKey =
+      tx.from && tx.from[0] && tx.from[0].publicKey ? String(tx.from[0].publicKey) : '';
+    const tweet = this.getTweet(targetSignature);
+
+    if (tweet?.tx) {
+      const targetTx = tweet.tx;
+
+      if (!targetTx.optional || typeof targetTx.optional !== 'object') {
+        targetTx.optional = {};
+      }
+
+      const targetTs =
+        Number(tweet.updated_at) ||
+        Number(targetTx.optional.updated_at) ||
+        Number(targetTx.timestamp) ||
+        0;
+
+      if (interactionTs > targetTs) {
+        targetTx.optional.num_retweets = Number(targetTx.optional.num_retweets) || 0;
+        targetTx.optional.num_retweets += 1;
+
+        if (!Array.isArray(targetTx.optional.retweeters)) {
+          targetTx.optional.retweeters = [];
+        }
+
+        if (retweeterKey && !targetTx.optional.retweeters.includes(retweeterKey)) {
+          targetTx.optional.retweeters.unshift(retweeterKey);
+        }
+
+        targetTx.optional.retweeted_at = interactionTs;
+        targetTx.optional.updated_at = interactionTs;
+        tweet.retweets = targetTx.optional.num_retweets;
+        tweet.retweeters = targetTx.optional.retweeters.slice();
+        tweet.updated_at = interactionTs;
+
+        await this.app.storage.updateTransaction(
+          targetTx,
+          { updated_at: interactionTs },
+          'localhost'
+        );
+
+        tweet.refreshControls();
+      }
+    } else {
+      await new Promise((resolve) => {
+        this.app.storage.loadTransactions(
+          { sig: targetSignature, field1: 'RedSquare' },
+          async (txs) => {
+            if (txs?.length > 0) {
+              const targetTx = txs[0];
+
+              if (!targetTx.optional || typeof targetTx.optional !== 'object') {
+                targetTx.optional = {};
+              }
+
+              const targetTs =
+                Number(targetTx.optional.updated_at) || Number(targetTx.timestamp) || 0;
+
+              if (interactionTs > targetTs) {
+                targetTx.optional.num_retweets = Number(targetTx.optional.num_retweets) || 0;
+                targetTx.optional.num_retweets += 1;
+
+                if (!Array.isArray(targetTx.optional.retweeters)) {
+                  targetTx.optional.retweeters = [];
+                }
+
+                if (retweeterKey && !targetTx.optional.retweeters.includes(retweeterKey)) {
+                  targetTx.optional.retweeters.unshift(retweeterKey);
+                }
+
+                targetTx.optional.retweeted_at = interactionTs;
+
+                await this.app.storage.updateTransaction(
+                  targetTx,
+                  { updated_at: interactionTs },
+                  'localhost'
+                );
+              }
+            }
+
+            resolve();
+          },
+          'localhost'
+        );
+      });
+    }
+
+    if (this.app.BROWSER) {
+      this.addNotification(tx);
+    }
+
+    return tweet;
+  }
+
+  async receiveFlagTweetTransaction(tx, blk = null) {
+    const txmsg = tx?.returnMessage?.() || tx?.msg || {};
+    const targetSignature = txmsg?.data?.signature != null ? String(txmsg.data.signature) : '';
+
+    if (!targetSignature) {
+      return null;
+    }
+
+    const interactionTs = Number(tx.timestamp) || Date.now();
+    const tweet = this.getTweet(targetSignature);
+
+    if (tweet?.tx) {
+      if (!tweet.tx.optional || typeof tweet.tx.optional !== 'object') {
+        tweet.tx.optional = {};
+      }
+
+      tweet.tx.optional.flagged = 1;
+      tweet.flagged = 1;
+
+      await this.app.storage.updateTransaction(
+        tweet.tx,
+        { updated_at: interactionTs, flagged: 1 },
+        'localhost'
+      );
+
+      tweet.refresh();
+      return tweet;
+    }
+
+    await new Promise((resolve) => {
+      this.app.storage.loadTransactions(
+        { sig: targetSignature, field1: 'RedSquare' },
+        async (txs) => {
+          if (txs?.length > 0) {
+            const archivedTx = txs[0];
+
+            if (!archivedTx.optional || typeof archivedTx.optional !== 'object') {
+              archivedTx.optional = {};
+            }
+
+            archivedTx.optional.flagged = 1;
+
+            await this.app.storage.updateTransaction(
+              archivedTx,
+              { updated_at: interactionTs, flagged: 1 },
+              'localhost'
+            );
+          }
+
+          resolve();
+        },
+        'localhost'
+      );
+    });
+
+    return null;
+  }
+
+  async receiveEditTweetTransaction(tx, blk = null) {
+    const txmsg = tx?.returnMessage?.() || tx?.msg || {};
+    const tweet_id = txmsg?.data?.tweet_id != null ? String(txmsg.data.tweet_id) : '';
+    const editorKey = tx?.from?.[0]?.publicKey || '';
+
+    if (!tweet_id) {
+      return null;
+    }
+
+    const interactionTs = Number(tx.timestamp) || Date.now();
+    const tweet = this.getTweet(tweet_id);
+
+    const applyToTx = async (oldtx) => {
+      if (!oldtx || oldtx.from?.[0]?.publicKey !== editorKey) {
+        return null;
+      }
+
+      if (!oldtx.optional || typeof oldtx.optional !== 'object') {
+        oldtx.optional = {};
+      }
+
+      if (interactionTs <= (Number(oldtx.optional.edit_ts) || 0)) {
+        return oldtx;
+      }
+
+      oldtx.optional.update_tx = tx.serialize_to_web(this.app);
+      oldtx.optional.edit_ts = interactionTs;
+      oldtx.optional.updated_at = interactionTs;
+
+      await this.app.storage.updateTransaction(
+        oldtx,
+        { updated_at: interactionTs },
+        'localhost'
+      );
+
+      return oldtx;
+    };
+
+    if (tweet?.tx) {
+      await applyToTx(tweet.tx);
+      tweet.applyEditFromOptional();
+      tweet.refresh();
+      return tweet;
+    }
+
+    await new Promise((resolve) => {
+      this.app.storage.loadTransactions(
+        { sig: tweet_id, field1: 'RedSquare' },
+        async (txs) => {
+          if (txs?.length) {
+            await applyToTx(txs[0]);
+          }
+          resolve();
+        },
+        'localhost'
+      );
+    });
+
+    return null;
+  }
+
+  async receiveDeleteTweetTransaction(tx, blk = null) {
+    const txmsg = tx?.returnMessage?.() || tx?.msg || {};
+    const tweet_id = txmsg?.data?.tweet_id != null ? String(txmsg.data.tweet_id) : '';
+    const deleterKey = tx?.from?.[0]?.publicKey || '';
+
+    if (!tweet_id) {
+      return null;
+    }
+
+    const interactionTs = Number(tx.timestamp) || Date.now();
+    const tweet = this.getTweet(tweet_id);
+    const parent_id = tweet?.parent_id || '';
+    const retweet_of = tweet?.embedded?.signature || '';
+
+    if (tweet) {
+      tweet.removeFromDom();
+      this.removeTweet(tweet_id);
+      this.manager?.onTweetDeleted?.(tweet_id);
+    }
+
+    await new Promise((resolve) => {
+      this.app.storage.loadTransactions(
+        { sig: tweet_id, field1: 'RedSquare' },
+        async (txs) => {
+          if (txs?.length) {
+            const oldtx = txs[0];
+
+            if (oldtx.from?.[0]?.publicKey === deleterKey) {
+              const archivedParent =
+                parent_id ||
+                (oldtx.msg?.data?.parent_id != null ? String(oldtx.msg.data.parent_id) : '') ||
+                (typeof oldtx.returnMessage === 'function'
+                  ? String(oldtx.returnMessage()?.data?.parent_id || '')
+                  : '');
+
+              let archivedRetweetOf = retweet_of;
+              if (!archivedRetweetOf) {
+                const msg =
+                  typeof oldtx.returnMessage === 'function' ? oldtx.returnMessage() : oldtx.msg;
+                const embedded = msg?.data?.embedded;
+                if (embedded?.signature) {
+                  archivedRetweetOf = String(embedded.signature);
+                }
+              }
+
+              await this.app.storage.deleteTransaction(oldtx, {}, 'localhost');
+
+              if (archivedParent) {
+                await new Promise((r2) => {
+                  this.app.storage.loadTransactions(
+                    { sig: archivedParent, field1: 'RedSquare' },
+                    async (parentTxs) => {
+                      if (parentTxs?.[0]?.optional?.num_replies) {
+                        parentTxs[0].optional.num_replies--;
+                        await this.app.storage.updateTransaction(
+                          parentTxs[0],
+                          { updated_at: interactionTs },
+                          'localhost'
+                        );
+                        const parent = this.getTweet(archivedParent);
+                        if (parent) {
+                          parent.replies = parentTxs[0].optional.num_replies;
+                          parent.refreshControls?.();
+                        }
+                      }
+                      r2();
+                    },
+                    'localhost'
+                  );
+                });
+              }
+
+              if (archivedRetweetOf) {
+                await new Promise((r2) => {
+                  this.app.storage.loadTransactions(
+                    { sig: archivedRetweetOf, field1: 'RedSquare' },
+                    async (sourceTxs) => {
+                      if (sourceTxs?.[0]?.optional?.num_retweets) {
+                        sourceTxs[0].optional.num_retweets--;
+                        await this.app.storage.updateTransaction(
+                          sourceTxs[0],
+                          { updated_at: interactionTs },
+                          'localhost'
+                        );
+                        const source = this.getTweet(archivedRetweetOf);
+                        if (source) {
+                          source.retweets = sourceTxs[0].optional.num_retweets;
+                          source.refreshControls?.();
+                        }
+                      }
+                      r2();
+                    },
+                    'localhost'
+                  );
+                });
+              }
+            }
+          }
+          resolve();
+        },
+        'localhost'
+      );
+    });
+
+    if (!this.app.BROWSER) {
+      await this.app.storage.saveTransaction(tx, { field1: 'RedSquare' }, 'localhost', blk);
+    }
+
+    return true;
+  }
+
+  async receiveReviewTweetTransaction(tx, blk = null) {
+    const txmsg = tx?.returnMessage?.() || tx?.msg || {};
+    const targetSignature = txmsg?.data?.signature != null ? String(txmsg.data.signature) : '';
+    const decision = txmsg?.data?.decision != null ? String(txmsg.data.decision) : '';
+
+    if (!targetSignature || (decision !== 'approve' && decision !== 'delete')) {
+      return null;
+    }
+
+    const interactionTs = Number(tx.timestamp) || Date.now();
+    const tweet = this.getTweet(targetSignature);
+
+    const resolveTargetTx = async () => {
+      if (tweet?.tx) {
+        return tweet.tx;
+      }
+
+      return await new Promise((resolve) => {
+        this.app.storage.loadTransactions(
+          { sig: targetSignature, field1: 'RedSquare' },
+          (txs) => {
+            resolve(txs?.length ? txs[0] : null);
+          },
+          'localhost'
+        );
+      });
+    };
+
+    const targetTx = await resolveTargetTx();
+
+    if (!targetTx) {
+      if (this.app.BROWSER && this.moderator_mode) {
+        this.moderate?.removeTweet?.(targetSignature);
+      }
+      return null;
+    }
+
+    if (decision === 'delete') {
+      await this.app.storage.deleteTransaction(targetTx, null, 'localhost');
+      this.removeTweet(targetSignature);
+
+      if (this.app.BROWSER && this.moderator_mode) {
+        this.moderate?.removeTweet?.(targetSignature);
+      }
+
+      return null;
+    }
+
+    // approve → flagged = 2 (reviewed), curated = 1
+    if (!targetTx.optional || typeof targetTx.optional !== 'object') {
+      targetTx.optional = {};
+    }
+
+    targetTx.optional.curated = 1;
+    targetTx.optional.flagged = 2;
+
+    await this.app.storage.updateTransaction(
+      targetTx,
+      { updated_at: interactionTs, flagged: 2 },
+      'localhost'
+    );
+
+    if (tweet) {
+      tweet.curated = 1;
+      tweet.flagged = 2;
+    }
+
+    if (this.app.BROWSER && this.moderator_mode) {
+      this.moderate?.removeTweet?.(targetSignature);
+    }
+
+    return tweet || null;
+  }
+
+  async onConfirmation(blk, tx, conf) {
+    if (Number(conf) !== 0) {
+      return;
+    }
+
+    const txmsg = tx.returnMessage();
+
+    if (txmsg.module && txmsg.module !== this.name) {
+      return;
+    }
+
+    switch (txmsg.request) {
+      case 'create tweet': {
+        const signature = tx.signature != null ? String(tx.signature) : '';
+        const hadTweet = this.hasTweet(signature);
+        const tweet = await this.receiveTweetTransaction(tx, blk);
+
+        if (this.app.BROWSER && tweet && !hadTweet) {
+          this.manager?.onNewerContentLoaded?.(
+            {
+              type: 'tweets',
+              direction: 'newer',
+              added: [signature],
+              new_tweets: [signature],
+              updated: [],
+              ignored: [],
+              exhausted: false
+            },
+            { announce: true }
+          );
+        }
+        break;
+      }
+      case 'like tweet':
+        await this.receiveLikeTweetTransaction(tx, blk);
+        break;
+      case 'retweet':
+        await this.receiveRetweetTransaction(tx, blk);
+        break;
+      case 'flag tweet':
+        await this.receiveFlagTweetTransaction(tx, blk);
+        break;
+      case 'review tweet':
+        await this.receiveReviewTweetTransaction(tx, blk);
+        break;
+      case 'edit tweet':
+        await this.receiveEditTweetTransaction(tx, blk);
+        break;
+      case 'delete tweet':
+        await this.receiveDeleteTweetTransaction(tx, blk);
+        break;
+      default:
+        break;
+    }
+  }
+
+  respondTo(type = '', obj) {
+    if (type === 'redsquare-api') {
+      return this.redsquare_api;
+    }
+
+    if (type === 'user-menu') {
+      const publicKey = obj?.publicKey || '';
+
+      if (!publicKey) {
+        return null;
+      }
+
+      return {
+        text: publicKey === this.publicKey ? 'My Posts' : 'View Posts',
+        icon: 'fa-solid fa-square',
+        image: '/saito/icons/saito-redsquare-icon-solid.svg',
+        callback: () => {
+          if (this.browser_active && this.manager) {
+            this.manager.renderPosts(publicKey);
+            return;
+          }
+
+          navigateWindow(`/${encodeURI(this.returnSlug())}/user/${encodeURIComponent(publicKey)}`);
+        }
+      };
+    }
+
+    if (type === 'saito-header') {
+      if (this.browser_active) {
+        return [];
+      }
+
+      return [
+        {
+          text: 'RedSquare',
+          icon: 'fa-solid fa-square',
+          rank: 20,
+          type: 'navigation',
+          navigation: '/redsquare',
+          callback: () => {
+            navigateWindow('/redsquare');
+          },
+          event: (id) => {
+            this.app.connection.on('redsquare-update-notifications', (unread) => {
+              this.app.browser.addNotificationToId(unread, id);
+              this.app.connection.emit('saito-header-notification', 'redsquare', unread);
+            });
+          }
+        }
+      ];
+    }
+
+    if (type === 'saito-floating-menu') {
+      return [
+        {
+          text: 'Tweet',
+          icon: 'fa-solid fa-pen',
+          is_active: this.browser_active,
+          disallowed_mods: ['arcade'],
+          rank: 10,
+          callback: (app) => {
+            this.compose_overlay?.open();
+          }
+        },
+        {
+          text: 'Tweet Image',
+          icon: 'fas fa-image',
+          is_active: this.browser_active,
+          disallowed_mods: ['arcade'],
+          rank: 20,
+          callback: (app) => {
+            this.compose_overlay?.open();
+            setTimeout(() => {
+              document.querySelector('.saito-overlay .compose .file-input')?.click();
+            }, 100);
+          }
+        }
+      ];
+    }
+
+    return null;
+  }
+
+  //
+  // Tweet API — delegated to lib/tweets.js
+  //
+
+  addTweet(tx) {
+    return Tweets.addTweet(this, tx);
+  }
+
+  removeTweet(signature) {
+    return Tweets.removeTweet(this, signature);
+  }
+
+  updateTweet(tx) {
+    return Tweets.updateTweet(this, tx);
+  }
+
+  getTweet(signature) {
+    return Tweets.getTweet(this, signature) || this.profile_tweets[String(signature || '')] || null;
+  }
+
+  showTweetInfo(tweet) {
+    return Tweets.showTweetInfo(this, tweet);
+  }
+
+  hasTweet(signature) {
+    return Tweets.hasTweet(this, signature);
+  }
+
+  isValidTweetMessage(tweet) {
+    return Tweets.isValidTweetMessage(this, tweet);
+  }
+
+  indexTweetRelationships(signature) {
+    return Tweets.indexTweetRelationships(this, signature);
+  }
+
+  unindexTweetRelationships(signature) {
+    return Tweets.unindexTweetRelationships(this, signature);
+  }
+
+  addChildSignature(parentSignature, childSignature) {
+    return Tweets.addChildSignature(this, parentSignature, childSignature);
+  }
+
+  removeChildSignature(parentSignature, childSignature) {
+    return Tweets.removeChildSignature(this, parentSignature, childSignature);
+  }
+
+  updateCriticalChild(parentSignature) {
+    return Tweets.updateCriticalChild(this, parentSignature);
+  }
+
+  attachOrphans(parentSignature) {
+    return Tweets.attachOrphans(this, parentSignature);
+  }
+
+  insertTimeline(signature) {
+    return Tweets.insertTimeline(this, signature);
+  }
+
+  removeFromTimeline(signature) {
+    return Tweets.removeFromTimeline(this, signature);
+  }
+
+  resortTimeline() {
+    return Tweets.resortTimeline(this);
+  }
+
+  //
+  // Notification API — delegated to lib/notifications.js
+  //
+
+  normalizeNotificationInput(input) {
+    return Notifications.normalizeNotificationInput(this, input);
+  }
+
+  getNotificationAggregateKey(notification) {
+    return Notifications.getNotificationAggregateKey(this, notification);
+  }
+
+  getUnreadNotificationCount() {
+    return Notifications.getUnreadNotificationCount(this);
+  }
+
+  incrementUnreadNotifications(notification) {
+    return Notifications.incrementUnreadNotifications(this, notification);
+  }
+
+  markNotificationsViewed() {
+    return Notifications.markNotificationsViewed(this);
+  }
+
+  updateNotificationBadge() {
+    return Notifications.updateNotificationBadge(this);
+  }
+
+  ensureNotificationTweet(notification) {
+    return Notifications.ensureNotificationTweet(this, notification);
+  }
+
+  aggregateLikeNotification(existing, incoming) {
+    return Notifications.aggregateLikeNotification(this, existing, incoming);
+  }
+
+  addNotification(input) {
+    return Notifications.addNotification(this, input);
+  }
+
+  removeNotification(signature) {
+    return Notifications.removeNotification(this, signature);
+  }
+
+  updateNotification(input) {
+    return Notifications.updateNotification(this, input);
+  }
+
+  getNotification(signature) {
+    return Notifications.getNotification(this, signature);
+  }
+
+  hasNotification(signature) {
+    return Notifications.hasNotification(this, signature);
+  }
+
+  insertNotificationTimeline(signature) {
+    return Notifications.insertNotificationTimeline(this, signature);
+  }
+
+  removeFromNotificationTimeline(signature) {
+    return Notifications.removeFromNotificationTimeline(this, signature);
+  }
+
+  resortNotificationTimeline() {
+    return Notifications.resortNotificationTimeline(this);
+  }
+
+  async ensureRendered() {
+    if (!this.browser_active) {
+      return;
+    }
+
+    if (this.main == null) {
+      await this.render();
+    }
+
+    if (this.main?.manager) {
+      this.main.manager.render();
+    }
+  }
+
+  async render() {
+    if (!this.app.BROWSER || !this.browser_active) {
+      return;
+    }
+
+    if (this.main == null) {
+      this.header = new SaitoHeader(this.app, this);
+      await this.header.initialize(this.app);
+      this.main = new Main(this.app, this);
+      this.addComponent(this.header);
+      this.addComponent(this.main);
+
+      // Chat remains optional and owns its UI; RedSquare only supplies containers.
+      const cm = this.app.modules.returnFirstRespondTo?.('chat-manager') || null;
+      this.main.setChatManager(cm);
+
+      if (this.main.hasChatCapability()) {
+        this.addComponent(cm);
+      }
+    }
+
+    await super.render();
+
+    await this.manager?.applyLocationRoute?.();
+
+    // Ordered mounts: Arcade (My Games) → League (Leaderboard) → other peers.
+    if (this.app.modules?.renderInto) {
+      await this.app.modules.renderInto('.redsquare-arcade');
+      await this.app.modules.renderInto('.redsquare-leaderboard');
+      await this.app.modules.renderInto('.redsquare-sidebar');
+    }
+
+    this.renderFirstVisitSplash();
+  }
+
+  renderFirstVisitSplash() {
+    if (
+      !this.app.BROWSER ||
+      !this.show_splash ||
+      document.querySelector('.redsquare-splash-overlay')
+    ) {
+      return;
+    }
+
+    document.body.insertAdjacentHTML('beforeend', SplashTemplate());
+
+    // Persist dismissal only when the user completes onboarding — not when the
+    // splash is merely shown. Otherwise a reload mid-splash permanently skips it.
+    document.querySelector('.redsquare-splash-join')?.addEventListener('click', () => {
+      document.querySelector('.redsquare-splash-overlay')?.remove();
+      this.show_splash = false;
+      this.saveOptions();
+    });
+  }
+
+  returnTweetUrl(signature) {
+    if (typeof window === 'undefined') {
+      return '';
+    }
+
+    return `${window.location.origin}/${encodeURI(this.returnSlug())}/tweet/${encodeURIComponent(
+      signature
+    )}`;
+  }
+
+  returnUserUrl(publicKey) {
+    const path = `/${encodeURI(this.returnSlug())}/user/${encodeURIComponent(publicKey || '')}`;
+
+    if (typeof window === 'undefined') {
+      return path;
+    }
+
+    return `${window.location.origin}${path}`;
+  }
+
+  returnUserPublicKeyFromLocation(location = null) {
+    const currentLocation = location || (typeof window !== 'undefined' ? window.location : null);
+
+    if (!currentLocation) {
+      return '';
+    }
+
+    const prefix = `/${encodeURI(this.returnSlug())}/user/`;
+    const pathname = currentLocation.pathname || '';
+
+    if (pathname.startsWith(prefix)) {
+      const encodedPublicKey = pathname.slice(prefix.length).split('/')[0];
+
+      try {
+        return decodeURIComponent(encodedPublicKey);
+      } catch (err) {
+        return '';
+      }
+    }
+
+    const params = new URLSearchParams(currentLocation.search || '');
+    const legacyPublicKey = params.get('user_id') || '';
+
+    if (legacyPublicKey) {
+      return legacyPublicKey;
+    }
+
+    return currentLocation.hash === '#profile' ? this.publicKey || '' : '';
+  }
+
+  async cacheProfileTweetTransactions(txs = []) {
+    const cached = [];
+
+    for (const tx of txs) {
+      if (!tx) {
+        continue;
+      }
+
+      if (typeof tx.decryptMessage === 'function') {
+        await tx.decryptMessage(this.app);
+      }
+
+      const message = tx.returnMessage?.() || tx.msg || {};
+      const signature = tx.signature != null ? String(tx.signature) : '';
+
+      if (
+        !signature ||
+        (message.module && message.module !== this.name) ||
+        message.request !== 'create tweet' ||
+        this.app.modules?.moderate?.(tx, this.name) === -1
+      ) {
+        continue;
+      }
+
+      let tweet = Tweets.getTweet(this, signature) || this.profile_tweets[signature];
+
+      if (tweet) {
+        tweet.updateFromTransaction(tx);
+      } else {
+        tweet = new Tweet(this.app, this, tx);
+        this.profile_tweets[signature] = tweet;
+      }
+
+      cached.push(tweet);
+    }
+
+    return cached;
+  }
+
+  returnTweetSignatureFromLocation(location = null) {
+    const currentLocation = location || (typeof window !== 'undefined' ? window.location : null);
+
+    if (!currentLocation) {
+      return '';
+    }
+
+    const prefix = `/${encodeURI(this.returnSlug())}/tweet/`;
+    const pathname = currentLocation.pathname || '';
+
+    if (pathname.startsWith(prefix)) {
+      const encodedSignature = pathname.slice(prefix.length).split('/')[0];
+
+      try {
+        return decodeURIComponent(encodedSignature);
+      } catch (err) {
+        return '';
+      }
+    }
+
+    const params = new URLSearchParams(currentLocation.search || '');
+    return params.get('tweet_id') || params.get('thread_id') || '';
+  }
+
+  loadArchiveTransactions(query, archivePeer = 'localhost', timeoutMs = 5000) {
+    return this.loadArchiveTransactionsWithStatus(query, archivePeer, timeoutMs).then(
+      ({ transactions }) => transactions
+    );
+  }
+
+  loadArchiveTransactionsWithStatus(query, archivePeer = 'localhost', timeoutMs = 5000) {
+    return new Promise((resolve) => {
+      let settled = false;
+      let timer = null;
+      const finish = (status, txs = [], error = null) => {
+        if (settled) {
+          return;
+        }
+
+        settled = true;
+        if (timer) {
+          clearTimeout(timer);
+        }
+        resolve({
+          status,
+          transactions: Array.isArray(txs) ? txs : [],
+          error
+        });
+      };
+      timer = setTimeout(() => finish('timeout'), timeoutMs);
+
+      try {
+        Promise.resolve(
+          this.app.storage.loadTransactions(query, (txs) => finish('loaded', txs), archivePeer)
+        ).catch((err) => finish('error', [], err));
+      } catch (err) {
+        finish('error', [], err);
+      }
+    });
+  }
+
+  async addLoadedTweetTransactions(txs = []) {
+    for (const tx of txs) {
+      if (!tx) {
+        continue;
+      }
+
+      if (typeof tx.decryptMessage === 'function') {
+        await tx.decryptMessage(this.app);
+      }
+
+      this.addTweet(tx);
+    }
+  }
+
+  returnTweetArchivePeers() {
+    const archivePeers = ['localhost'];
+    const publicKeys = new Set();
+
+    for (const peerObject of this.peers || []) {
+      const archivePeer = peerObject?.peer;
+
+      if (!archivePeer || archivePeer === 'localhost') {
+        continue;
+      }
+
+      const publicKey = archivePeer.publicKey || peerObject.publicKey || '';
+
+      if (publicKey && !publicKeys.has(publicKey)) {
+        publicKeys.add(publicKey);
+        archivePeers.push(archivePeer);
+      }
+    }
+
+    return archivePeers;
+  }
+
+  returnTweetArchivePeerLabel(peer, index = 0) {
+    if (peer === 'localhost') {
+      return 'localhost';
+    }
+
+    return peer?.publicKey || `peer-${index}`;
+  }
+
+  async loadTweetArchivePhase(signature, query, phase, archivePeers) {
+    return Promise.all(
+      archivePeers.map(async (peer, index) => {
+        const result = await this.loadArchiveTransactionsWithStatus(query, peer);
+
+        console.info('RedSquare tweet archive lookup', {
+          signature,
+          phase,
+          peer: this.returnTweetArchivePeerLabel(peer, index),
+          status: result.status,
+          result_count: result.transactions.length
+        });
+
+        return result;
+      })
+    );
+  }
+
+  async loadTweetThread(signature) {
+    const targetSignature = String(signature || '');
+
+    if (!targetSignature) {
+      return { status: 'unavailable', reason: 'invalid-signature', tweet: null };
+    }
+
+    const archivePeers = this.returnTweetArchivePeers();
+    let targetResults = [];
+
+    if (!this.hasTweet(targetSignature)) {
+      targetResults = await this.loadTweetArchivePhase(
+        targetSignature,
+        { sig: targetSignature, field1: 'RedSquare', flagged_ne: 1 },
+        'target',
+        archivePeers
+      );
+
+      for (const result of targetResults) {
+        await this.addLoadedTweetTransactions(result.transactions);
+      }
+    }
+
+    const target = this.getTweet(targetSignature);
+
+    if (targetResults.length) {
+      console.info('RedSquare tweet archive ingestion', {
+        signature: targetSignature,
+        phase: 'target',
+        accepted: Boolean(target),
+        result_count: targetResults.reduce((count, result) => count + result.transactions.length, 0)
+      });
+    }
+
+    if (!target) {
+      const returnedTarget = targetResults.some((result) =>
+        result.transactions.some((tx) => String(tx?.signature || '') === targetSignature)
+      );
+      const lookupFailed = targetResults.some((result) => result.status !== 'loaded');
+
+      return {
+        status: lookupFailed ? 'error' : 'unavailable',
+        reason: returnedTarget ? 'rejected' : lookupFailed ? 'lookup-failed' : 'not-found',
+        tweet: null
+      };
+    }
+
+    const threadId = target.thread_id || target.signature;
+    const threadResults = await this.loadTweetArchivePhase(
+      targetSignature,
+      { field1: 'RedSquare', field5: threadId, flagged_ne: 1, limit: 100 },
+      'thread',
+      archivePeers
+    );
+
+    for (const result of threadResults) {
+      await this.addLoadedTweetTransactions(result.transactions);
+    }
+
+    console.info('RedSquare tweet archive ingestion', {
+      signature: targetSignature,
+      phase: 'thread',
+      accepted: Boolean(this.getTweet(targetSignature)),
+      result_count: threadResults.reduce((count, result) => count + result.transactions.length, 0)
+    });
+
+    return {
+      status: 'loaded',
+      tweet: this.getTweet(targetSignature),
+      partial: [...targetResults, ...threadResults].some((result) => result.status !== 'loaded')
+    };
+  }
+
+  async returnTweetSocial(signature, req) {
+    if (!signature) {
+      return null;
+    }
+
+    const txs = await this.loadArchiveTransactions(
+      { sig: String(signature || ''), field1: 'RedSquare', flagged_ne: 1 },
+      'localhost'
+    );
+    const tx = txs[0];
+
+    if (!tx) {
+      return null;
+    }
+
+    if (typeof tx.decryptMessage === 'function') {
+      await tx.decryptMessage(this.app);
+    }
+
+    const message = tx.returnMessage?.() || tx.msg || {};
+    const publicKey = tx.from?.[0]?.publicKey || '';
+    const username =
+      this.app.keychain.returnUsername(publicKey) ||
+      (publicKey ? `Anon-${publicKey.slice(0, 6)}` : 'Anonymous');
+    const origin = `${req.protocol}://${req.get('host')}`;
+    const encodedSignature = encodeURIComponent(signature);
+    const basePath = `/${encodeURI(this.returnSlug())}`;
+
+    return {
+      twitter: '@SaitoOfficial',
+      title: `${username} posted on Saito 🟥`,
+      url: `${origin}${basePath}/tweet/${encodedSignature}`,
+      description: String(message.data?.text || ''),
+      image: `${origin}${basePath}/og-image/${encodedSignature}`
+    };
+  }
+
+  async returnShortLinkSocial(row, req) {
+    const origin = `${req.protocol}://${req.get('host')}`;
+    const target = new URL(row?.link || '', origin);
+    const basePath = `/${encodeURI(this.returnSlug())}`;
+    const prefix = `${basePath}/tweet/`;
+
+    if (target.host !== req.get('host')) {
+      return null;
+    }
+
+    let signature = '';
+
+    try {
+      if (target.pathname.startsWith(prefix)) {
+        const encodedSignature = target.pathname.slice(prefix.length).split('/')[0];
+        signature = decodeURIComponent(encodedSignature);
+      } else if (target.pathname === basePath || target.pathname === `${basePath}/`) {
+        signature =
+          target.searchParams.get('tweet_id') || target.searchParams.get('thread_id') || '';
+      }
+
+      return signature ? await this.returnTweetSocial(signature, req) : null;
+    } catch (err) {
+      return null;
+    }
+  }
+
+  dataUriToImage(dataUri) {
+    const match =
+      /^data:(image\/(?:png|jpe?g|gif|webp|svg\+xml|png\+xml));base64,([a-z\d+/=]+)$/i.exec(
+        String(dataUri || '')
+      );
+
+    if (!match) {
+      return null;
+    }
+
+    const mimeType = match[1].toLowerCase() === 'image/png+xml' ? 'image/png' : match[1];
+
+    return {
+      mimeType,
+      buffer: Buffer.from(match[2], 'base64')
+    };
+  }
+
+  async returnTweetImage(signature) {
+    if (!signature) {
+      return null;
+    }
+
+    const txs = await this.loadArchiveTransactions(
+      { sig: String(signature || ''), field1: 'RedSquare', flagged_ne: 1 },
+      'localhost'
+    );
+    const tx = txs[0];
+
+    if (!tx) {
+      return null;
+    }
+
+    if (typeof tx.decryptMessage === 'function') {
+      await tx.decryptMessage(this.app);
+    }
+
+    const message = tx.returnMessage?.() || tx.msg || {};
+    const tweetImage = this.dataUriToImage(message.data?.images?.[0]);
+
+    if (tweetImage) {
+      return tweetImage;
+    }
+
+    const publicKey = tx.from?.[0]?.publicKey || '';
+    return this.dataUriToImage(this.app.keychain.returnIdenticon(publicKey, 'png'));
+  }
+
+  webServer(app, expressapp, express, alternative_slug = null) {
+    const webdir = `${__dirname}/web`;
+    const uri = alternative_slug || '/' + encodeURI(this.returnSlug());
+    const routeBase = uri.endsWith('/') ? uri.slice(0, -1) : uri;
+    const self = this;
+
+    expressapp.use(uri, express.static(webdir));
+
+    expressapp.get(`${routeBase}/tweet/:signature`, async function (req, res) {
+      let social = self.social;
+
+      try {
+        social = (await self.returnTweetSocial(req.params.signature, req)) || self.social;
+      } catch (err) {
+        console.error('RedSquare tweet metadata lookup failed:', err);
+      }
+
+      const html = index(app, self, app.build_number, social);
+
+      res.setHeader('Content-type', 'text/html');
+      res.charset = 'UTF-8';
+      return res.send(html);
+    });
+
+    expressapp.get(`${routeBase}/user/:publicKey`, function (req, res) {
+      const html = index(app, self, app.build_number);
+
+      res.setHeader('Content-type', 'text/html');
+      res.charset = 'UTF-8';
+      return res.send(html);
+    });
+
+    expressapp.get(`${routeBase}/og-image/:signature`, async function (req, res) {
+      let image = null;
+
+      try {
+        image = await self.returnTweetImage(req.params.signature);
+      } catch (err) {
+        console.error('RedSquare tweet image lookup failed:', err);
+      }
+
+      if (!image) {
+        return res.redirect(302, self.social.image);
+      }
+
+      res.writeHead(200, {
+        'Content-Type': image.mimeType,
+        'Content-Length': image.buffer.length
+      });
+      return res.end(image.buffer);
+    });
+
+    expressapp.get(uri, function (req, res) {
+      const imageSignature = req.query?.og_img_sig;
+      const tweetSignature = req.query?.tweet_id || req.query?.thread_id;
+      const userPublicKey = req.query?.user_id;
+
+      if (imageSignature) {
+        return res.redirect(
+          301,
+          `${routeBase}/og-image/${encodeURIComponent(String(imageSignature))}`
+        );
+      }
+
+      if (tweetSignature) {
+        return res.redirect(
+          301,
+          `${routeBase}/tweet/${encodeURIComponent(String(tweetSignature))}`
+        );
+      }
+
+      if (userPublicKey) {
+        return res.redirect(
+          301,
+          `${routeBase}/user/${encodeURIComponent(String(userPublicKey))}`
+        );
+      }
+
+      const html = index(app, self, app.build_number);
+      res.setHeader('Content-type', 'text/html');
+      res.charset = 'UTF-8';
+      return res.send(html);
+    });
+  }
+
+  //
+  // Development-only fixtures for exercising the UI. Not part of production loading.
+  //
+  returnMockTransactions() {
+    const authors = [
+      'redsquare-mock-pk-saito',
+      'redsquare-mock-pk-alice',
+      'redsquare-mock-pk-bob',
+      'redsquare-mock-pk-carol'
+    ];
+    const now = Date.now();
+    const mockSig = (seed) => `${seed.toString(16).padStart(64, '0')}`;
+
+    const build = ({
+      seed,
+      author = 0,
+      text,
+      parent_id = '',
+      thread_id = '',
+      images = [],
+      embedded = null,
+      minutesAgo = 0,
+      optional = {}
+    }) => {
+      const signature = mockSig(seed);
+      const publicKey = authors[author % authors.length];
+      const timestamp = now - minutesAgo * 60 * 1000;
+      const data = {
+        text,
+        images,
+        parent_id,
+        thread_id: thread_id || (parent_id ? '' : signature)
+      };
+
+      if (embedded) {
+        data.embedded = embedded;
+      }
+
+      if (parent_id && thread_id) {
+        data.thread_id = thread_id;
+      }
+
+      return {
+        signature,
+        timestamp,
+        from: [
+          {
+            publicKey,
+            amount: '0',
+            type: 1,
+            index: 0,
+            blockId: '0',
+            txOrdinal: '0'
+          }
+        ],
+        msg: {
+          module: this.name,
+          request: 'create tweet',
+          data
+        },
+        optional: {
+          num_likes: 12,
+          num_replies: 3,
+          num_retweets: 5,
+          ...optional
+        }
+      };
+    };
+
+    const normalSig = mockSig(1);
+    const threadRootSig = mockSig(2);
+    const threadReplySig = mockSig(3);
+    const embeddedSig = mockSig(8);
+
+    return [
+      build({
+        seed: 1,
+        author: 0,
+        minutesAgo: 60,
+        text: 'Welcome to RedSquare — a normal timeline post for UI development.'
+      }),
+      build({
+        seed: 5,
+        author: 1,
+        minutesAgo: 55,
+        parent_id: normalSig,
+        thread_id: normalSig,
+        text: 'This is a reply to the post above.',
+        optional: { num_likes: 4, num_replies: 0, num_retweets: 1 }
+      }),
+      build({
+        seed: 2,
+        author: 2,
+        minutesAgo: 45,
+        text: 'Thread root — open this post to walk the critical reply chain.'
+      }),
+      build({
+        seed: 3,
+        author: 3,
+        minutesAgo: 40,
+        parent_id: threadRootSig,
+        thread_id: threadRootSig,
+        text: 'First reply in the thread.',
+        optional: { num_likes: 6, num_replies: 1, num_retweets: 0 }
+      }),
+      build({
+        seed: 4,
+        author: 1,
+        minutesAgo: 35,
+        parent_id: threadReplySig,
+        thread_id: threadRootSig,
+        text: 'Second reply — continues the critical path.',
+        optional: { num_likes: 2, num_replies: 0, num_retweets: 0 }
+      }),
+      build({
+        seed: 6,
+        author: 0,
+        minutesAgo: 25,
+        text: 'Quote-posting another tweet below.',
+        embedded: {
+          signature: embeddedSig,
+          publicKey: authors[2],
+          text: 'Embedded tweet card — quoted content rendered inline.',
+          created_at: now - 30 * 60 * 1000,
+          images: [],
+          likes: 9,
+          replies: 2,
+          retweets: 1
+        }
+      }),
+      build({
+        seed: 7,
+        author: 3,
+        minutesAgo: 10,
+        text: 'Image gallery fixture with four placeholders.',
+        images: [
+          '/saito/img/dreamscape.png',
+          '/saito/img/dreamscape.png',
+          '/saito/img/dreamscape.png',
+          '/saito/img/dreamscape.png'
+        ],
+        optional: { num_likes: 28, num_replies: 6, num_retweets: 11 }
+      })
+    ];
   }
 }
 

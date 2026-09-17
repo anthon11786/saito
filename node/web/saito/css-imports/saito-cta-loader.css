@@ -1,0 +1,22 @@
+/* Boot-loader chrome for prerendered CTA splash pages.
+   Component surface lives in saito-cta.css. */
+
+body.saito-cta-loader-active::before,
+body.saito-cta-loader-complete::before {
+  opacity: 0 !important;
+  z-index: -2 !important;
+  pointer-events: none !important;
+}
+
+@supports not selector(body:has(.saito-cta)) {
+  body.saito-cta-loader-active .pace {
+    display: none;
+  }
+}
+
+@media (max-width: 720px) {
+  .saito-cta-loader-card {
+    padding: 20dvh 24px 24px;
+    justify-content: flex-start;
+  }
+}

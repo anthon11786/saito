@@ -3,14 +3,13 @@ module.exports = (app, mod) => {
   // expose public options
   let public_options = Object.assign({}, app.options);
   delete public_options.wallet;
-  const opt_str = JSON.stringify(
-    public_options,
-    (k, v) => (typeof v === 'bigint' ? v.toString() : v)
+  const opt_str = JSON.stringify(public_options, (k, v) =>
+    typeof v === 'bigint' ? v.toString() : v
   );
 
   const html = `
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" data-theme="dark">
   <head>
     <meta charset="utf-8"/>
     <meta http-equiv="X-UA-Compatible" content="IE=edge"/>

@@ -1,68 +1,84 @@
 module.exports = (app, mod, invite) => {
+  let invite_class =
+    invite.target && invite.players[invite.target - 1] == mod.publicKey ? ' my-turn' : '';
+  let invite_img = `/${String(invite.game_slug || '').replace(/[^a-zA-Z0-9_-]/g, '')}/img/arcade/arcade-banner-background.png`;
 
-	let invite_class = (invite.target && invite.players[invite.target - 1 ] == mod.publicKey) ? " my-turn" : ""; 
-	let invite_img = `/${invite.game_slug}/img/arcade/arcade-banner-background.png`;
-
-	let html = `
-          <div class="saito-module saito-game${invite_class}" id="saito-game-${invite.game_id}" 
-      				style="background-image: url('${invite_img}');">
-        <div class="saito-module-titlebar">
-          <div class="saito-module-titlebar-title">${invite.game_name}</div>
-          <div class="saito-module-titlebar-details game-type">${invite.game_type.toUpperCase()}</div>
-        </div>           
-        <div class="arcade-invite-actions">
-          <div class="saito-game-details arcade-invite-identicons">
-    `;
-
-	// render players who have joined
-	for (let i = 0; i < invite.players.length; i++) {
-		//invite_class = (invite.target && invite.target == i + 1) ? " arcade-invite-turn" : ""; 
-		html += `
-          <div class="saito-identicon-box">
-            <img class="saito-module-identicon saito-identicon" id-${invite.players[i]}" 
-            				src="${app.keychain.returnIdenticon(invite.players[i])}">`;
-//    if (invite_class){
-//      html += `<i class="fa-solid fa-circle-exclamation"></i>`;
-//    }
-    html+='</div>';
-	}
-
-	// render players who are requested to join (their slot isnt empty)
-	for (let i = 0; i < invite.desired_opponent_publickeys.length; i++) {
-		html += `
-          <div class="arcade-invite-requested">
-            <img class="saito-module-identicon saito-identicon" id-${invite.desired_opponent_publickeys[i]}" 
-            			src="${app.keychain.returnIdenticon(invite.desired_opponent_publickeys[i])}">
-          </div>
-
-      `;
-	}
-
-	// render empty slots; empty slots =  players needed - (players joined + players requested)
-	for (let i = 0; i < invite.empty_slots; i++) {
-		html += `
-          <div class="saito-module-identicon arcade-invite-slot">
-          </div>
-      `;
-	}
-
-	html += `
-          </div>
-        </div>`;
-  
+  let badge = '';
   if (invite_class) {
-    html += `<div class="arcade-invite-badge">your turn</div>`;
-  } 
-  // Overwrite "your turn" as necessary
+    badge = `<div class="badge">your turn</div>`;
+  }
   if (invite.winner) {
     if (invite.winner.includes(mod.publicKey)) {
-      html += `<div class="arcade-invite-badge">you won</div>`;
+      badge = `<div class="badge">you won</div>`;
     } else {
-      html += `<div class="arcade-invite-badge">you lost</div>`;
-    } 
-  }    
-  
-  html += `</div>`;
+      badge = `<div class="badge">you lost</div>`;
+    }
+  }
 
-	return html;
+  let risk_mode_html = '';
+  if (invite.risk_mode) {
+    const risk_label = app.browser.escapeHTML(invite.risk_mode);
+    const risk_lines = risk_label.split(/\s+/).join('<br>');
+    risk_mode_html = `<div class="risk-mode-ribbon" aria-label="${risk_label}"><span class="risk-mode-ribbon__text">${risk_lines}</span></div>`;
+  }
+
+  const details_line = invite.economic_line
+    ? invite.economic_line
+    : String(invite.game_type || '').toUpperCase();
+
+  let html = `
+    <div class="invite arcade-invite${invite_class}" id="arcade-invite-${invite.game_id}"
+         style="background-image: url('${invite_img}');">
+      ${risk_mode_html}
+      <div class="invite-title">
+        <div class="header">
+          <div class="title">${app.browser.escapeHTML(invite.game_name)}</div>
+          <div class="details">${app.browser.escapeHTML(details_line)}</div>
+        </div>
+      </div>
+      <div class="actions">
+        ${badge}
+        <div class="players">
+  `;
+
+  for (let i = 0; i < invite.players.length; i++) {
+    html += `
+          <div class="player">
+            <img class="saito-identicon" id="${invite.players[i]}"
+                 src="${app.keychain.returnIdenticon(invite.players[i])}">
+          </div>`;
+  }
+
+  const tentative_join = invite.tentative?.join || [];
+  for (let i = 0; i < tentative_join.length; i++) {
+    const pkey = tentative_join[i];
+    if (invite.players.includes(pkey)) {
+      continue;
+    }
+    html += `
+          <div class="pending">
+            <img class="saito-module-identicon saito-identicon" id="${pkey}"
+                 src="${app.keychain.returnIdenticon(pkey)}">
+          </div>`;
+  }
+
+  for (let i = 0; i < invite.desired_opponent_publickeys.length; i++) {
+    html += `
+          <div class="requested">
+            <img class="saito-identicon" id="${invite.desired_opponent_publickeys[i]}"
+                 src="${app.keychain.returnIdenticon(invite.desired_opponent_publickeys[i])}">
+          </div>
+      `;
+  }
+
+  for (let i = 0; i < invite.empty_slots; i++) {
+    html += `<div class="slot"></div>`;
+  }
+
+  html += `
+        </div>
+      </div>
+    </div>`;
+
+  return html;
 };

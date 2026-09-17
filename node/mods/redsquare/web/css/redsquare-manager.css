@@ -1,0 +1,194 @@
+/* Namespace: .manager — feed chrome only (not tweet content)
+ *
+ * Column ownership:
+ *   .manager  → flex column shell (fills .main)
+ *   .header   → pinned chrome (never scrolls)
+ *   .body     → sole scrollport for feed panels
+ */
+
+.manager {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.manager > .header {
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--saito-space-md);
+  flex: 0 0 auto;
+  min-height: 5.2rem;
+  padding: 0.8rem var(--saito-space-md);
+  background: var(--saito-card-wash);
+  border-bottom: 1px solid var(--saito-border);
+}
+
+/*
+ * Desktop Option A — page title anchors the feed chrome.
+ * Content-sized height (no empty min-height), title-weighted.
+ */
+@media (min-width: 601px) {
+  .manager > .header {
+    min-height: 0;
+    padding: 0.7rem var(--saito-space-md) 0.55rem;
+  }
+}
+
+/* Header is omitted from the DOM when the view does not require chrome. */
+
+.manager > .body {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+}
+
+.manager > .header .start {
+  display: flex;
+  align-items: center;
+  gap: var(--saito-space-md);
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+/* Shared .saito-button-square owns appearance; keep [hidden] from being overridden. */
+.manager > .header .back[hidden] {
+  display: none;
+}
+
+.manager > .header .title {
+  margin: 0;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  /* Visuelt Medium — page-title for conversation / profile navigation chrome */
+  font-family: var(--saito-font-heavy);
+  line-height: 1.2;
+}
+
+.manager > .header .actions {
+  display: flex;
+  align-items: center;
+  flex: 0 0 auto;
+  gap: var(--saito-space-sm);
+}
+
+.manager > .header .new-post {
+  margin: 0;
+}
+
+.manager .new-posts-banner {
+  position: absolute;
+  z-index: 2;
+  top: 0;
+  left: 50%;
+  display: block;
+  width: 16rem;
+  padding: var(--saito-space-sm) var(--saito-space-lg);
+  border: 1px solid var(--saito-border);
+  border-radius: var(--saito-radius-lg);
+  margin: var(--saito-space-md) 0 0;
+  background: color-mix(in srgb, var(--saito-background) 33%, transparent);
+  color: var(--saito-foreground);
+  text-align: center;
+  cursor: pointer;
+  transform: translateX(-50%);
+}
+
+.manager .new-posts-banner[hidden] {
+  display: none;
+}
+
+.manager .thread-context {
+  padding: var(--saito-space-md) var(--saito-space-lg);
+  color: var(--saito-primary);
+  cursor: pointer;
+}
+
+.manager .feed-status {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.manager .feed-status .loader,
+.manager .feed-status .message,
+.manager .feed-status .retry {
+  display: none;
+}
+
+.manager .feed-status .message {
+  max-width: 24rem;
+  margin: 0;
+  text-align: center;
+  color: var(--saito-muted-foreground);
+}
+
+.manager .feed-status[data-status='content'] {
+  min-height: 2.4rem;
+  padding: var(--saito-space-md) var(--saito-space-lg);
+}
+
+.manager .feed-status[data-status='loading'],
+.manager .feed-status[data-status='empty'],
+.manager .feed-status[data-status='end'],
+.manager .feed-status[data-status='unavailable'],
+.manager .feed-status[data-status='error'] {
+  padding: 7rem var(--saito-space-lg) 5rem;
+}
+
+.manager .feed-status[data-status='loading'] .loader {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 7rem;
+}
+
+.manager .feed-status[data-status='empty'] .message,
+.manager .feed-status[data-status='end'] .message,
+.manager .feed-status[data-status='unavailable'] .message,
+.manager .feed-status[data-status='error'] .message,
+.manager .feed-status[data-status='unavailable'] .retry,
+.manager .feed-status[data-status='error'] .retry {
+  display: block;
+}
+
+.manager .feed-status .retry {
+  margin-top: var(--saito-space-md);
+}
+
+@media (max-width: 600px) {
+  .manager > .body {
+    padding: 0.5rem;
+    scroll-padding-bottom: var(--saito-space-md);
+  }
+
+  .manager > .header {
+    padding: 0.8rem var(--saito-space-sm);
+  }
+
+  /* Floating + is the only compose affordance on mobile */
+  .manager > .header .new-post {
+    display: none;
+  }
+
+  .manager .thread-context,
+  .manager .new-posts-banner,
+  .manager .feed-status[data-status='content'],
+  .manager .feed-status[data-status='loading'],
+  .manager .feed-status[data-status='empty'],
+  .manager .feed-status[data-status='end'],
+  .manager .feed-status[data-status='unavailable'],
+  .manager .feed-status[data-status='error'] {
+    padding-left: var(--saito-space-sm);
+    padding-right: var(--saito-space-sm);
+  }
+}

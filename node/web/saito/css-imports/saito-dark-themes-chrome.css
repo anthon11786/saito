@@ -1,0 +1,38 @@
+/* ----------------------------------------------------------------
+ * Scrollbars, text selection, and native form controls for the dark theme.
+ * Chrome needs explicit option colors and color-scheme metadata.
+ *----------------------------------------------------------------*/
+
+html {
+  scrollbar-width: thin;
+  scrollbar-color: var(--saito-border) var(--saito-background);
+  color-scheme: dark;
+}
+
+html select option {
+  background-color: var(--saito-background);
+  color: var(--saito-foreground);
+}
+
+html ::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+html ::-webkit-scrollbar-track {
+  background: var(--saito-background);
+}
+
+html ::-webkit-scrollbar-thumb {
+  background: var(--saito-border);
+  border-radius: 4px;
+}
+
+html ::-webkit-scrollbar-thumb:hover {
+  background: var(--saito-primary);
+}
+
+html ::selection {
+  background: var(--saito-primary);
+  color: var(--saito-primary-foreground);
+}

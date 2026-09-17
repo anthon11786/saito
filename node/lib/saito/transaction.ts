@@ -170,7 +170,7 @@ export default class Transaction extends SaitoTransaction {
       console.warn('Attempting to decrypt multiparty message: ', addresses);
     }
 
-    let dmsg = app.keychain.decryptMessage(counter_party_key, parsed_msg);
+    let dmsg = await app.keychain.decryptMessage(counter_party_key, parsed_msg);
 
     if (dmsg && dmsg !== parsed_msg) {
       this.dmsg = dmsg;
@@ -312,9 +312,19 @@ export default class Transaction extends SaitoTransaction {
     return Buffer.from(str, 'base64').toString('utf-8');
   }
 
-  serialize_to_web(app) {
+  serialize_to_web(app, options: any = {}) {
     // we clone so that we don't modify the tx itself
     let newtx = new Transaction(undefined, this.toJson());
+
+    if (options && options.update_outputs) {
+      const outputs = newtx.to;
+      for (let i = 0; i < outputs.length; i++) {
+        outputs[i].blockId = BigInt(options.block_id);
+        outputs[i].txOrdinal = BigInt(options.transaction_id);
+        outputs[i].index = i;
+      }
+    }
+
     let m = Buffer.from(newtx.data);
     let opt = JSON.stringify(this.optional);
     newtx.data = Buffer.alloc(0);

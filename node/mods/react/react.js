@@ -1,6 +1,6 @@
 /**
  * ReactMod: A Saito Module that integrates React Libary as it's UI framework
- * 
+ *
  **/
 
 const ModTemplate = require('../../lib/templates/modtemplate');
@@ -15,13 +15,13 @@ class ReactMod extends ModTemplate {
     this.app = app;
     this.name = 'React';
     this.slug = 'react';
-    this.social = {
+    this.social = this.buildSocial({
       twitter: '@SaitoOfficial',
       title: `🟥 ${this.returnName()}`,
-      url: `https://saito.io/${this.returnSlug()}/`,
+      url: `/${this.returnSlug()}/`,
       description: '',
       image: 'https://saito.tech/wp-content/uploads/2023/11/videocall-300x300.png'
-    };
+    });
     this.description = 'A placeholder react app';
 
     this.styles = ['/saito/saito.css', '/react/style.css'];
@@ -34,9 +34,6 @@ class ReactMod extends ModTemplate {
   async initialize(app) {
     await super.initialize(app);
   }
-
-
-
 
   async render() {
     const rootElement = document.getElementById('root');
@@ -59,9 +56,8 @@ class ReactMod extends ModTemplate {
         return res.send(HomePage(app, mod_self, app.build_number, mod_self.social));
       }
       return;
-
     });
-      
+
     expressapp.use('/' + encodeURI(this.returnSlug()), express.static(webdir));
   }
 }

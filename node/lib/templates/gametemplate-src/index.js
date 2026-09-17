@@ -1,17 +1,16 @@
 module.exports = (app, mod, build_number, og_card, include_loader = true) => {
+  const gameSlug = app.browser.escapeHTML(mod.returnSlug());
   let html = `
 
   
   <!DOCTYPE html>
-  <html lang="en" data-theme="lite">
+  <html lang="en" class="game ${gameSlug}" data-theme="lite">
   
   <head>
 
     <meta charset="utf-8" />
     <meta http-equiv="X-UA-Compatible" content="IE=edge" />
-    <meta name="description" content="${app.browser.escapeHTML(
-      app.browser.sanitize(mod.description)
-    )}" />
+    <meta name="description" content="${app.browser.escapeHTML(app.browser.sanitize(mod.description))}" />
     <meta name="keywords" content="${mod.categories}"/>
     <meta name="author" content="${og_card.creator}"/>
     <meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no" />
@@ -98,7 +97,7 @@ module.exports = (app, mod, build_number, og_card, include_loader = true) => {
         left: 50%;
         top: 50%;
         border-radius: 1rem;
-        border: 1px solid var(--saito-border-color);
+        border: 1px solid var(--saito-border);
         transform: translate(-50%,-50%);
       }
 
@@ -112,7 +111,7 @@ module.exports = (app, mod, build_number, og_card, include_loader = true) => {
         justify-content: center;
         align-items: center;
         background-color: rgba(230, 230, 230, 0.7);
-        border: 1px solid var(--saito-border-color);
+        border: 1px solid var(--saito-border);
         border-radius: 1rem;
       }
 
@@ -128,7 +127,7 @@ module.exports = (app, mod, build_number, og_card, include_loader = true) => {
         justify-content: space-between;
         align-items: center;
         background-color: rgba(230, 230, 230, 0.5);
-        border: 1px solid var(--saito-border-color);
+        border: 1px solid var(--saito-border);
         border-radius: 1rem;
         padding-top: 2rem;
       }

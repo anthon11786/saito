@@ -1,0 +1,401 @@
+:root {
+  --game-menu-background: #f5f5f5ed;
+}
+
+.game-menu {
+  position: fixed;
+  top: 0px;
+  left: 0px;
+  display: block;
+  width: auto;
+  margin: 1px 1px 3px 3px;
+  z-index: 500;
+  font-size: 1.583rem;
+  min-width: 20vw;
+  cursor: pointer;
+  color: black;
+}
+
+
+.menu-option-container {
+  border: unset;
+}
+
+#saito-header .game-menu {
+  position: relative;
+  margin: unset;
+}
+
+.game-menu ul,
+.game-menu-mobile-toggle {
+  box-shadow: 2px 2px 5px 0px rgba(0, 0, 0, 0.75);
+  background-color: var(--game-menu-background);
+}
+
+.game-menu ul li {
+  text-align: center;
+}
+
+/* Visible Top Row */
+.game-menu > ul {
+  display: flex;
+  flex-direction: row;
+  height: 40px;
+  border: 1px solid #444;
+  border-radius: 0.417rem;
+}
+
+/* All menu options */
+.game-menu > ul li {
+  user-select: none;
+  list-style: none;
+  text-align: center;
+  padding: 0;
+  margin: 0;
+  min-width: 125px;
+  width: fit-content;
+  max-width: 150px;
+  height: fit-content;
+  line-height: 40px;
+  position: relative;
+}
+
+.game-menu > ul li.game-menu-icon {
+  min-width: unset;
+  width: 50px;
+  padding: 0 5px;
+  line-height: 40px;
+}
+
+.game-menu-sub-options {
+  width: 200px;
+}
+
+.game-menu-sub-options:after {
+  content: '';
+  position: absolute;
+  width: calc(100% + 70px);
+  height: calc(100% + 45px);
+  top: 0;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: -2;
+}
+
+.game-menu-sub-sub-options:after {
+  content: '';
+  position: absolute;
+  width: calc(100% + 40px);
+  height: calc(100% + 25px);
+  top: 0;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: -1;
+}
+
+.game-menu ul.game-menu-sub-options li {
+  max-width: unset;
+  width: 100%;
+  border-bottom: 1px solid var(--saito-gray-200);
+}
+
+.game-menu-sub-option .game-menu-option-label {
+  position: relative;
+  background-color: inherit;
+  height: 50px;
+  line-height: 50px;
+  width: 100%;
+  text-align: center;
+}
+
+.game-menu-sub-options,
+.game-menu-sub-sub-options {
+  display: none;
+  position: absolute;
+  top: 100%;
+}
+
+.game-menu-sub-sub-options {
+  position: absolute;
+  width: 100%;
+  left: 101%;
+  top: 0;
+}
+
+.game-menu-icon:hover,
+.game-menu-option:hover,
+.game-menu-sub-option:hover,
+.game-menu-sub-sub-option:hover {
+  font-weight: bold;
+  background-color: rgba(0, 0, 0, 0.1);
+}
+
+.game-menu-option:hover ul {
+  font-weight: normal;
+}
+
+.game-menu .game-menu-mobile-toggle {
+  display: none;
+}
+
+.game-menu-mobile-header,
+.game-menu-icon-label,
+.game-menu-accordion-icon,
+.game-menu-saito-state {
+  display: none;
+}
+
+.game-menu-mobile-fullscreen-icon {
+  display: none;
+}
+
+.game-menu .notification::before {
+  content: '!';
+  color: var(--saito-white);
+  background-color: var(--saito-primary);
+  border-radius: 0.583rem;
+  padding: 0.208rem 0.5rem;
+  position: absolute;
+  right: 0.833rem;
+  top: 50%;
+  transform: translateY(-50%);
+  font-size: 20px;
+  line-height: 20px;
+}
+
+.game-menu .saito-notification-dot {
+  left: unset;
+  right: 2.5rem;
+  top: 0;
+}
+
+@media screen and (max-width: 600px),
+  screen and (orientation: landscape) and (max-height: 600px) {
+  #saito-header .game-menu {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: min(33.333rem, 100vw);
+    min-width: 0;
+    height: 100svh;
+    margin: 0;
+    border: 0;
+    transform: translateX(-100%);
+    transition: transform 0.3s ease;
+  }
+
+  #saito-header .game-menu.mobile-visible {
+    transform: translateX(0);
+  }
+
+  .game-menu > ul {
+    display: flex;
+    flex-direction: column;
+    width: 100%;
+    height: 100%;
+    overflow-x: hidden;
+    overflow-y: auto;
+    color: var(--saito-foreground);
+    background: var(--saito-popover);
+    border: 0;
+    border-radius: 0 var(--saito-radius-lg) var(--saito-radius-lg) 0;
+    box-shadow: var(--saito-elevation-3);
+  }
+
+  .game-menu > ul > li,
+  .game-menu ul.game-menu-sub-options li {
+    flex: 0 0 auto;
+    width: 100%;
+    min-width: 0;
+    max-width: none;
+    height: auto;
+    margin: 0;
+    line-height: normal;
+    border-bottom: 1px solid var(--saito-border);
+  }
+
+  .game-menu > ul > li.game-menu-mobile-header {
+    position: sticky;
+    top: 0;
+    z-index: 2;
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: var(--saito-space-sm);
+    width: 100%;
+    height: var(--game-menu-mobile-header-height);
+    padding: var(--saito-space-sm);
+    background: var(--saito-popover);
+    border-bottom: 1px solid var(--saito-border);
+  }
+
+  .game-menu-mobile-header-button {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 0;
+    height: 4rem;
+    padding: var(--saito-space-sm) var(--saito-space-md);
+    color: var(--saito-foreground);
+    font: inherit;
+    background: var(--saito-secondary);
+    border: 1px solid var(--saito-border);
+    border-radius: var(--saito-radius);
+  }
+
+  .game-menu-mobile-header-button > span {
+    align-items: center;
+    justify-content: center;
+    gap: var(--saito-space-sm);
+    min-width: 0;
+  }
+
+  .game-menu-mobile-header-button .game-menu-game-state {
+    display: flex;
+  }
+
+  .game-menu-mobile-header-button img {
+    width: 2.167rem;
+    height: 2.167rem;
+    object-fit: contain;
+  }
+
+  .game-menu-mobile-header-button i {
+    font-size: 1.833rem;
+  }
+
+  .game-menu > ul > li.game-menu-icon,
+  .game-menu-option-label {
+    display: flex;
+    align-items: center;
+    width: 100%;
+    height: 4.167rem;
+    padding: 0 var(--saito-space-lg);
+    color: var(--saito-foreground);
+    line-height: 4.167rem;
+    text-align: left;
+    background: transparent;
+    box-shadow: none;
+  }
+
+  .game-menu > ul > li.game-menu-icon {
+    gap: var(--saito-space-md);
+    max-width: none;
+  }
+
+  .game-menu > ul > li.game-menu-icon > i {
+    width: 2rem;
+    font-size: 1.667rem;
+    text-align: center;
+  }
+
+  .game-menu-desktop-fullscreen-icon {
+    display: none;
+  }
+
+  .game-menu-mobile-fullscreen-icon {
+    display: inline-block;
+  }
+
+  .game-menu-icon-label,
+  .game-menu-accordion-icon {
+    display: inline-block;
+  }
+
+  .game-menu-option-label {
+    justify-content: space-between;
+  }
+
+  .game-menu-accordion-icon {
+    transition: transform 0.2s ease;
+  }
+
+  .game-menu-option.expanded > .game-menu-option-label > .game-menu-accordion-icon,
+  .game-menu-sub-option.expanded > .game-menu-option-label > .game-menu-accordion-icon {
+    transform: rotate(180deg);
+  }
+
+  .game-menu .game-menu-sub-options,
+  .game-menu .game-menu-sub-sub-options {
+    position: static;
+    width: 100%;
+    margin: 0;
+    background: var(--saito-popover);
+    border: 0;
+    box-shadow: none;
+  }
+
+  .game-menu-sub-options::after,
+  .game-menu-sub-sub-options::after {
+    display: none;
+  }
+
+  .game-menu-sub-option .game-menu-option-label {
+    height: 4rem;
+    padding-left: 2.667rem;
+    line-height: 4rem;
+  }
+
+  .game-menu-sub-sub-option .game-menu-option-label {
+    padding-left: 4.333rem;
+  }
+
+  .game-menu .game-menu-mobile-toggle {
+    position: absolute;
+    top: 0;
+    left: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 3.667rem;
+    height: 3.667rem;
+    padding: 0;
+    color: var(--saito-foreground);
+    font-size: 2.167rem;
+    background: var(--saito-secondary);
+    border: 1px solid var(--saito-border);
+    border-left: 0;
+    border-radius: 0 var(--saito-radius) var(--saito-radius) 0;
+    box-shadow: var(--saito-elevation-2);
+  }
+
+  .game-menu.mobile-visible .game-menu-mobile-toggle {
+    opacity: 0;
+    pointer-events: none;
+  }
+
+  .game-menu.mobile-saito-visible {
+    pointer-events: none;
+  }
+
+  .game-menu.mobile-saito-visible > ul {
+    overflow: visible;
+    background: transparent;
+    box-shadow: none;
+  }
+
+  .game-menu.mobile-saito-visible > ul > .game-menu-icon,
+  .game-menu.mobile-saito-visible > ul > .game-menu-option {
+    visibility: hidden;
+  }
+
+  .game-menu.mobile-saito-visible .game-menu-mobile-header {
+    pointer-events: auto;
+  }
+
+  .game-menu.mobile-saito-visible .game-menu-game-state {
+    display: none;
+  }
+
+  .game-menu.mobile-saito-visible .game-menu-saito-state {
+    display: flex;
+  }
+
+  .game-menu .notification::before {
+    right: var(--saito-space-lg);
+  }
+}
+
+.disable-menu {
+  display: none;
+  visibility: hidden;
+}

@@ -148,10 +148,11 @@ class SettlersDisplay {
     }
     try {
       let cards = '';
+      let resources = this.game.state.players[this.game.player - 1].resources;
 
-      for (let r of this.game.state.players[this.game.player - 1].resources) {
-        //Show all cards
-        cards += `<div class="card"><img src="${this.returnCardImage(r)}">
+      for (let r of resources) {
+        cards += `<div class="card" data-resource="${r}">
+                    <img src="${this.returnCardImage(r)}">
                   </div>`;
       }
 

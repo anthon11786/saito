@@ -1555,21 +1555,21 @@ console.log("LATEST MOVE: " + mv);
 	//
         if (this.game.options.deck === "late-war") {
           if (this.game.state.vp < 20) {
-            this.sendGameOverTransaction(this.game.players[0], "Wargames");
+            this.triggerGameOver(this.game.players[0], "Wargames");
           } else {
-            this.sendGameOverTransaction(this.game.players[1], "Wargames");
+            this.triggerGameOver(this.game.players[1], "Wargames");
           }
 	  return 0;
         }
 
         if (this.game.state.vp > 0) {
-          this.sendGameOverTransaction(this.game.players[1],"Wargames");
+          this.triggerGameOver(this.game.players[1],"Wargames");
         }
         if (this.game.state.vp < 0) {
-          this.sendGameOverTransaction(this.game.players[0],"Wargames");
+          this.triggerGameOver(this.game.players[0],"Wargames");
         }
         if (this.game.state.vp == 0) {
-          this.sendGameOverTransaction(this.game.players, "tie");
+          this.triggerGameOver(this.game.players, "tie");
         }
 
       }
@@ -3046,9 +3046,9 @@ console.log("DESC: " + JSON.stringify(discarded_cards));
       //
       if (this.is_testing == 1) {
         if (this.game.player == 2) {
-          this.game.deck[0].hand = ["brushwar", "missileenvy", "iraniraq", "abmtreaty", "quagmire", "nato", "grainsales"];
+          this.game.deck[0].hand = ["cubanmissile", "fidel", "missileenvy", "iraniraq", "abmtreaty", "quagmire", "nato", "grainsales"];
         } else {
-          this.game.deck[0].hand = ["brezhnev", "saltnegotiations","opec","asknot","flowerpower","indopaki", "truman", "asia"];
+          this.game.deck[0].hand = ["oas", "saltnegotiations","opec","asknot","flowerpower","indopaki", "truman", "asia"];
         }
 
       	//this.game.state.round = 1;
@@ -4607,18 +4607,15 @@ async playerTurnHeadlineSelected(card, player) {
       twilight_self.hideCard(); //close cardbox in case it is open
 
       //
-      // WWBY
+      // WWBY warning only — do not mutate state until the play is committed
+      // (event / ops / space). Keeps back-button / re-select working.
       //
       if (twilight_self.game.state.events.wwby == 1 && twilight_self.game.state.headline == 0) {
-        if (player == "us") {
-          if (card != "unintervention") {
-            if (twilight_self.playerHoldsCard("unintervention")){
-              let c = await sconfirm(`If you don't play ${twilight_self.cardToText("unintervention")}, USSR will gain 3 VP. Still play this card?`);
-              if (c) {} else { return; }
-            }
-            twilight_self.game.state.events.wwby_triggers = 1; //Remember penalty to apply with next endturn
+        if (player == "us" && card != "unintervention") {
+          if (twilight_self.playerHoldsCard("unintervention")){
+            let c = await sconfirm(`If you don't play ${twilight_self.cardToText("unintervention")}, USSR will gain 3 VP. Still play this card?`);
+            if (c) {} else { return; }
           }
-          twilight_self.game.state.events.wwby = 0; //Turn off WWBY
         }
       }
 
@@ -4629,6 +4626,7 @@ async playerTurnHeadlineSelected(card, player) {
         //
         // scoring cards score, not get discarded
         if (ac[card]?.scoring == 0) {
+          twilight_self.resolveWeWillBuryYouOnCommit(player, card, false);
           twilight_self.removeTwilightCardFromHand(card);
           twilight_self.addMove("resolve\tplay");
           twilight_self.addMove("quagmire\t"+player+"\t"+card);
@@ -4876,6 +4874,7 @@ async playerTurnHeadlineSelected(card, player) {
 	      }
 
               if (action == "spaceit") {
+                twilight_self.resolveWeWillBuryYouOnCommit(player, card, false);
                 twilight_self.addMove("space\t"+player+"\t"+card);
                 twilight_self.removeTwilightCardFromHand(card);
                 twilight_self.endTurn();
@@ -4886,6 +4885,7 @@ async playerTurnHeadlineSelected(card, player) {
             return;
           }
 
+          twilight_self.resolveWeWillBuryYouOnCommit(player, card, false);
           twilight_self.addMove("space\t"+player+"\t"+card);
           twilight_self.removeTwilightCardFromHand(card);
           twilight_self.endTurn();
@@ -5394,6 +5394,26 @@ async playerTurnHeadlineSelected(card, player) {
 
 
 
+  /**
+   * Finalize We Will Bury You when a US Action Round play is committed.
+   * Call only from final commit paths (not card-select / back-button).
+   * UN Intervention as Event cancels; any other committed play scores once via endTurn.
+   */
+  resolveWeWillBuryYouOnCommit(player, card, committing_as_event = false) {
+    if (this.game.state.events.wwby != 1) { return; }
+    if (this.game.state.headline == 1) { return; }
+    if (player != "us") { return; }
+
+    if (card == "unintervention" && committing_as_event) {
+      this.game.state.events.wwby = 0;
+      return;
+    }
+
+    this.game.state.events.wwby_triggers = 1;
+    this.game.state.events.wwby = 0;
+  }
+
+
   playerTriggerOps(player, card) {
 
     let twilight_self = this;
@@ -5422,6 +5442,7 @@ async playerTurnHeadlineSelected(card, player) {
         twilight_self.bindBackButtonFunction(() => {  twilight_self.playerTurnCardSelected(card, player);  });
         twilight_self.updateStatusWithOptions('Playing opponent card:', html, function(action2) {
 
+          twilight_self.resolveWeWillBuryYouOnCommit(player, card, false);
           twilight_self.game.state.event_name = twilight_self.cardToText(card);
 
           if (action2 === "before_ops") {
@@ -5445,6 +5466,7 @@ async playerTurnHeadlineSelected(card, player) {
 
     } else { //Playing my own or neutral card for ops
 
+      twilight_self.resolveWeWillBuryYouOnCommit(player, card, false);
       twilight_self.addMove("ops\t"+player+"\t"+card+"\t"+ac[card].ops);
       if (card == "china") { twilight_self.addMove("limit\tchina"); }
       twilight_self.removeTwilightCardFromHand(card);
@@ -5462,6 +5484,8 @@ async playerTurnHeadlineSelected(card, player) {
   playerTriggerEvent(player, card) {
 
     let twilight_self = this;
+
+    twilight_self.resolveWeWillBuryYouOnCommit(player, card, true);
 
     //
     // Flower Power
@@ -6016,6 +6040,7 @@ async playerTurnHeadlineSelected(card, player) {
 	              twilight_self.game.state.events.cubanmissilecrisis = 0; //for immediate effect
 	              twilight_self.game.state.events.cubanmissilecrisis_cancelled = 1; //for immediate effect
 	              twilight_self.game.state.events.cubanmissilecrisis_removal_country = countryname;
+		      if (mycallback) { mycallback(); }
                     } else {
                       twilight_self.addMove("place\tus\tus\t"+countryname+"\t1");
                       twilight_self.placeInfluence(countryname, 1, "us", mycallback);
@@ -6078,12 +6103,13 @@ async playerTurnHeadlineSelected(card, player) {
       		        twilight_self.addMove("setvar\tgame\tstate\tevents\tcubanmissilecrisis_cancelled\t1");
     		        twilight_self.addMove("setvar\tgame\tstate\tevents\tcubanmissilecrisis_removal_country\t"+countryname);
                         twilight_self.removeInfluence("cuba", 1, "ussr");
-                        twilight_self.addMove("remove\tussr\tussr\tcuba\t2");
+                        twilight_self.addMove("remove\tussr\tussr\tcuba\t1");
                         twilight_self.addMove("unlimit\tcmc\t"+countryname);
                         twilight_self.addMove("NOTIFY\tUSSR has cancelled the Cuban Missile Crisis");
                         twilight_self.game.state.events.cubanmissilecrisis = 0; //for immediate effect
 	                twilight_self.game.state.events.cubanmissilecrisis_cancelled = 1; //for immediate effect
 	                twilight_self.game.state.events.cubanmissilecrisis_removal_country = countryname;
+			if (mycallback) { mycallback(); }
                     } else {
                       twilight_self.addMove("place\tussr\tussr\t"+countryname+"\t1");
                       twilight_self.placeInfluence(countryname, 1, "ussr", mycallback);
@@ -6318,11 +6344,11 @@ async playerTurnHeadlineSelected(card, player) {
     // Cuban Missile Crisis
     //
     if (player == "ussr" && this.game.state.events.cubanmissilecrisis == 1) {
-      this.sendGameOverTransaction(this.game.players[1], "Cuban Missile Crisis");
+      this.triggerGameOver(this.game.players[1], "Cuban Missile Crisis");
       return;
     }
     if (player == "us" && this.game.state.events.cubanmissilecrisis == 2) {
-      this.sendGameOverTransaction(this.game.players[0], "Cuban Missile Crisis");
+      this.triggerGameOver(this.game.players[0], "Cuban Missile Crisis");
       return;
     }
 
@@ -7981,14 +8007,14 @@ console.log("DISPLAY ERROR: " + JSON.stringify(err));
       this.game.state.vp--;
       this.updateLog("USSR receives 1 VP for the China Card");
       if (this.game.state.vp <= -20) {
-        this.sendGameOverTransaction(this.game.players[0], "victory points");
+        this.triggerGameOver(this.game.players[0], "victory points");
         return;
       }
     } else {
       this.game.state.vp++;
       this.updateLog("US receives 1 VP for the China Card");
       if (this.game.state.vp >= 20) {
-        this.sendGameOverTransaction(this.game.players[1], "victory points");
+        this.triggerGameOver(this.game.players[1], "victory points");
         return;
       }
     }
@@ -8033,9 +8059,9 @@ console.log("DISPLAY ERROR: " + JSON.stringify(err));
     //
     if (this.game.options.deck === "late-war") {
       if (this.game.state.vp < 20) {
-        this.sendGameOverTransaction(this.game.players[0], "final scoring");
+        this.triggerGameOver(this.game.players[0], "final scoring");
       } else {
-        this.sendGameOverTransaction(this.game.players[1], "final scoring");
+        this.triggerGameOver(this.game.players[1], "final scoring");
       }
     }
 
@@ -8043,13 +8069,13 @@ console.log("DISPLAY ERROR: " + JSON.stringify(err));
     // normal game
     //
     if (this.game.state.vp == 0) {
-      this.sendGameOverTransaction(this.game.players, "tie");
+      this.triggerGameOver(this.game.players, "tie");
       return 1;
     }
     if (this.game.state.vp < 0) {
-      this.sendGameOverTransaction(this.game.players[0], "final scoring");
+      this.triggerGameOver(this.game.players[0], "final scoring");
     } else {
-      this.sendGameOverTransaction(this.game.players[1], "final scoring");
+      this.triggerGameOver(this.game.players[1], "final scoring");
     }
 
     return 1;
@@ -8831,9 +8857,9 @@ console.log("DISPLAY ERROR: " + JSON.stringify(err));
     if (this.game.state.defcon <= 1) {
       if (this.game.state.headline == 1) {
         // phasing player in headline loses
-        this.sendGameOverTransaction(this.game.players[2 - this.game.state.player_to_go], "thermonuclear war");
+        this.triggerGameOver(this.game.players[2 - this.game.state.player_to_go], "thermonuclear war");
       }else{
-        this.sendGameOverTransaction(this.game.players[2 - this.game.state.turn], "thermonuclear war");
+        this.triggerGameOver(this.game.players[2 - this.game.state.turn], "thermonuclear war");
       }
       return;
     }
@@ -9433,10 +9459,10 @@ console.log("DISPLAY ERROR: " + JSON.stringify(err));
     }
 
     if (this.game.state.vp > 19) {
-        this.sendGameOverTransaction(this.game.players[1], "victory point track");
+        this.triggerGameOver(this.game.players[1], "victory point track");
     }
     if (this.game.state.vp < -19) {
-      this.sendGameOverTransaction(this.game.players[0], "victory point track");
+      this.triggerGameOver(this.game.players[0], "victory point track");
     }
 
   }
@@ -16887,22 +16913,61 @@ console.log("respondant: " + respondant);
 
         var twilight_self = this;
         let cards_discarded = 0;
-        let cards_to_discard = 0;
         twilight_self.addMove("resolve\tpoliovaccine");
+
+        let finish_discard = () => {
+
+          if (twilight_self.game.player == 1) {
+            twilight_self.addMove("DEAL\t1\t1\t"+cards_discarded);
+          }
+          if (twilight_self.game.player == 2) {
+            twilight_self.addMove("DEAL\t1\t2\t"+cards_discarded);
+          }
+
+          //
+          // are there enough cards available, if not, reshuffle
+          //
+          if (cards_discarded > twilight_self.game.deck[0].crypt.length) {
+
+            let discarded_cards = twilight_self.returnDiscardedCards();
+            if (Object.keys(discarded_cards).length > 0) {
+
+              //
+              // shuffle in discarded cards
+              //
+              twilight_self.addMove("SHUFFLE\t1");
+              twilight_self.addMove("DECKRESTORE\t1");
+              twilight_self.addMove("DECKENCRYPT\t1\t2");
+              twilight_self.addMove("DECKENCRYPT\t1\t1");
+              twilight_self.addMove("DECKXOR\t1\t2");
+              twilight_self.addMove("DECKXOR\t1\t1");
+              twilight_self.addMove("flush\tdiscards"); // opponent should know to flush discards as we have
+              twilight_self.addMove("DECK\t1\t"+JSON.stringify(discarded_cards));
+              twilight_self.addMove("DECKBACKUP\t1");
+              twilight_self.updateLog("cards remaining: " + twilight_self.game.deck[0].crypt.length);
+              twilight_self.updateLog("Shuffling discarded cards back into the deck...");
+
+            }
+          }
+          twilight_self.endTurn();
+        };
 
         let discard_function = () => {
 
+          let remaining = 0;
           let html = "<ul>";
-          for (let i = 0; i < this.game.deck[0].hand.length; i++) {
-            if (this.game.deck[0].hand[i] != "china") {
-              html += `<li class="option" id="${this.game.deck[0].hand[i]}">${this.game.deck[0].cards[this.game.deck[0].hand[i]].name}</li>`;
-              cards_to_discard++;
+          for (let i = 0; i < twilight_self.game.deck[0].hand.length; i++) {
+            if (twilight_self.game.deck[0].hand[i] != "china") {
+              html += `<li class="option" id="${twilight_self.game.deck[0].hand[i]}">${twilight_self.game.deck[0].cards[twilight_self.game.deck[0].hand[i]].name}</li>`;
+              remaining++;
             }
           }
 
-          if (cards_to_discard == 0) {
-            twilight_self.addMove("notify\tPlayer has no cards available to discard");
-            twilight_self.endTurn();
+          if (remaining == 0) {
+            if (cards_discarded == 0) {
+              twilight_self.addMove("notify\tPlayer has no cards available to discard");
+            }
+            finish_discard();
             return 0;
           }
 
@@ -16910,51 +16975,20 @@ console.log("respondant: " + respondant);
 
           twilight_self.updateStatusWithOptions("Select cards to discard:", html, function(card) {
 
+            if (card == "finished") {
+              finish_discard();
+              return;
+            }
+
             cards_discarded++;
             twilight_self.removeCardFromHand(card);
-            twilight_self.addMove("discard\tus\t"+card);
+            twilight_self.addMove("discard\t"+player+"\t"+card);
 
-            if (card == "finished" || cards_discarded == 3) {
-
-              //
-              // if Aldrich Ames is active, US must reveal cards
-              //
-              if (this.game.player == 1) {
-                twilight_self.addMove("DEAL\t1\t1\t"+cards_discarded);
-              }
-              if (this.game.player == 2) {
-                twilight_self.addMove("DEAL\t1\t2\t"+cards_discarded);
-              }
-
-              //
-              // are there enough cards available, if not, reshuffle
-              //
-              if (cards_discarded > twilight_self.game.deck[0].crypt.length) {
-
-                let discarded_cards = twilight_self.returnDiscardedCards();
-                if (Object.keys(discarded_cards).length > 0) {
-
-                  //
-                  // shuffle in discarded cards
-                  //
-                  twilight_self.addMove("SHUFFLE\t1");
-                  twilight_self.addMove("DECKRESTORE\t1");
-                  twilight_self.addMove("DECKENCRYPT\t1\t2");
-                  twilight_self.addMove("DECKENCRYPT\t1\t1");
-                  twilight_self.addMove("DECKXOR\t1\t2");
-                  twilight_self.addMove("DECKXOR\t1\t1");
-                  twilight_self.addMove("flush\tdiscards"); // opponent should know to flush discards as we have
-                  twilight_self.addMove("DECK\t1\t"+JSON.stringify(discarded_cards));
-                  twilight_self.addMove("DECKBACKUP\t1");
-                  twilight_self.updateLog("cards remaining: " + twilight_self.game.deck[0].crypt.length);
-                  twilight_self.updateLog("Shuffling discarded cards back into the deck...");
-
-                }
-              }
-              twilight_self.endTurn();
+            if (cards_discarded == 3) {
+              finish_discard();
             } else {
-	      discard_function();
-	    }
+              discard_function();
+            }
           });
         }
 	discard_function();
@@ -16962,7 +16996,6 @@ console.log("respondant: " + respondant);
 
       return 0;
     }
-
 
 
     if (card == "breakthroughatlopnor") {

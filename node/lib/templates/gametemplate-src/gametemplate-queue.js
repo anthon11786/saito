@@ -144,10 +144,6 @@ class GameQueue {
    *  Game moves are processed through a queue.
    */
   async startQueue() {
-    console.log('[OBS_TRACE] startQueue()', {
-      halted: this.halted,
-      gaming_active: this.gaming_active
-    });
     console.info(
       `GT [startQueue] halted: (${this.halted}) , gaming_active (${this.gaming_active})`
     );
@@ -159,7 +155,7 @@ class GameQueue {
     );
     console.debug('GT [startQueue] CONFIRMS_NEEDED: ' + JSON.stringify(this.game.confirms_needed));
 
-    if (this.game.over) {
+    if (this.game.over == 1) {
       console.trace('GT: Starting queue from game over state???');
       return;
     }
@@ -204,13 +200,24 @@ class GameQueue {
 
     this.halted = 0;
 
+    //
+    // process any stopgame / gameover that arrived while we were halted --
+    // these may end the game, in which case there is no queue to restart
+    //
+    if (this.deferred_game_end?.length) {
+      await this.processDeferredGameEndTransactions();
+      if (this.game.over == 1) {
+        return;
+      }
+    }
+
     this.saveGame(this.game.id);
 
     await this.startQueue();
 
     // When we get to a stop point, check on all the future moves that had come in
     //if ((await this.runQueue()) == 0) {
-    //	this.processFutureMoves();
+    //  this.processFutureMoves();
     //}
   }
 
@@ -240,7 +247,6 @@ class GameQueue {
     // this indicates we are processing our queue
     //
     this.gaming_active = 1; // prevents future moves from getting added to the queue while it is processing
-    console.log('[OBS_TRACE] runQueue(): set gaming_active = 1');
     //
     //stash a copy of state before doing anything
     //
@@ -302,6 +308,9 @@ class GameQueue {
         last_instruction === game_self.game.queue[queue_length - 1]
       ) {
         cont = await this.handleGameLoop();
+        if (cont == 0 && game_self.game.terminating && game_self.game.over == 0) {
+          cont = 1;
+        }
       }
     }
 
@@ -577,10 +586,31 @@ class GameQueue {
     });
 
     this.commands.push(async (game_self, gmv) => {
+      if (gmv[0] === 'SETTLE') {
+        game_self.game.queue.splice(game_self.game.queue.length - 1, 1);
+        game_self.queueGameStakeSettlement();
+        return 1;
+      }
+      return 1;
+    });
+
+    this.commands.push(async (game_self, gmv) => {
       if (gmv[0] === 'GAMEOVER') {
+        game_self.game.queue.splice(game_self.game.queue.length - 1, 1);
+        game_self.game.terminating = 0;
+        game_self.game.over = 1;
+        game_self.game.last_block = game_self.app.blockchain.last_bid;
+
         if (game_self.gameBrowserActive()) {
-          game_self.updateLog('Player has Quit the Game');
+          game_self.gameOverUserInterface();
+        } else {
+          if (game_self.game.reason !== 'cancellation') {
+            siteMessage(game_self.game.module + ': Game Over', 5000);
+            game_self.app.connection.emit('arcade-invite-manager-render-request');
+          }
         }
+
+        game_self.saveGame(game_self.game.id);
         return 0;
       }
       return 1;
@@ -968,11 +998,7 @@ class GameQueue {
         } else {
           //Otherwise we want to pause game processing
           game_self.treat_all_moves_as_future = 1;
-          game_self.app.connection.emit('arcade-game-ready-render-request', {
-            name: game_self.name,
-            slug: game_self.returnSlug(),
-            id: game_self.game.id
-          });
+          game_self.emitGameReadyRender();
           // Move into game before processing anything else from the queue or future moves
           game_self.halted = 1;
           return 0;
@@ -1898,10 +1924,10 @@ class GameQueue {
     });
 
     /*
-		      There are two ways to restore, which usually doesn't matter as the next
-		      instruction is almost always a shuffle, but we can restore the deck before/after
-		      the (added deck cards) add "push" to put new cards on top of deck,
-		      otherwise defaults to bottom of deck
+          There are two ways to restore, which usually doesn't matter as the next
+          instruction is almost always a shuffle, but we can restore the deck before/after
+          the (added deck cards) add "push" to put new cards on top of deck,
+          otherwise defaults to bottom of deck
     */
     this.commands.push(async (game_self, gmv) => {
       if (gmv[0] === 'DECKRESTORE') {
@@ -2037,8 +2063,8 @@ class GameQueue {
     });
 
     /*
-      		  Creates the pool data structure
-    		*/
+            Creates the pool data structure
+        */
     this.commands.push(async (game_self, gmv) => {
       if (gmv[0] === 'POOL') {
         let poolidx = gmv[1];
@@ -2280,7 +2306,7 @@ class GameQueue {
           //console.info('GT: Halt game for observer checkpoint');
           game_self.halted = 1;
           game_self.saveGame(game_self.game.id);
-          game_self.observerControls.updateStatus('Pause for Observer Checkpoint');
+          game_self.observerControls?.updateStatus('Pause for Observer Checkpoint');
           return 0;
         }
         return 1;
@@ -2661,6 +2687,7 @@ class GameQueue {
         }
 
         let my_specific_game_id = game_self.game.id;
+        let my_queue_entry = game_self.game.queue[game_self.game.queue.length - 1];
         game_self.saveGame(game_self.game.id);
         game_self.halted = 1;
 
@@ -2675,12 +2702,26 @@ class GameQueue {
               if (game_self.game.id != my_specific_game_id) {
                 game_self.game = game_self.loadGame(my_specific_game_id);
               }
+
+              game_self.app.connection.emit('saito-crypto-send-confirm', robj);
+
+              //
+              // our SEND entry was at the tail when we halted, and the queue is
+              // frozen while we wait -- if the tail is no longer our entry, the
+              // queue changed underneath us (duplicate callback, or something
+              // else consumed it) and we must not splice a different command
+              //
+              if (game_self.game.queue[game_self.game.queue.length - 1] !== my_queue_entry) {
+                console.warn(
+                  'GT [SEND] our entry is not at the end of the queue, ignoring callback'
+                );
+                return 0;
+              }
               game_self.updateLog('payments issued...');
               game_self.game.queue.splice(game_self.game.queue.length - 1, 1);
 
-              game_self.app.connection.emit('saito-crypto-send-confirm', robj, unique_hash);
-
               game_self.restartQueue();
+
               return 0;
             },
             receiver,
@@ -2688,13 +2729,16 @@ class GameQueue {
           );
         };
 
-        game_self.app.connection.emit('saito-crypto-send-render-request', {
+        game_self.app.connection.emit('saito-game-crypto-send-auth-open-request', {
           publicKey: receiver,
           address: receiver_crypto_address,
           amount,
           ticker,
           hash: unique_hash,
-          trusted: this_self.loadGamePreference('crypto_transfers_outbound_trusted'),
+          game_id: game_self.game.id,
+          trusted: game_self.game.terminating
+            ? true
+            : this_self.loadGamePreference('crypto_transfers_outbound_trusted'),
           mycallback: sendPaymentWrapper
         });
 
@@ -2741,37 +2785,53 @@ class GameQueue {
         }
 
         let my_specific_game_id = game_self.game.id;
+        let my_queue_entry = game_self.game.queue[game_self.game.queue.length - 1];
         game_self.saveGame(game_self.game.id);
         game_self.halted = 1;
 
+        //
+        // Update 6/17/2026
+        // We launch the overlay before calling receivePayment
+        // because the continue code is triggered by closing the overlay, which
+        // listens for a confirmation event emitted by the crypto, that could be instantaneous
+        //
+        game_self.app.connection.emit('saito-crypto-game-receive-render-request', {
+          address: sender_crypto_address,
+          publicKey: sender,
+          amount: amount,
+          ticker,
+          hash: unique_hash,
+          game_id: game_self.game.id,
+          mycallback: function () {
+            if (game_self.game.id != my_specific_game_id) {
+              game_self.game = game_self.loadGame(my_specific_game_id);
+            }
+
+            //
+            // our RECEIVE entry was at the tail when we halted, and the queue is
+            // frozen while we wait -- if the tail is no longer our entry, the
+            // queue changed underneath us (duplicate callback, or something
+            // else consumed it) and we must not splice a different command
+            //
+            if (game_self.game.queue[game_self.game.queue.length - 1] !== my_queue_entry) {
+              console.warn(
+                'GT [RECEIVE] our entry is not at the end of the queue, ignoring callback'
+              );
+              return 0;
+            }
+            game_self.updateLog('payments received...');
+            game_self.game.queue.splice(game_self.game.queue.length - 1, 1);
+
+            game_self.restartQueue();
+            return 0;
+          }
+        });
+
         await game_self.app.wallet.receivePayment(
           ticker,
-          [sender_crypto_address],
-          [receiver_crypto_address],
-          [amount],
-          unique_hash,
-          function () {
-            game_self.app.connection.emit('saito-crypto-receive-render-request', {
-              address: sender_crypto_address,
-              publicKey: sender,
-              amount: amount,
-              ticker,
-              hash: unique_hash,
-              trusted: this_self.loadGamePreference('crypto_transfers_inbound_trusted'),
-              mycallback: function () {
-                if (game_self.game.id != my_specific_game_id) {
-                  game_self.game = game_self.loadGame(my_specific_game_id);
-                }
-
-                game_self.updateLog('payments received (maybe)... moving on...');
-                game_self.game.queue.splice(game_self.game.queue.length - 1, 1);
-
-                game_self.restartQueue();
-                return 0;
-              }
-            });
-          },
-          sender
+          sender_crypto_address,
+          amount,
+          unique_hash
         );
 
         return 0;

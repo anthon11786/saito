@@ -81,6 +81,8 @@ class Browser {
     }
 
     app.connection.on('saito-render-complete', () => {
+      (window as any).SaitoCtaLoader?.markAppReady?.();
+
       //hide pace-js if its still active
       let elem = document.querySelector('.pace');
       let delay = 500;
@@ -276,7 +278,6 @@ class Browser {
       console.log('Browser.ts -- active module is ' + active_module);
       for (let i = 0; i < this.app.modules.mods.length; i++) {
         if (this.app.modules.mods[i].isSlug(active_module)) {
-          console.log('Activating ' + this.app.modules.mods[i].returnName());
           this.app.modules.mods[i].activateModule();
           break;
         }
@@ -300,30 +301,10 @@ class Browser {
 
       this.browser_active = 1;
 
-      let theme = /*document.documentElement.getAttribute('data-theme') ||*/ 'lite';
+      const theme_from_document = document.documentElement.getAttribute('data-theme');
+      const theme = this.app.options?.theme?.[active_module] ?? theme_from_document ?? 'dark';
 
-      // ignore html-embedded default theme preference until we are sorted on the themese
-      // because all of them are undefined!
-
-      if (this.app.options?.theme) {
-        if (this.app.options.theme[active_module]) {
-          theme = this.app.options.theme[active_module];
-          this.switchTheme(theme);
-        }
-      }
-
-      this.updateThemeInHeader(theme);
-
-      const updateViewHeight = () => {
-        let vh = window.innerHeight / 100;
-        document.documentElement.style.setProperty('--saito-vh', `${vh}px`);
-        //siteMessage(`Update: ${vh}px`);
-      };
-
-      window.addEventListener('resize', debounce(updateViewHeight, 200));
-      setTimeout(() => {
-        updateViewHeight();
-      }, 200);
+      this.switchTheme(theme);
     } catch (err) {
       if (err == 'ReferenceError: document is not defined') {
         console.error('non-browser detected: ', err);
@@ -378,7 +359,7 @@ class Browser {
           let publicKey = e.target.getAttribute('data-id');
           if (
             !publicKey ||
-            !app.wallet.isValidPublicKey(publicKey) ||
+            !app.crypto.isPublicKey(publicKey) ||
             disable_click === 'true' ||
             disable_click == true
           ) {
@@ -412,11 +393,37 @@ class Browser {
     });
   }
 
+  /**
+   * Attach a stylesheet once (for feature UI CSS that lives outside saito.css).
+   */
+  addStylesheet(href) {
+    if (typeof document === 'undefined' || !href) {
+      return;
+    }
+    const links = document.querySelectorAll('link[rel="stylesheet"]');
+    for (let i = 0; i < links.length; i++) {
+      try {
+        if (links[i].getAttribute('href')?.includes(href)) {
+          return;
+        }
+      } catch (err) {}
+    }
+    const s = document.createElement('link');
+    s.rel = 'stylesheet';
+    s.type = 'text/css';
+    s.href = href + (this.app?.build_number ? `?v=${this.app.build_number}` : '');
+    document.querySelector('head')?.appendChild(s);
+  }
+
   determineActiveModule() {
     const current_url = window.location.toString();
     const myurl = new URL(current_url);
     const myurlpath = myurl.pathname.split('/');
     const default_mod = 'website';
+
+    if (myurl.pathname === '/') {
+      return this.app?.options?.defaultModule || default_mod;
+    }
 
     if (myurlpath[1]) {
       return myurlpath[1].toLowerCase();
@@ -468,7 +475,7 @@ class Browser {
             if (key) {
               add = key.publicKey;
             }
-            if (this.app.wallet.isValidPublicKey(cleaner) && (add == '' || add == null)) {
+            if (this.app.crypto.isPublicKey(cleaner) && (add == '' || add == null)) {
               add = cleaner;
             }
             if (!keys.includes(add) && add != '' && add != null) {
@@ -484,7 +491,7 @@ class Browser {
 
     if (adds) {
       adds.forEach((add) => {
-        if (this.app.wallet.isValidPublicKey(add) && !keys.includes(add)) {
+        if (this.app.crypto.isPublicKey(add) && !keys.includes(add)) {
           keys.push(add);
         }
       });
@@ -494,7 +501,7 @@ class Browser {
         let key = this.app.keychain.returnKey({ identifier: id });
         if (key.publicKey) {
           let add = key.publicKey;
-          if (this.app.wallet.isValidPublicKey(add)) {
+          if (this.app.crypto.isPublicKey(add)) {
             if (!keys.includes(add)) {
               keys.push(add);
             }
@@ -732,13 +739,19 @@ class Browser {
     const QRCode = require('./../helpers/qrcode');
     let obj = document.getElementById(qrid);
 
-    if (typeof data === 'object') {
-      data.width = 256;
-      data.height = 256;
-      data.colorDark = '#000000';
-      data.colorLight = '#ffffff';
-      data.correctLevel = QRCode.CorrectLevel.H;
-    }
+    data =
+      typeof data === 'object' && data !== null
+        ? data
+        : {
+            text: data
+          };
+
+    data.width = data.width || 256;
+    data.height = data.height || 256;
+    data.colorDark = data.colorDark || '#000000';
+    data.colorLight = data.colorLight || '#ffffff';
+    data.correctLevel = data.correctLevel || QRCode.CorrectLevel.H;
+    data.useSVG = true;
 
     console.debug('browser [generateQRCode]: ', data);
 
@@ -870,6 +883,10 @@ class Browser {
   }
 
   removeElementBySelector(selector = '') {
+    if (selector === '') {
+      console.warn('no selector provided to removeElementBySelector');
+      return;
+    }
     let obj = document.querySelector(selector);
     if (obj) {
       obj.remove();
@@ -1139,6 +1156,25 @@ class Browser {
     return `${Math.floor(diff / 86400)} days ago`;
   }
 
+  formatRelativeTime(timestamp = 0) {
+    const diffMs = Math.max(0, Date.now() - Number(timestamp));
+    const diffMinutes = Math.floor(diffMs / 60000);
+
+    if (diffMinutes < 60) {
+      return `${Math.max(1, diffMinutes)}m`;
+    }
+
+    const diffHours = Math.floor(diffMinutes / 60);
+
+    if (diffHours < 24) {
+      return `${diffHours}h`;
+    }
+
+    const diffDays = Math.floor(diffHours / 24);
+
+    return `${diffDays}d`;
+  }
+
   saneTimeFromTimestamp(timestamp, with_seconds = true) {
     var date = new Date(timestamp);
     var hours = date.getHours();
@@ -1198,7 +1234,7 @@ class Browser {
         display: flex; flex-direction: column; align-items: center; justify-content: center;
         background: rgba(0, 0, 0, 0.7); z-index: 1000; border-radius: inherit;
       ">
-        <div class="saito_spinner" style="width: 4rem; height: 4rem;"></div>
+        <div class="saito-spinner" style="width: 4rem; height: 4rem;"></div>
         <div style="color: white; margin-top: 1rem; font-size: 1.4rem;">Reading file...</div>
       </div>
     `;
@@ -1234,7 +1270,7 @@ class Browser {
       <form id="uploader_${id}" class="saito-file-uploader" style="display:none">
         <p>Upload multiple files with the file dialog or by dragging and dropping images onto the dashed region</p>
         <input type="file" id="hidden_file_element_${id}" multiple accept="*" class="treated hidden_file_element_${id}">
-        <label class="button" class="hidden_file_element_button" id="hidden_file_element_button_${id}" for="hidden_file_element_${id}">Select some files</label>
+        <label class="hidden_file_element_button" id="hidden_file_element_button_${id}" for="hidden_file_element_${id}">Select some files</label>
       </form>
     `;
 
@@ -1863,7 +1899,7 @@ class Browser {
   }
 
   returnAddressHTML(key, disable = false) {
-    return `<div class="saito-address" data-id="${key}" ${disable ? `data-disable="true"` : ''}>${this.app.keychain.returnUsername(key)}</div>`;
+    return `<div class="saito-address" data-id="${this.escapeHTML(key)}" ${disable ? `data-disable="true"` : ''}>${this.escapeHTML(this.app.keychain.returnUsername(key))}</div>`;
   }
 
   updateAddressHTML(key, id) {
@@ -2021,125 +2057,229 @@ class Browser {
     return regex.test(potential_link);
   }
 
+  /**
+   * Return a compact label for a URL without changing the URL used by the link.
+   */
+  formatUrlForDisplay(url, maxLength = 42) {
+    let displayUrl = String(url ?? '').trim();
+    if (!displayUrl) {
+      return '';
+    }
+
+    displayUrl = displayUrl.replace(/^https?:\/\//i, '').replace(/^www\./i, '');
+
+    const limit = Math.max(4, Number(maxLength) || 42);
+    if (displayUrl.length > limit) {
+      displayUrl = displayUrl.slice(0, limit - 3) + '...';
+    }
+
+    return displayUrl;
+  }
+
+  /**
+   * Sanitize untrusted metadata that may contain basic inline emphasis.
+   * This deliberately excludes links, images, block elements and all attributes.
+   */
+  sanitizeInlineHtml(text) {
+    if (!text) {
+      return '';
+    }
+
+    return sanitizeHtml(String(text), {
+      allowedTags: ['em', 'i', 'strong', 'b'],
+      allowedAttributes: {}
+    });
+  }
+
+  /**
+   * Repair anchors produced by an older publisher that used a smart quote to
+   * close href attributes. Keep this deliberately narrow: only a lone href is
+   * accepted, and its value must pass the same URL policy as normal links.
+   */
+  normalizeLegacySmartQuotedAnchors(text) {
+    return String(text ?? '').replace(
+      /<a\s+href=(["'])([^<>"']+)[‘’“”]\s*>/gi,
+      (match, _openingQuote, href) => {
+        const decodedHref = sanitizer.unescapeEntities(String(href).trim());
+        if (!this.isSafeHref(decodedHref)) {
+          return match;
+        }
+        return `<a href="${this.escapeHTML(decodedHref)}">`;
+      }
+    );
+  }
+
   sanitize(text, createLinks = false) {
     if (!text) {
       return '';
     }
     try {
+      text = this.normalizeLegacySmartQuotedAnchors(text);
+
+      if (createLinks) {
+        const host =
+          typeof window !== 'undefined' && window.location && window.location.host
+            ? window.location.host
+            : '';
+
+        const renderer = new marked.Renderer();
+        const defaultLinkRenderer = renderer.link.bind(renderer);
+        renderer.link = (href, title, linkText) => {
+          const decodedHref = sanitizer.unescapeEntities(String(href ?? ''));
+          const decodedText = sanitizer.unescapeEntities(String(linkText ?? ''));
+          const hrefFromLabel = this.hrefFromAutolink(decodedText);
+
+          // Marked has already converted bare URLs into anchors. Shorten only
+          // their generated labels, preserving authored Markdown link text.
+          if (
+            (decodedText === decodedHref || hrefFromLabel === decodedHref) &&
+            this.isSafeHref(decodedHref) &&
+            decodedText.length > 42
+          ) {
+            linkText = this.escapeHTML(this.formatUrlForDisplay(decodedText));
+          }
+
+          return defaultLinkRenderer(href, title, linkText);
+        };
+
+        text = marked.parse(text, { renderer });
+
+        text = text.replace(this.urlRegexp(), (...args) => {
+          const url = args[0];
+          const offset = args[args.length - 2];
+          const full = args[args.length - 1];
+          const before = full.slice(0, offset);
+          const openAnchors = (before.match(/<a\b/gi) || []).length;
+          const closeAnchors = (before.match(/<\/a>/gi) || []).length;
+          if (openAnchors > closeAnchors) {
+            return url;
+          }
+
+          if (this.numberFilter(url)) {
+            return url;
+          }
+
+          const hrefRaw = this.hrefFromAutolink(url);
+          if (!hrefRaw || !this.isSafeHref(hrefRaw)) {
+            return url;
+          }
+
+          const url2 = this.formatUrlForDisplay(url);
+
+          const extra =
+            host && hrefRaw.includes(host)
+              ? "data-link='local_link' "
+              : "target='_blank' rel='noopener noreferrer' ";
+
+          return `<a ${extra} class="saito-link" href="${this.escapeHTML(hrefRaw)}">${this.escapeHTML(url2)}</a>`;
+        });
+      }
+
+      text = String(text).replace(/\sid=(["']).*?\1/gi, '');
+
       text = sanitizeHtml(text, {
         allowedTags: [
           'a',
+          'p',
+          'br',
+          'div',
+          'span',
+          'ul',
+          'ol',
+          'li',
+          'blockquote',
+          'strong',
+          'b',
+          'em',
+          'i',
+          'strike',
+          'del',
+          'code',
+          'pre',
+          'hr',
           'h1',
           'h2',
           'h3',
           'h4',
           'h5',
           'h6',
-          'blockquote',
-          'p',
-          'ul',
-          'ol',
-          'nl',
-          'li',
-          'b',
-          'i',
-          'strong',
-          'em',
-          'strike',
-          'code',
-          'hr',
-          'br',
-          'div',
           'table',
           'thead',
-          'caption',
           'tbody',
           'tr',
           'th',
           'td',
-          'marquee',
-          /*'pre',*/
-          'span',
-          'img',
-          'video',
-          'audio'
+          'img'
         ],
         allowedAttributes: {
+          a: ['href', 'class', 'target', 'rel', 'data-link'],
+          span: ['class', 'data-id'],
           div: ['class', 'id'],
-          span: ['class', 'id', 'data-id'],
-          img: ['src', 'class'],
+          img: ['src', 'class', 'alt'],
           blockquote: ['href'],
-          i: ['class'],
-          a: ['href', 'data-*']
+          code: ['class']
         },
-        selfClosing: ['img', 'br', 'hr', 'area', 'base', 'basefont', 'input', 'link', 'meta'],
-        allowedSchemes: ['http', 'https', 'ftp', 'mailto'],
-        allowedSchemesByTag: {},
-        allowedSchemesAppliedToAttributes: ['href', 'cite'],
-        allowProtocolRelative: true
+        selfClosing: ['img', 'br', 'hr'],
+        allowedSchemes: ['http', 'https', 'mailto'],
+        allowedSchemesByTag: {
+          img: ['http', 'https', 'data']
+        },
+        allowedSchemesAppliedToAttributes: ['href', 'src'],
+        allowProtocolRelative: false,
+        transformTags: {
+          a: (tagName, attribs) => {
+            const href = attribs.href || '';
+            if (href && !this.isSafeHref(href)) {
+              delete attribs.href;
+            }
+            attribs.class = 'saito-link';
+            let isLocal = false;
+            try {
+              if (typeof window !== 'undefined' && window.location?.host) {
+                isLocal = (attribs.href || href).includes(window.location.host);
+              }
+            } catch (err) {}
+            if (isLocal) {
+              attribs['data-link'] = 'local_link';
+              delete attribs.target;
+              delete attribs.rel;
+            } else {
+              attribs.target = '_blank';
+              attribs.rel = 'noopener noreferrer';
+            }
+            return { tagName, attribs };
+          }
+        },
+        exclusiveFilter: (frame) => {
+          if (frame.tag !== 'img') {
+            return false;
+          }
+          const src = frame.attribs?.src;
+          if (!src || typeof src !== 'string') {
+            return true;
+          }
+          const trimmed = src.trim();
+          if (!trimmed || /[\s<>"'`]/.test(trimmed)) {
+            return true;
+          }
+          if (trimmed.startsWith('/') && !trimmed.startsWith('//')) {
+            return trimmed.includes('\\');
+          }
+          if (/^data:image\/(jpeg|jpg|png|gif|webp);base64,/i.test(trimmed)) {
+            return false;
+          }
+          return !(this.isSafeHref(trimmed) && /^https?:/i.test(trimmed));
+        }
       });
 
-      /* wrap link in <a> tag */
-
-      if (createLinks) {
-        text = text.replace(this.urlRegexp(), (url) => {
-          // This is a number like 1.50 that accidentally got marked as a URL
-          if (this.numberFilter(url)) {
-            //console.warn(`BROWSER [sanitize]: ${url} is a number, not a link`);
-            return url;
-          }
-
-          let url1 = url.trim();
-          let url2 = url1;
-          if (url2.length > 42) {
-            if (url2.indexOf('http') == 0 && url2.includes('://')) {
-              let temp = url2.split('://');
-              url2 = temp[1];
-            }
-            if (url2.indexOf('www.') == 0) {
-              url2 = url2.substr(4);
-            }
-            if (url2.length > 40) {
-              url2 = url2.substr(0, 37) + '...';
-            }
-          }
-
-          return `<a ${
-            url.includes(window.location.host)
-              ? "data-link='local_link' "
-              : "target='_blank' rel='noopener noreferrer' "
-          } class="saito-link" href="${
-            !url.includes('http') ? `http://${url1}` : url1
-          }">${url2}</a>`;
-        });
-
-        //
-        // HTML markup for some basic formatting in chat/tweets -- also functions as a link detector
-        //
-        text = marked.parse(text);
-
-        if (text.includes('<a ') && text.includes('href') && !text.includes('saito-link')) {
-          // These are links created by MarkDown which has a more expansive url regexp
-          let io = text.indexOf('<a ');
-          let href = text.match(/href=".*"/)[0];
-
-          let extra_stuff = href.includes(window.location.host)
-            ? "data-link='local_link'"
-            : "target='_blank' rel='noopener noreferrer'";
-
-          text = text.slice(0, io + 3) + extra_stuff + ` class="saito-link" ` + text.slice(io + 3);
-        }
-      }
-
-      //trim lines at start and end
-      text = text.replace(/^\s+|\s+$/g, '');
-
       text = emoji.emojify(text);
+
+      text = text.replace(/^\s+|\s+$/g, '');
 
       return text;
     } catch (err) {
       console.error('Browser [sanitize] error: ', err);
-      return text;
+      return '';
     }
   }
 
@@ -2219,7 +2359,84 @@ class Browser {
   // escaping special characters like & < > "
   //
   escapeHTML(text) {
-    return sanitizer.escapeAttrib(text);
+    return sanitizer.escapeAttrib(text == null ? '' : String(text));
+  }
+
+  /**
+   * Turn a bare autolink match into an absolute href, or null if the match
+   * already has a non-allowed scheme (javascript:, data:, etc.).
+   */
+  hrefFromAutolink(url) {
+    if (!url || typeof url !== 'string') {
+      return null;
+    }
+    const trimmed = url.trim();
+    if (!trimmed || /[\s<>"'`]/.test(trimmed)) {
+      return null;
+    }
+    if (trimmed.startsWith('//')) {
+      return null;
+    }
+    if (/^(https?|mailto):/i.test(trimmed)) {
+      return trimmed;
+    }
+    if (/^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(trimmed)) {
+      return null;
+    }
+    return `http://${trimmed}`;
+  }
+
+  /**
+   * True if url is safe to use as an href (http/https/mailto).
+   * Rejects javascript:, data:, vbscript:, ftp, protocol-relative, and other non-allowed schemes.
+   */
+  isSafeHref(url) {
+    if (!url || typeof url !== 'string') {
+      return false;
+    }
+    const trimmed = url.trim();
+    if (!trimmed || /[\s<>"'`]/.test(trimmed)) {
+      return false;
+    }
+    if (trimmed.startsWith('//')) {
+      return false;
+    }
+    const schemeMatch = trimmed.match(/^([a-zA-Z][a-zA-Z0-9+.-]*):/);
+    if (!schemeMatch) {
+      return false;
+    }
+    const scheme = schemeMatch[1].toLowerCase();
+    return scheme === 'http' || scheme === 'https' || scheme === 'mailto';
+  }
+
+  /**
+   * True if url is safe as an image/media src or CSS url().
+   * Allows http(s), relative paths, and raster data:image base64 URLs. Rejects svg data URLs.
+   */
+  isSafeMediaUrl(url) {
+    if (!url || typeof url !== 'string') {
+      return false;
+    }
+    const trimmed = url.trim();
+    if (!trimmed || /[\s<>"'`]/.test(trimmed)) {
+      return false;
+    }
+    if (trimmed.startsWith('/') && !trimmed.startsWith('//')) {
+      return !trimmed.includes('\\');
+    }
+    const lower = trimmed.toLowerCase();
+    if (lower.startsWith('data:image/svg')) {
+      return false;
+    }
+    if (/^data:image\/[a-z0-9.+-]+[;,]/i.test(trimmed)) {
+      return true;
+    }
+    const schemeMatch = trimmed.match(/^([a-zA-Z][a-zA-Z0-9+.-]*):/);
+    if (!schemeMatch) {
+      return false;
+    }
+    const scheme = schemeMatch[1].toLowerCase();
+    return scheme === 'http' || scheme === 'https';
   }
 
   //////////////////////
@@ -2282,38 +2499,42 @@ class Browser {
 
       window.salert = function (message) {
         if (document.getElementById('saito-alert')) {
-          return;
+          return Promise.resolve(false);
         }
-        let wrapper = document.createElement('div');
-        wrapper.id = 'saito-alert';
-        let html = `<div id="saito-alert-shim">
-                      <div id="saito-alert-box">
-                        <div class="saito-alert-message">${browser_self.sanitize(message)}</div>
-                        <div class="saito-button-row">
-                          <button id="alert-ok">OK</button>
+        return new Promise((resolve) => {
+          let wrapper = document.createElement('div');
+          wrapper.id = 'saito-alert';
+          wrapper.className = 'saito-alert';
+          let html = `<div id="saito-alert-shim">
+                        <div id="saito-alert-box" class="saito-overlay-panel compact">
+                          <div class="saito-alert-message">${browser_self.sanitize(message)}</div>
+                          <div class="saito-button-row">
+                            <button id="alert-ok" class="saito-button-primary">OK</button>
+                          </div>
                         </div>
-                      </div>
-                    </div>`;
-        wrapper.innerHTML = html;
-        document.body.appendChild(wrapper);
-        //        setTimeout(() => {
-        //          document.querySelector("#saito-alert-box").style.top = "0";
-        //        }, 100);
-        document.querySelector('#alert-ok').focus();
-        document.querySelector('#saito-alert-shim').addEventListener('keyup', function (event) {
-          if (event.keyCode === 13) {
-            event.preventDefault();
-            document.querySelector('#alert-ok').click();
-          }
+                      </div>`;
+          wrapper.innerHTML = html;
+          document.body.appendChild(wrapper);
+          //        setTimeout(() => {
+          //          document.querySelector("#saito-alert-box").style.top = "0";
+          //        }, 100);
+          document.querySelector('#alert-ok').focus();
+          document.querySelector('#saito-alert-shim').addEventListener('keyup', function (event) {
+            if (event.keyCode === 13) {
+              event.preventDefault();
+              document.querySelector('#alert-ok').click();
+            }
+          });
+          document.querySelector('#alert-ok').addEventListener(
+            'click',
+            function () {
+              wrapper.remove();
+              resolve(true);
+            },
+            false
+          );
+          document.querySelector('#saito-alert-box').style.top = '1rem';
         });
-        document.querySelector('#alert-ok').addEventListener(
-          'click',
-          function () {
-            wrapper.remove();
-          },
-          false
-        );
-        document.querySelector('#saito-alert-box').style.top = '1rem';
       };
 
       window.sconfirm = function (message) {
@@ -2323,12 +2544,13 @@ class Browser {
         return new Promise((resolve, reject) => {
           let wrapper = document.createElement('div');
           wrapper.id = 'saito-alert';
+          wrapper.className = 'saito-alert';
           let html = `<div id="saito-alert-shim">
-                        <div id="saito-alert-box">
+                        <div id="saito-alert-box" class="saito-overlay-panel compact">
                           <div class="saito-alert-message">${browser_self.sanitize(message)}</div>
                           <div class="saito-button-row">
                             <button class='saito-button-secondary' id="alert-cancel">Cancel</button>
-                            <button id="alert-ok">OK</button>
+                            <button id="alert-ok" class="saito-button-primary">OK</button>
                           </div>
                         </div>
                       </div>`;
@@ -2366,10 +2588,11 @@ class Browser {
         return new Promise((resolve, reject) => {
           let wrapper = document.createElement('div');
           wrapper.id = 'saito-alert';
+          wrapper.className = 'saito-alert';
           let html = `<div id="saito-alert-shim">
-                        <div id="saito-alert-box">
+                        <div id="saito-alert-box" class="saito-overlay-panel compact">
                           <div class="saito-alert-message">${browser_self.sanitize(message)}</div>
-                          <div class="alert-prompt"><input type="text" id="promptval" class="promptval" placeholder="${suggestion}" /></div>
+                          <div class="alert-prompt"><input type="text" id="promptval" class="promptval saito-input" placeholder="${suggestion}" /></div>
                           <div class="saito-button-row">
                             <button class='saito-button-secondary' id="alert-cancel">Cancel</button>
                             <button id="alert-ok" class="saito-button-primary">OK</button>
@@ -2508,7 +2731,7 @@ class Browser {
           if (el.classList.contains('saito-address') && !el.classList.contains('treated')) {
             el.classList.add('treated');
             let key = el.dataset?.id;
-            if (key && saito_app.wallet.isValidPublicKey(key)) {
+            if (key && saito_app.crypto.isPublicKey(key)) {
               // Returns registered name from our keychain or empty string
               let identifier = saito_app.keychain.returnIdentifierByPublicKey(key);
 
@@ -2589,51 +2812,45 @@ class Browser {
     return false;
   }
 
+  checkNFTThemes(): string[] | null {
+    // Wallet-backed theme discovery will populate this list in a future release.
+    return null;
+  }
+
+  isThemeAvailable(theme) {
+    const nft_themes = this.checkNFTThemes();
+    if (nft_themes === null) {
+      return theme === 'dark';
+    }
+
+    return theme === 'dark' || (Array.isArray(nft_themes) && nft_themes.includes(theme));
+  }
+
   switchTheme(theme) {
+    let mod_obj = this.app.modules.returnActiveModule();
+    let force_lite_for_game =
+      mod_obj?.is_game_template === true || document.documentElement.classList.contains('game');
+
+    if (force_lite_for_game) {
+      theme = 'lite';
+    } else if (!this.isThemeAvailable(theme)) {
+      theme = 'dark';
+    }
+
     document.documentElement.setAttribute('data-theme', theme);
 
     if (this.app.BROWSER == 1) {
-      let mod_obj = this.app.modules.returnActiveModule();
-
       if (!this.app.options.theme) {
         this.app.options.theme = {};
       }
 
-      if (mod_obj != null) {
+      if (mod_obj != null && !force_lite_for_game) {
         if (mod_obj.slug != null) {
           this.app.options.theme[mod_obj.slug] = theme;
           this.app.storage.saveOptions();
         }
       }
-
-      this.updateThemeInHeader(theme);
     }
-  }
-
-  updateThemeInHeader(theme) {
-    //Update header
-    setTimeout(() => {
-      let theme_icon_obj = document.querySelector('.saito-theme-icon');
-      let am = this.app.modules.returnActiveModule();
-
-      if (theme_icon_obj && am) {
-        let classes = theme_icon_obj.classList;
-        for (let c of classes) {
-          theme_icon_obj.classList.remove(c);
-        }
-
-        theme_icon_obj.classList.add('saito-theme-icon');
-        try {
-          let theme_classes = am.theme_options[theme].split(' ');
-          for (let t of theme_classes) {
-            theme_icon_obj.classList.add(t);
-          }
-        } catch (err) {
-          console.error(err);
-          console.debug(theme, am.theme_options);
-        }
-      }
-    }, 500);
   }
 
   isValidUrl(urlString) {
@@ -2680,8 +2897,7 @@ class Browser {
   }
 
   getThousandSeparator() {
-    let decimal_separator = this.getDecimalSeparator();
-    return decimal_separator == '.' ? ',' : '.';
+    return this.getLocaleNumberSeparators().group;
   }
 
   /**
@@ -2707,6 +2923,165 @@ class Browser {
     }
   }
 
+  getLocaleNumberSeparators(locale = null) {
+    const resolvedLocale =
+      locale ||
+      (this.app.BROWSER && window?.navigator?.language ? window.navigator.language : 'en-US');
+    const parts = Intl.NumberFormat(resolvedLocale).formatToParts(12345.6);
+    return {
+      locale: resolvedLocale,
+      decimal: parts.find((part) => part.type === 'decimal')?.value || '.',
+      group: parts.find((part) => part.type === 'group')?.value || ''
+    };
+  }
+
+  parseLocaleAmount(value = '', options: any = {}) {
+    const maxFractionDigits =
+      Number.isFinite(options.maxFractionDigits) && options.maxFractionDigits >= 0
+        ? options.maxFractionDigits
+        : 8;
+    const allowNegative = options.allowNegative === true;
+    const strictLocaleSeparators = options.strictLocaleSeparators === true;
+    const { decimal, group } = this.getLocaleNumberSeparators(options.locale || null);
+    let input = String(value ?? '').trim();
+
+    if (!input) {
+      return { valid: false, normalized: '', value: null, fractionDigits: 0 };
+    }
+
+    input = input
+      .replace(/[\s\u00a0\u202f]/g, '')
+      .replace(/[’']/g, '')
+      .replace(/[−–—]/g, '-');
+
+    let negative = false;
+    if (input.startsWith('-')) {
+      negative = allowNegative;
+      input = input.slice(1);
+    }
+
+    if (!/\d/.test(input)) {
+      return { valid: false, normalized: '', value: null, fractionDigits: 0 };
+    }
+
+    const dotPositions = [];
+    const commaPositions = [];
+    for (let i = 0; i < input.length; i++) {
+      if (input[i] === '.') {
+        dotPositions.push(i);
+      } else if (input[i] === ',') {
+        commaPositions.push(i);
+      }
+    }
+
+    const allDecimalCandidates = [...dotPositions, ...commaPositions].sort((a, b) => a - b);
+    let decimalIndex = -1;
+    let decimalChar = decimal;
+
+    if (allDecimalCandidates.length) {
+      const last = allDecimalCandidates[allDecimalCandidates.length - 1];
+      const lastChar = input[last];
+      const after = input.slice(last + 1).replace(/\D/g, '');
+      const before = input.slice(0, last).replace(/\D/g, '');
+      const sameCharCount = lastChar === '.' ? dotPositions.length : commaPositions.length;
+      const otherCharCount = lastChar === '.' ? commaPositions.length : dotPositions.length;
+      const localeDecimalMatch = lastChar === decimal;
+      const localeGroupMatch = group && lastChar === group;
+
+      if (strictLocaleSeparators && localeGroupMatch) {
+        decimalIndex = -1;
+      } else if (otherCharCount > 0) {
+        decimalIndex = last;
+        decimalChar = lastChar;
+      } else if (localeDecimalMatch) {
+        decimalIndex = last;
+        decimalChar = lastChar;
+      } else if (sameCharCount > 1) {
+        if (after.length > 0 && after.length !== 3) {
+          decimalIndex = last;
+          decimalChar = lastChar;
+        }
+      } else if (localeGroupMatch && after.length === 3 && before.length > 0) {
+        decimalIndex = -1;
+      } else if (after.length > 0 && after.length <= maxFractionDigits) {
+        decimalIndex = last;
+        decimalChar = lastChar;
+      }
+    }
+
+    let whole = '';
+    let fraction = '';
+    for (let i = 0; i < input.length; i++) {
+      const ch = input[i];
+      if (i === decimalIndex) {
+        continue;
+      }
+      if (/\d/.test(ch)) {
+        if (decimalIndex >= 0 && i > decimalIndex) {
+          fraction += ch;
+        } else {
+          whole += ch;
+        }
+      }
+    }
+
+    whole = whole.replace(/^0+(?=\d)/, '') || '0';
+    fraction = fraction.slice(0, maxFractionDigits);
+
+    if (maxFractionDigits === 0) {
+      fraction = '';
+    }
+
+    const normalized = `${negative ? '-' : ''}${whole}${fraction ? `.${fraction}` : ''}`;
+    const numeric = Number(normalized);
+    return {
+      valid: Number.isFinite(numeric),
+      normalized,
+      value: Number.isFinite(numeric) ? numeric : null,
+      fractionDigits: fraction.length,
+      hadTrailingDecimal: decimalIndex === input.length - 1 || input.endsWith(decimalChar)
+    };
+  }
+
+  formatLocaleAmount(value = '', options: any = {}) {
+    const maxFractionDigits =
+      Number.isFinite(options.maxFractionDigits) && options.maxFractionDigits >= 0
+        ? options.maxFractionDigits
+        : 8;
+    const { locale, decimal } = this.getLocaleNumberSeparators(options.locale || null);
+    const parsed = this.parseLocaleAmount(value, { ...options, maxFractionDigits });
+
+    if (!parsed.valid) {
+      return '';
+    }
+
+    const [wholeRaw, fractionRaw = ''] = parsed.normalized.replace('-', '').split('.');
+    const whole = BigInt(wholeRaw || '0').toLocaleString(locale);
+    const sign = parsed.normalized.startsWith('-') ? '-' : '';
+    const fraction = fractionRaw.slice(0, maxFractionDigits);
+
+    if (fraction || parsed.hadTrailingDecimal) {
+      return `${sign}${whole}${decimal}${fraction}`;
+    }
+
+    return `${sign}${whole}`;
+  }
+
+  formatLocaleAmountInputElement(input, options: any = {}) {
+    if (!input) {
+      return { valid: false, normalized: '', value: null, fractionDigits: 0 };
+    }
+
+    const parsed = this.parseLocaleAmount(input.value, options);
+    input.dataset.amountRaw = parsed.valid ? parsed.normalized : '';
+
+    if (parsed.valid) {
+      input.value = this.formatLocaleAmount(input.value, options);
+    }
+
+    return parsed;
+  }
+
   addSaitoMentions(textarea, listDiv, inputType) {
     new SaitoMentions(this.app, textarea, listDiv, inputType);
   }
@@ -2728,7 +3103,7 @@ class Browser {
         key = split[1];
       }
 
-      if (this.app.wallet.isValidPublicKey(key)) {
+      if (this.app.crypto.isPublicKey(key)) {
         if (!keys.includes(key)) {
           keys.push(key);
         }
@@ -2752,8 +3127,8 @@ class Browser {
         key = split[1];
       }
 
-      if (this.app.wallet.isValidPublicKey(key)) {
-        return `<span class="saito-mention saito-address" data-id="${key}">${username}</span>`;
+      if (this.app.crypto.isPublicKey(key)) {
+        return `<span class="saito-mention saito-address" data-id="${this.escapeHTML(key)}">${this.escapeHTML(username)}</span>`;
       } else {
         return k;
       }
@@ -2766,16 +3141,14 @@ class Browser {
     // 47 to 58 corresponds to 0 through 9 on the Number Row;
     // 8 is Backspace
     // 190, 110, 46 are for dot (.)
-    if (
-      !(
-        (event.keyCode > 95 && event.keyCode < 106) ||
-        (event.keyCode > 47 && event.keyCode < 58) ||
-        event.keyCode == 8 ||
-        event.keyCode == 190 ||
-        event.keyCode == 110 ||
-        event.keyCode == 46
-      )
-    ) {
+    if (!(
+      (event.keyCode > 95 && event.keyCode < 106) ||
+      (event.keyCode > 47 && event.keyCode < 58) ||
+      event.keyCode == 8 ||
+      event.keyCode == 190 ||
+      event.keyCode == 110 ||
+      event.keyCode == 46
+    )) {
       event.preventDefault();
       return false;
     }
@@ -2883,10 +3256,6 @@ class Browser {
     }
 
     return html;
-
-    //document.querySelector(`.balance-amount-whole`).innerHTML = whole_amt;
-    //document.querySelector(`.balance-amount-separator`).innerHTML = separator;
-    //document.querySelector(`.balance-amount-decimal`).innerHTML = decimal_amt;
   }
 
   logoSVG() {

@@ -74,6 +74,19 @@ class GameUI {
   }
 
   updateStatus(str, force = 0) {
+    //
+    // no-op if this status is already on screen -- queue commands re-fire on
+    // every pass, and repainting the same status flickers the UI (and would
+    // needlessly clear the controls). the DOM check keeps this safe across
+    // body re-renders that empty the status container.
+    //
+    if (!force && str === this.game.status) {
+      let el = document.getElementById('status');
+      if (el && el.innerHTML === str) {
+        return;
+      }
+    }
+
     this.updateControls('', force);
 
     try {
@@ -294,16 +307,34 @@ class GameUI {
 
   setShotClock(target = '', timer = 3000, pause_on_activity = true, callback = null) {
     this.clearShotClock();
+    if (!target) {
+      console.warn('GT [setShotClock] empty target!');
+      return;
+    }
     let elem = document.querySelector(target);
     if (elem) {
       this.app.browser.addElementToSelector(`<div class="animated-mask"></div>`, target);
 
       this.shot_clock = setTimeout(() => {
         this.clearShotClock();
+
+        //
+        // the UI may have been re-rendered (or repurposed entirely, e.g. by a
+        // game-over) since the clock was armed -- only auto-click a control
+        // that still matches the selector we were armed for
+        //
+        let clickable = elem.isConnected ? elem : document.querySelector(target);
+        if (!clickable) {
+          console.warn(
+            `GT [setShotClock] not auto-clicking '${target}' -- control was replaced or removed`
+          );
+          return;
+        }
+
         if (callback) {
           callback();
         }
-        elem.click();
+        clickable.click();
       }, timer);
 
       $('.animated-mask').animate({ width: '0px' }, timer);
@@ -338,6 +369,10 @@ class GameUI {
 
   promptMove(target = '', timer = 10000) {
     this.clearShotClock();
+    if (!target) {
+      console.warn('GT [promptMove] empty target!');
+      return;
+    }
     let elem = document.querySelector(target);
     if (elem) {
       this.app.browser.addElementToSelector(`<div class="animated-mask flash2"></div>`, target);

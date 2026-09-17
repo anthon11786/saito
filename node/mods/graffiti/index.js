@@ -1,9 +1,9 @@
 module.exports = (app) => {
-  const title = "Saito Graffiti";
+  const title = 'Saito Graffiti';
 
   return `
     <!doctype html>
-    <html lang="en" prefix="og: http://ogp.me/ns#">
+    <html lang="en" prefix="og: http://ogp.me/ns#" data-theme="dark">
       <head>
         <meta charset="UTF-8">
         <meta name="viewport" content="width=device-width, initial-scale=1">

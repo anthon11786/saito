@@ -2,7 +2,7 @@
   border-radius: 8px;
   padding: 16px;
   margin-bottom: 16px;
-  background-color: var(--saito-background-color);
+  background-color: var(--saito-background);
 }
 
 .filter-sort__container {
@@ -17,14 +17,7 @@
 
 .filter-sort__search-input {
   width: 100%;
-  padding: 8px 12px;
-  border: 1px solid var(--saito-border-color);
-  border-radius: 4px;
-  background-color: var(--saito-background-color);
-  color: var(--saito-font-color);
-  font-size: 16px;
 }
-
 .filter-sort__controls {
   display: flex;
   gap: 8px;
@@ -32,20 +25,13 @@
 }
 
 .filter-sort__select {
-  padding: 4px 8px;
-  border: 1px solid var(--saito-border-color);
-  border-radius: 4px;
-  background-color: var(--saito-background-color);
-  color: var(--saito-font-color);
-  font-size: 14px;
   min-width: 10rem;
   max-width: 12rem;
   flex: 1;
 }
-
 .filter-sort__select option {
-  background-color: var(--saito-background-color);
-  color: var(--saito-font-color);
+  background-color: var(--saito-background);
+  color: var(--saito-foreground);
   padding: 4px;
 }
 

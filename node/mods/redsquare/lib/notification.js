@@ -1,229 +1,189 @@
-const LikeNotificationTemplate = require('./notification-like.template');
-const ReplyNotificationTemplate = require('./notification-reply.template');
-const saito = require('./../../../lib/saito/saito');
-const Tweet = require('./tweet');
-const SaitoUser = require('./../../../lib/saito/ui/saito-user/saito-user');
-const Image = require('./image');
+const NotificationTemplate = require('./notification.template');
+const TweetTemplate = require('./tweet.template');
 
-class RedSquareNotification {
-	constructor(app, mod, tx = null) {
-		this.app = app;
-		this.mod = mod;
-		this.tx = tx;
-		this.user = null;
-	}
+function returnMessage(tx) {
+  if (tx && typeof tx.returnMessage === 'function') {
+    return tx.returnMessage();
+  }
 
-	render(selector = '') {
-		if (this.tx == null) {
-			this.app.browser.addElementAfterSelector(
-				'<div class="saito-end-of-redsquare">no notifications</div>',
-				selector
-			);
-		} else {
-			let html = '';
-
-			let txmsg = this.tx.returnMessage();
-
-			if (txmsg.data?.mentions?.includes(this.mod.publicKey) || txmsg.data?.mentions == 1) {
-				this.renderNotificationTweet(txmsg, this.tx);
-				return;
-			}
-
-			//
-			// The tx_sig of the tweet that is being liked or replied to...
-			this.signature = txmsg.data?.signature || txmsg.data.parent_id || null;
-
-			//
-			// We put the entire render in a callback so that if we don't have the original tweet being referenced by the
-			// notification, we can make a peer DB request to try to find it
-			//
-			if (this.signature) {
-				this.mod.loadTweetWithSig(this.signature, (txs) => {
-					if (!txs) {
-						console.warn('RS.Notification for unknown tweet');
-						return null;
-					}
-
-					let tweet_tx;
-					if (Array.isArray(txs)) {
-						if (txs.length > 0) {
-							tweet_tx = txs[0];
-						} else {
-							console.warn('RS.Notification for unknown tweet');
-							return null;
-						}
-					} else {
-						tweet_tx = txs;
-					}
-
-					this.renderNotificationTweet(txmsg, tweet_tx);
-				});
-			} else {
-				console.log('RS.notification ... unexpected notification type..');
-				this.renderNotificationTweet(txmsg, this.tx);
-			}
-		}
-	}
-
-	renderNotificationTweet(txmsg, tweet_tx) {
-		if (txmsg.data?.mentions?.includes(this.mod.publicKey) || txmsg.data?.mentions == 1) {
-			this.tweet = new Tweet(this.app, this.mod, tweet_tx);
-		} else {
-			if (txmsg.request == 'like tweet' || txmsg.request == 'retweet') {
-				//Process as normal
-				let keyword = txmsg.request == 'like tweet' ? 'liked' : 'retweeted';
-
-				this.tweet = new Tweet(
-					this.app,
-					this.mod,
-					tweet_tx,
-					`.tweet-notif-fav.notification-item-${this.tx.from[0].publicKey}-${this.signature} .tweet-body .tweet-main .tweet-preview`
-				);
-
-				this.user = new SaitoUser(
-					this.app,
-					this.mod,
-					`.notification-item-${this.tx.from[0].publicKey}-${this.signature} > .tweet-header`,
-					this.tx.from[0].publicKey
-				);
-
-				let qs = `.tweet-notif-fav.notification-item-${this.tx.from[0].publicKey}-${this.signature}`;
-				let obj = document.querySelector(qs);
-				if (obj) {
-					obj.innerHTML = obj.innerHTML.replace(`${keyword} `, `really ${keyword} `);
-
-					//We process multiple likes from same person of same tweet, just update html in situ and quit
-					return;
-				} else {
-					html = LikeNotificationTemplate(this.app, this.mod, this.tx);
-					let msg = `${keyword} your tweet`;
-
-					if (this.mod.publicKey != tweet_tx.from[0].publicKey) {
-						msg = `${keyword} a tweet sent to you`;
-					}
-
-					this.user.notice = `</i> <span class='notification-type'>${msg}</span>`;
-				}
-			} else if (txmsg.request == 'create tweet') {
-				this.tweet = new Tweet(
-					this.app,
-					this.mod,
-					tweet_tx,
-					`.notification-item-${this.tx.signature} .tweet-body .tweet-main .tweet-preview`
-				);
-				this.user = new SaitoUser(
-					this.app,
-					this.mod,
-					`.notification-item-${this.tx.signature} > .tweet-header`,
-					this.tx.from[0].publicKey
-				);
-
-				html = ReplyNotificationTemplate(this.app, this.mod, this.tx);
-
-				//
-				// retweet
-				//
-				if (txmsg.data.retweet_tx) {
-					let msg = 'retweeted your tweet';
-
-					if (this.mod.publicKey != tweet_tx.from[0].publicKey) {
-						msg = 'retweeted a tweet concerning you';
-					}
-
-					this.user.notice = `<span class='notification-type'>${msg}</span>`;
-
-					//
-					// or reply
-					//
-				} else {
-					let msg = 'replied to your tweet';
-
-					if (this.mod.publicKey !== tweet_tx.from[0].publicKey) {
-						msg = 'replied to a tweet concerning you';
-					}
-
-					this.user.notice = `<span class='notification-type'>${msg}</span>`;
-				}
-			} else {
-				console.warn('RS.Notification: Unknown type -- ', txmsg.request);
-				return null;
-			}
-
-			if (!this.tweet?.noerrors) {
-				return null;
-			}
-
-			//
-			//
-			//
-			let nqs = '.notification-item-' + this.tx.signature;
-			if (document.querySelector(nqs)) {
-				this.app.browser.replaceElementBySelector(html, nqs);
-			} else {
-				this.app.browser.addElementToSelector(html, '.tweet-container');
-			}
-
-			//
-			// and render the user
-			//
-			if (new Date().getTime() - this.tx.timestamp > 24 * 60 * 60 * 100) {
-				this.user.fourthelem = `<div class="timestamp">${this.app.browser.prettifyTimeStamp(this.tx.timestamp, true)}</div>`;
-			} else {
-				this.user.fourthelem = `<div class="timestamp">${this.app.browser.returnTime(this.tx.timestamp)}</div>`;
-			}
-
-			this.user.render();
-
-			// check and render images if any in notification
-			if (txmsg.data?.images) {
-				let img_preview = new Image(
-					this.app,
-					this.mod,
-					`.notification-item-${this.tx.signature} .tweet-body .tweet-main .notification-tweet`,
-					txmsg.data?.images,
-					tweet_tx.signature
-				);
-
-				img_preview.render();
-			}
-		}
-
-		this.tweet.show_controls = 0;
-		this.tweet.render();
-
-		this.attachEvents();
-	}
-
-	attachEvents() {
-		Array.from(document.querySelectorAll('.tweet')).forEach((obj) => {
-			obj.onclick = (e) => {
-				let sig = e.currentTarget.getAttribute('data-id');
-				let tweet = this.mod.returnTweet(sig);
-
-				if (tweet) {
-					this.app.connection.emit('redsquare-tweet-render-request', tweet);
-				} else {
-					//
-					// I'm not sure we would ever run into this situation
-					// Besides wounldn't the this.tweet be the one we are looking for... why even go through the DOM dataset?
-					//
-					console.warn('RS.Notification tweet not found...');
-
-					this.mod.loadTweetWithSig(sig, (txs) => {
-						let tweet = this.mod.returnTweet(sig);
-						this.app.connection.emit('redsquare-tweet-render-request', tweet);
-					});
-				}
-			};
-		});
-	}
-
-	isRendered() {
-		//if (document.querySelector(`.notification-item-${this.tx.signature}`)) {
-		//  return true;
-		//}
-		return false;
-	}
+  return tx && tx.msg && typeof tx.msg === 'object' ? tx.msg : {};
 }
 
-module.exports = RedSquareNotification;
+class Notification {
+  constructor(app, mod, data = {}) {
+    this.app = app;
+    this.mod = mod;
+    this.container = '';
+    this.tx = null;
+
+    this.signature = '';
+    this.tweet_signature = '';
+    this.type = '';
+    this.actor_publicKey = '';
+    this.actor_name = '';
+    this.actor_avatar = '/saito/img/dreamscape.png';
+    this.text = '';
+    this.count = 1;
+    this.created_at = Date.now();
+    this.time = '';
+    this.unread = true;
+
+    if (data && data.tx) {
+      this.tx = data.tx;
+      this.parseFromTransaction();
+      return;
+    }
+
+    this.parseFromData(data);
+  }
+
+  static fromTransaction(app, mod, tx) {
+    return new Notification(app, mod, { tx });
+  }
+
+  parseFromTransaction() {
+    if (!this.tx) {
+      return;
+    }
+
+    const txmsg = returnMessage(this.tx);
+    const data = txmsg.data && typeof txmsg.data === 'object' ? txmsg.data : {};
+
+    this.signature = this.tx.signature != null ? String(this.tx.signature) : '';
+    this.created_at = Number(this.tx.timestamp) || Date.now();
+    this.actor_publicKey = this.extractPublicKey();
+    this.applyActor(this.actor_publicKey);
+    this.time = this.app.browser.formatRelativeTime(this.created_at);
+
+    if (txmsg.request === 'like tweet') {
+      this.type = 'like';
+      this.tweet_signature = data.signature != null ? String(data.signature) : '';
+    } else if (txmsg.request === 'retweet') {
+      const hasCommentary =
+        Boolean(String(data.text || '').trim()) ||
+        (Array.isArray(data.images) && data.images.length > 0);
+
+      this.type = hasCommentary ? 'quote' : 'retweet';
+      this.tweet_signature = data.signature != null ? String(data.signature) : '';
+    } else if (txmsg.request === 'create tweet') {
+      this.type = data.parent_id ? 'reply' : 'tweet';
+      this.tweet_signature = this.signature;
+    } else {
+      this.type = data.type != null ? String(data.type) : '';
+      this.tweet_signature =
+        data.tweet_signature != null
+          ? String(data.tweet_signature)
+          : data.signature != null
+            ? String(data.signature)
+            : '';
+    }
+
+    this.text = this.buildActionText();
+  }
+
+  parseFromData(data) {
+    if (!data || typeof data !== 'object') {
+      return;
+    }
+
+    this.signature = data.signature != null ? String(data.signature) : '';
+    this.tweet_signature = data.tweet_signature != null ? String(data.tweet_signature) : '';
+    this.type = data.type != null ? String(data.type) : '';
+    this.actor_publicKey = data.actor_publicKey != null ? String(data.actor_publicKey) : '';
+    this.actor_name = data.actor_name != null ? String(data.actor_name) : '';
+    this.actor_avatar =
+      data.actor_avatar != null ? String(data.actor_avatar) : '/saito/img/dreamscape.png';
+    this.text = data.text != null ? String(data.text) : '';
+    this.count = Number(data.count) > 0 ? Number(data.count) : 1;
+    this.created_at = Number(data.created_at) || Date.now();
+    this.time =
+      data.time != null ? String(data.time) : this.app.browser.formatRelativeTime(this.created_at);
+    this.unread = data.unread !== false;
+
+    if (!this.text) {
+      this.text = this.buildActionText();
+    }
+
+    if (!this.actor_name && this.actor_publicKey) {
+      this.applyActor(this.actor_publicKey);
+    }
+  }
+
+  extractPublicKey() {
+    if (this.tx && this.tx.from && this.tx.from[0] && this.tx.from[0].publicKey) {
+      return String(this.tx.from[0].publicKey);
+    }
+
+    return '';
+  }
+
+  applyActor(publicKey) {
+    if (!publicKey) {
+      this.actor_name = 'anon';
+      this.actor_avatar = '/saito/img/dreamscape.png';
+      return;
+    }
+
+    this.actor_name = this.app.keychain.returnUsername(publicKey) || publicKey.slice(0, 8);
+    this.actor_avatar = this.app.keychain.returnIdenticon(publicKey) || '/saito/img/dreamscape.png';
+  }
+
+  buildActionText() {
+    switch (this.type) {
+      case 'like':
+        if (this.count > 1) {
+          return `liked your post (${this.count})`;
+        }
+        return 'liked your post';
+      case 'reply':
+        return 'posted a new reply';
+      case 'quote':
+        return 'quoted your post';
+      case 'retweet':
+        return 'reposted your post';
+      case 'tweet':
+        return 'posted a new tweet';
+      default:
+        return 'sent you a notification';
+    }
+  }
+
+  refreshActionText() {
+    this.text = this.buildActionText();
+  }
+
+  getReferencedTweet() {
+    return this.mod.getTweet(this.tweet_signature);
+  }
+
+  renderHTML() {
+    const tweet = this.getReferencedTweet();
+
+    if (!tweet) {
+      return '';
+    }
+
+    const tweetHtml = TweetTemplate(tweet, 'tweet slot', {
+      presentation: 'timeline',
+      hideControls: true
+    });
+
+    return NotificationTemplate(this, tweetHtml);
+  }
+
+  render(container = '') {
+    if (container) {
+      this.container = container;
+    }
+
+    const html = this.renderHTML();
+
+    if (!html) {
+      return;
+    }
+
+    this.app.browser.addElementToSelector(html, this.container);
+  }
+}
+
+module.exports = Notification;

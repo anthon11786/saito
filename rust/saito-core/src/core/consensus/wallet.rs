@@ -6,14 +6,16 @@ use crate::core::defs::{
     BlockId, Currency, PrintForLog, SaitoHash, SaitoPrivateKey, SaitoPublicKey, SaitoSignature,
     SaitoUTXOSetKey, UTXO_KEY_LENGTH,
 };
+use crate::core::network::interface_io::{InterfaceEvent, InterfaceIO};
+use crate::core::network::network::Network;
 use crate::core::process::version::{read_pkg_version, Version};
-use crate::core::routing::io::interface_io::{InterfaceEvent, InterfaceIO};
-use crate::core::routing::io::network::Network;
-use crate::core::routing::io::storage::Storage;
+use crate::core::storage::storage::Storage;
 use crate::core::util::balance_snapshot::BalanceSnapshot;
 use crate::core::util::crypto::{generate_keys, hash, sign};
 use ahash::{AHashMap, AHashSet};
 use log::{debug, error, info, trace, warn};
+use serde::Serialize;
+use serde_json::json;
 use std::fmt::Display;
 use std::io::{Error, ErrorKind};
 
@@ -34,8 +36,9 @@ pub const WALLET_NOT_UPDATED: WalletUpdateStatus = false;
 /// are spent on one fork are not recaptured on chains, for instance, and once
 /// a slip is spent it is marked as spent.
 ///
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Serialize, Clone, Debug, PartialEq)]
 pub struct WalletSlip {
+    #[serde(with = "crate::core::defs::saito_utxosetkey_serde")]
     pub utxokey: SaitoUTXOSetKey,
     pub amount: Currency,
     pub block_id: u64,
@@ -46,13 +49,20 @@ pub struct WalletSlip {
     pub slip_type: SlipType,
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Serialize, Clone, Debug, PartialEq)]
 pub struct NFT {
+    #[serde(with = "crate::core::defs::saito_utxosetkey_serde")]
     pub slip1: SaitoUTXOSetKey,
+    #[serde(with = "crate::core::defs::saito_utxosetkey_serde")]
     pub slip2: SaitoUTXOSetKey,
+    #[serde(with = "crate::core::defs::saito_utxosetkey_serde")]
     pub slip3: SaitoUTXOSetKey,
+    #[serde(with = "crate::core::defs::vec_u8_serde")]
     pub id: Vec<u8>,
+    #[serde(with = "crate::core::defs::saito_signature_serde")]
     pub tx_sig: SaitoSignature,
+    #[serde(default)]
+    pub ticker: String,
 }
 
 impl Default for NFT {
@@ -63,55 +73,49 @@ impl Default for NFT {
             slip3: [0; UTXO_KEY_LENGTH], // bound
             id: vec![],
             tx_sig: [0; 64],
-        }
-    }
-}
-
-#[derive(Clone, Debug, PartialEq)]
-pub struct DetailedNFT {
-    pub slip1: Slip,
-    pub slip2: Slip,
-    pub slip3: Slip,
-    pub id: Vec<u8>,
-    pub tx_sig: SaitoSignature,
-}
-
-impl Default for DetailedNFT {
-    fn default() -> Self {
-        DetailedNFT {
-            slip1: Slip::default(),
-            slip2: Slip::default(),
-            slip3: Slip::default(),
-            id: Vec::new(),
-            tx_sig: [0u8; 64],
+            ticker: String::new(),
         }
     }
 }
 
 /// The `Wallet` manages the public and private keypair of the node and holds the
 /// slips that are used to form transactions on the network.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Serialize, Clone, Debug, PartialEq)]
 pub struct Wallet {
+    #[serde(with = "crate::core::defs::saito_public_key_serde")]
     pub public_key: SaitoPublicKey,
+
+    #[serde(skip)]
     pub private_key: SaitoPrivateKey,
+    #[serde(serialize_with = "crate::core::defs::utxo_map_serde::serialize")]
     pub slips: AHashMap<SaitoUTXOSetKey, WalletSlip>,
+    #[serde(serialize_with = "crate::core::defs::utxo_set_serde::serialize")]
     pub unspent_slips: AHashSet<SaitoUTXOSetKey>,
+    #[serde(serialize_with = "crate::core::defs::utxo_set_serde::serialize")]
     pub staking_slips: AHashSet<SaitoUTXOSetKey>,
     pub filename: String,
+    #[serde(skip)]
     pub filepass: String,
+
     available_balance: Currency,
+
+    #[serde(skip)]
     pub pending_txs: AHashMap<SaitoHash, Transaction>,
     // TODO : this version should be removed. only added as a temporary hack to allow SLR app version to be easily upgraded in browsers
     pub wallet_version: Version,
     pub core_version: Version,
+    #[serde(with = "crate::core::defs::saito_public_key_serde::vec")]
     pub key_list: Vec<SaitoPublicKey>,
     pub nfts: Vec<NFT>,
+
+    pub latest_block_id: BlockId,
+    pub genesis_period: BlockId,
+    pub minimum_block_id: BlockId,
 }
 
 impl Wallet {
     pub fn new(private_key: SaitoPrivateKey, public_key: SaitoPublicKey) -> Wallet {
         trace!("generating new wallet...");
-        // let (public_key, private_key) = generate_keys();
 
         Wallet {
             public_key,
@@ -127,19 +131,18 @@ impl Wallet {
             core_version: read_pkg_version(),
             key_list: vec![],
             nfts: Vec::new(),
+            minimum_block_id: 0,
+            latest_block_id: 0,
+            genesis_period: 0,
         }
     }
 
     pub async fn load(wallet: &mut Wallet, io: &(dyn InterfaceIO + Send + Sync)) {
-        info!("loading wallet...");
         let result = io.load_wallet(wallet).await;
         if result.is_err() {
             error!("loading wallet failed. saving new wallet");
-            // TODO : check error code
             io.save_wallet(wallet).await.unwrap();
         } else {
-            info!("wallet loaded");
-
             io.send_interface_event(InterfaceEvent::WalletUpdate());
         }
     }
@@ -155,7 +158,6 @@ impl Wallet {
         network: Option<&Network>,
         keep_keys: bool,
     ) {
-        info!("resetting wallet");
         if !keep_keys {
             let keys = generate_keys();
             self.public_key = keys.0;
@@ -201,11 +203,17 @@ impl Wallet {
         Ok(())
     }
 
+    //
+    // on chain reorg
+    //
+    // this receives transactions (nft and normal) over the
+    //
     pub fn on_chain_reorganization(
         &mut self,
         block: &Block,
         lc: bool,
         genesis_period: BlockId,
+        io: Option<&(dyn InterfaceIO + Send + Sync)>,
     ) -> WalletUpdateStatus {
         let mut wallet_changed = WALLET_NOT_UPDATED;
         debug!(
@@ -215,11 +223,31 @@ impl Wallet {
             block.transactions.len(),
             lc
         );
-        let mut tx_index = 0;
 
         if lc {
+            //
+            // update wallet with latest_block_id information, making transactions
+            // spendable as we now have a longest-chain...
+            //
+            if self.genesis_period == 0 {
+                self.genesis_period = genesis_period;
+            }
+            self.latest_block_id = block.id;
+            self.minimum_block_id = if block.id.saturating_sub(self.genesis_period) > 0 {
+                block
+                    .id
+                    .saturating_sub(self.genesis_period)
+                    .saturating_add(2)
+            } else {
+                1
+            };
+
             for tx in block.transactions.iter() {
                 trace!("Processing transaction: {:?}", tx.signature.to_hex());
+
+                let mut emitted_chain_tx_sent = false;
+                let mut emitted_nft_sent = false;
+
                 //
                 // Process inputs first: remove spent slips and NFT groups
                 //
@@ -229,19 +257,70 @@ impl Wallet {
                     let is_this_an_nft = tx.is_nft(&tx.from, i);
 
                     if is_this_an_nft {
+                        //
+                        // remove from NFT storage
+                        //
                         let slip1 = &tx.from[i];
                         let slip2 = &tx.from[i + 1];
                         let slip3 = &tx.from[i + 2];
 
-                        //
-                        // Remove the NFT group matching all three UTXO keys
-                        //
-                        if let Some(pos) = self.nfts.iter().position(|nft| {
-                            nft.slip1 == slip1.utxoset_key
-                                && nft.slip2 == slip2.utxoset_key
-                                && nft.slip3 == slip3.utxoset_key
+                        if let Some(pos) = self.nfts.iter().position(|n| {
+                            n.slip1 == slip1.utxoset_key
+                                && n.slip2 == slip2.utxoset_key
+                                && n.slip3 == slip3.utxoset_key
                         }) {
                             self.nfts.remove(pos);
+
+                            if let Some(io) = io {
+                                let sender = self.return_nft_sender_publickey(tx);
+                                // receiver = first TO NFT group's slip2 (the primary recipient)
+                                let receiver = (0..tx.to.len().saturating_sub(2))
+                                    .find(|&i| tx.is_nft(&tx.to, i))
+                                    .and_then(|i| tx.to.get(i + 1))
+                                    .map(|s| s.public_key.to_base58())
+                                    .unwrap_or_else(|| {
+                                        tx.to
+                                            .first()
+                                            .map(|s| s.public_key.to_base58())
+                                            .unwrap_or_default()
+                                    });
+                                // amount = sum of TO NFT groups going to recipients (not self)
+                                let sent_amount: Currency = {
+                                    let mut total: Currency = 0;
+                                    let mut j = 0;
+                                    while j + 2 < tx.to.len() {
+                                        if tx.is_nft(&tx.to, j) {
+                                            if tx.to[j + 1].public_key != self.public_key {
+                                                total = total.saturating_add(tx.to[j].amount);
+                                            }
+                                            j += 3;
+                                        } else {
+                                            j += 1;
+                                        }
+                                    }
+                                    total
+                                };
+                                let signature = tx.signature.to_hex();
+                                let payload = serde_json::to_string(&json!({
+                                    "block_id": block.id,
+                                    "block_hash": block.hash.to_hex(),
+                                    "timestamp": block.timestamp,
+                                    "signature": signature,
+                                    "sender": sender.to_base58(),
+                                    "receiver": receiver,
+                                    "ticker": Self::extract_nft_ticker_from_tx(tx),
+                                    "nft_id": slip3.public_key.to_hex(),
+                                    "amount": sent_amount,
+                                    "saito_deposit": slip2.amount,
+                                    "slip1_utxo": slip1.utxoset_key.to_hex(),
+                                    "slip2_utxo": slip2.utxoset_key.to_hex(),
+                                    "slip3_utxo": slip3.utxoset_key.to_hex(),
+                                }))
+                                .unwrap_or_else(|_| "{}".to_string());
+                                io.send_interface_event(InterfaceEvent::OnNFTSent(payload));
+                                emitted_nft_sent = true;
+                            }
+
                             debug!(
                                 "Removed sent NFT with UTXO keys: {:?}, {:?}, {:?}",
                                 slip1.utxoset_key.to_hex(),
@@ -261,10 +340,50 @@ impl Wallet {
                             self.delete_slip(input, None);
                         }
                         //
-                        // Also remove from pending if present
+                        // Also remove from pending if present (at most one success per tx)
                         //
                         if self.delete_pending_transaction(tx) {
                             wallet_changed |= WALLET_UPDATED;
+                            if let Some(io) = io {
+                                if !emitted_chain_tx_sent && !emitted_nft_sent {
+                                    emitted_chain_tx_sent = true;
+                                    let sender = tx
+                                        .from
+                                        .first()
+                                        .map(|s| s.public_key.to_base58())
+                                        .unwrap_or_default();
+                                    // receiver uses tx.to.first(); amount sums non-self to-slips.
+                                    // Both may be inaccurate when a transaction has multiple to-slips
+                                    // (e.g. multiple recipients, or change ordered before payment).
+                                    let receiver = tx
+                                        .to
+                                        .first()
+                                        .map(|s| s.public_key.to_base58())
+                                        .unwrap_or_default();
+                                    let amount: Currency = tx
+                                        .to
+                                        .iter()
+                                        .filter(|s| s.public_key != self.public_key)
+                                        .map(|s| s.amount)
+                                        .sum();
+                                    let signature = tx.signature.to_hex();
+                                    let payload = serde_json::to_string(&json!({
+                                        "ticker": "SAITO" ,
+                                        "block_id": block.id,
+                                        "block_hash": block.hash.to_hex(),
+                                        "timestamp": block.timestamp,
+                                        "signature": signature,
+                                        "transaction_type": format!("{:?}", tx.transaction_type),
+                                        "amount": amount,
+                                        "sender": sender,
+                                        "receiver": receiver,
+                                    }))
+                                    .unwrap_or_else(|_| "{}".to_string());
+                                    io.send_interface_event(InterfaceEvent::OnTransactionSent(
+                                        payload,
+                                    ));
+                                }
+                            }
                         }
                         i += 1;
                     }
@@ -293,7 +412,30 @@ impl Wallet {
                                 slip3.utxoset_key,
                                 slip3.public_key.to_vec(),
                                 tx.signature,
+                                Self::extract_nft_ticker_from_tx(tx),
                             );
+
+                            if let Some(io) = io {
+                                let sender = self.return_nft_sender_publickey(tx);
+                                let signature = tx.signature.to_hex();
+                                let payload = serde_json::to_string(&json!({
+                                    "block_id": block.id,
+                                    "block_hash": block.hash.to_hex(),
+                                    "timestamp": block.timestamp,
+                                    "signature": signature,
+                                    "sender": sender.to_base58(),
+                                    "receiver": slip2.public_key.to_base58(),
+                                    "ticker": Self::extract_nft_ticker_from_tx(tx),
+                                    "nft_id": slip3.public_key.to_hex(),
+                                    "amount": slip1.amount,
+                                    "saito_deposit": slip2.amount,
+                                    "slip1_utxo": slip1.utxoset_key.to_hex(),
+                                    "slip2_utxo": slip2.utxoset_key.to_hex(),
+                                    "slip3_utxo": slip3.utxoset_key.to_hex(),
+                                }))
+                                .unwrap_or_else(|_| "{}".to_string());
+                                io.send_interface_event(InterfaceEvent::OnNFTReceived(payload));
+                            }
 
                             wallet_changed |= WALLET_UPDATED;
                         }
@@ -303,6 +445,31 @@ impl Wallet {
                         // Handle normal output slips
                         //
                         if output.public_key == self.public_key && output.amount > 0 {
+                            if let Some(io) = io {
+                                let sender = tx
+                                    .from
+                                    .first()
+                                    .map(|s| s.public_key.to_base58())
+                                    .unwrap_or_default();
+                                let receiver = output.public_key.to_base58();
+                                let signature = tx.signature.to_hex();
+                                let payload = serde_json::to_string(&json!({
+                                    "ticker": "SAITO",
+                                    "block_id": block.id,
+                                    "block_hash": block.hash.to_hex(),
+                                    "timestamp": block.timestamp,
+                                    "signature": signature,
+                                    "transaction_type": format!("{:?}", tx.transaction_type),
+                                    "amount": output.amount,
+                                    "sender": sender,
+                                    "receiver": receiver,
+                                }))
+                                .unwrap_or_else(|_| "{}".to_string());
+                                io.send_interface_event(InterfaceEvent::OnTransactionReceived(
+                                    payload,
+                                ));
+                            }
+
                             wallet_changed |= WALLET_UPDATED;
                             self.add_slip(output, true, None);
                         }
@@ -310,19 +477,17 @@ impl Wallet {
                     }
                 }
 
-                //
-                // Advance transaction index and prune old slips
-                //
-                if let TransactionType::SPV = tx.transaction_type {
-                    tx_index += tx.txs_replacements as u64;
-                } else {
-                    tx_index += 1;
-                }
-
                 if block.id > genesis_period {
                     self.remove_old_slips(block.id - genesis_period);
                 }
             }
+
+            self.log_wallet_pending_balance_debug(&format!(
+                "on_chain_reorganization_lc_done block_id={} block_hash={} txs_in_block={}",
+                block.id,
+                block.hash.to_hex(),
+                block.transactions.len()
+            ));
         } else {
             //
             // we're unwinding (block not in longest chain),
@@ -341,12 +506,18 @@ impl Wallet {
                         //
                         // remove from NFT storage
                         //
+                        let slip1 = &tx.to[i];
                         let slip2 = &tx.to[i + 1];
-                        let nft_id = slip2.utxoset_key.to_vec();
-                        if let Some(pos) = self.nfts.iter().position(|n| n.id == nft_id) {
+                        let slip3 = &tx.to[i + 2];
+
+                        if let Some(pos) = self.nfts.iter().position(|n| {
+                            n.slip1 == slip1.utxoset_key
+                                && n.slip2 == slip2.utxoset_key
+                                && n.slip3 == slip3.utxoset_key
+                        }) {
                             self.nfts.remove(pos);
                             debug!(
-                                "Unwound NFT output group, removed id: {:?}",
+                                "Unwound NFT output group, removed slip2 group: {:?}",
                                 slip2.utxoset_key.to_hex()
                             );
 
@@ -387,6 +558,7 @@ impl Wallet {
                             slip3.utxoset_key,
                             slip3.public_key.to_vec(),
                             tx.signature,
+                            Self::extract_nft_ticker_from_tx(tx),
                         );
 
                         debug!(
@@ -395,13 +567,6 @@ impl Wallet {
                         );
 
                         wallet_changed |= WALLET_UPDATED;
-
-                        // if let Some(network) = network {
-                        //     network
-                        //         .io_interface
-                        //         .send_interface_event(InterfaceEvent::WalletUpdate());
-                        // }
-
                         i += 3;
                     } else {
                         //
@@ -413,15 +578,6 @@ impl Wallet {
                         }
                         i += 1;
                     }
-                }
-
-                //
-                // advance index exactly as in lc
-                //
-                if let TransactionType::SPV = tx.transaction_type {
-                    tx_index += tx.txs_replacements as u64;
-                } else {
-                    tx_index += 1;
                 }
             }
         }
@@ -505,7 +661,6 @@ impl Wallet {
             self.staking_slips.insert(wallet_slip.utxokey);
         } else if let SlipType::Bound = slip.slip_type {
         } else {
-            self.available_balance += slip.amount;
             self.unspent_slips.insert(wallet_slip.utxokey);
         }
 
@@ -526,10 +681,9 @@ impl Wallet {
 
     pub fn delete_slip(&mut self, slip: &Slip, network: Option<&Network>) {
         trace!("deleting slip : {} from wallet", slip);
-        if let Some(removed_slip) = self.slips.remove(&slip.utxoset_key) {
+        if let Some(_removed_slip) = self.slips.remove(&slip.utxoset_key) {
             let in_unspent_list = self.unspent_slips.remove(&slip.utxoset_key);
             if in_unspent_list {
-                self.available_balance -= removed_slip.amount;
             } else {
                 self.staking_slips.remove(&slip.utxoset_key);
             }
@@ -541,8 +695,76 @@ impl Wallet {
         }
     }
 
+    pub fn get_pending_balance(&self) -> Currency {
+        let base = self.get_available_balance();
+        let mut pending_return: Currency = 0;
+
+        for tx in self.pending_txs.values() {
+            let mut i = 0;
+            while i < tx.to.len() {
+                if tx.is_nft(&tx.to, i) {
+                    // do not count deposits as balance
+                    //let slip2 = &tx.to[i + 1];
+                    //if slip2.public_key == self.public_key {
+                    //    pending_return = pending_return.saturating_add(slip2.amount);
+                    //}
+                    i += 3;
+                } else {
+                    let out = &tx.to[i];
+                    if out.public_key == self.public_key {
+                        pending_return = pending_return.saturating_add(out.amount);
+                    }
+                    i += 1;
+                }
+            }
+        }
+
+        base.saturating_add(pending_return)
+    }
+
+    /// Debug-only: log Nolan balances and pending tx keys (header / WASM debugging).
+    fn log_wallet_pending_balance_debug(&self, context: &str) {
+        let available = self.get_available_balance();
+        let pending_total = self.get_pending_balance();
+        let count = self.pending_txs.len();
+        let mut parts: Vec<String> = Vec::with_capacity(count);
+        for (k, tx) in self.pending_txs.iter() {
+            parts.push(format!(
+                "hash_key={} sig={} type={:?}",
+                k.to_hex(),
+                tx.signature.to_hex(),
+                tx.transaction_type
+            ));
+        }
+        let joined = parts.join(" | ");
+        debug!(
+            "[ PENDING BALANCE ] [ {} | pending_nolan={} | pending_txs_count={} | {} ]",
+            context, pending_total, count, joined
+        );
+        debug!(
+            "[ AVAILABLE BALANCE ] [ {} | available_nolan={} ]",
+            context, available
+        );
+    }
+
     pub fn get_available_balance(&self) -> Currency {
-        self.available_balance
+        let mut total: Currency = 0;
+
+        for utxokey in self.unspent_slips.iter() {
+            if let Some(ws) = self.slips.get(utxokey) {
+                if ws.spent {
+                    continue;
+                }
+                match ws.slip_type {
+                    SlipType::Bound | SlipType::BlockStake => continue,
+                    _ => {
+                        total = total.saturating_add(ws.amount);
+                    }
+                }
+            }
+        }
+
+        total
     }
 
     pub fn get_unspent_slip_count(&self) -> u64 {
@@ -552,13 +774,7 @@ impl Wallet {
     // the nolan_requested is omitted from the slips created - only the change
     // address is provided as an output. so make sure that any function calling
     // this manually creates the output for its desired payment
-    pub fn generate_slips(
-        &mut self,
-        nolan_requested: Currency,
-        network: Option<&Network>,
-        latest_block_id: u64,
-        genesis_period: u64,
-    ) -> (Vec<Slip>, Vec<Slip>) {
+    pub fn generate_slips(&mut self, nolan_requested: Currency) -> (Vec<Slip>, Vec<Slip>) {
         let mut inputs: Vec<Slip> = Vec::new();
         let mut nolan_in: Currency = 0;
         let mut nolan_out: Currency = 0;
@@ -566,27 +782,24 @@ impl Wallet {
 
         // grab inputs
         let mut keys_to_remove = Vec::new();
-        let mut unspent_slips;
+
+        #[cfg_attr(not(test), allow(unused_mut))]
+        let mut unspent_slips: Vec<&SaitoUTXOSetKey> = self.unspent_slips.iter().collect();
+
         #[cfg(test)]
         {
-            // this part is compiled for tests to make sure selected slips are predictable. otherwise we will get random slips from a hashset
-            unspent_slips = self.unspent_slips.iter().collect::<Vec<&SaitoUTXOSetKey>>();
             unspent_slips.sort_by(|slip, slip2| {
                 let slip = Slip::parse_slip_from_utxokey(slip).unwrap();
                 let slip2 = Slip::parse_slip_from_utxokey(slip2).unwrap();
                 slip.amount.cmp(&slip2.amount)
             });
         }
-        #[cfg(not(test))]
-        {
-            unspent_slips = &self.unspent_slips;
-        }
 
         for key in unspent_slips {
             let slip = self.slips.get_mut(key).expect("slip should be here");
 
             // Prevent using slips from blocks earlier than (latest_block_id - (genesis_period-1)
-            if slip.block_id <= latest_block_id.saturating_sub(genesis_period - 1) {
+            if slip.block_id < self.minimum_block_id {
                 debug!("Balance in process of rebroadcasting. Please wait 2 blocks and retry...");
                 continue;
             }
@@ -607,7 +820,6 @@ impl Wallet {
             inputs.push(input);
 
             slip.spent = true;
-            self.available_balance -= slip.amount;
 
             trace!(
                 "marking slip : {:?} with value : {:?} as spent",
@@ -628,9 +840,10 @@ impl Wallet {
 
         if nolan_in < nolan_requested {
             warn!(
-                "Trying to spend more than available. requested : {:?}, available : {:?}",
+                "Requested more Saito than available. requested : {:?}, available : {:?}",
                 nolan_requested, nolan_in
             );
+            return (vec![], vec![]);
         }
 
         let mut outputs: Vec<Slip> = Vec::new();
@@ -663,10 +876,125 @@ impl Wallet {
             };
             outputs.push(output);
         }
-        if let Some(network) = network {
-            network
-                .io_interface
-                .send_interface_event(InterfaceEvent::WalletUpdate());
+
+        (inputs, outputs)
+    }
+
+    //
+    // generate_nft_slips
+    //
+    pub fn generate_nft_slips(
+        &mut self,
+        uuid: SaitoPublicKey,
+        amount: Currency,
+    ) -> (Vec<Slip>, Vec<Slip>) {
+        let mut candidate_inputs: Vec<(Slip, Slip, Slip, SaitoUTXOSetKey)> = vec![];
+        let mut collected: Currency = 0;
+        let mut total_slip2_in: Currency = 0;
+
+        //
+        // first pass: gather enough NFT groups (no mutation yet)
+        //
+        for nft in &self.nfts {
+            let slip1 = match Slip::parse_slip_from_utxokey(&nft.slip1) {
+                Ok(s) => s,
+                Err(_) => continue,
+            };
+
+            let slip2 = match Slip::parse_slip_from_utxokey(&nft.slip2) {
+                Ok(s) => s,
+                Err(_) => continue,
+            };
+
+            let slip3 = match Slip::parse_slip_from_utxokey(&nft.slip3) {
+                Ok(s) => s,
+                Err(_) => continue,
+            };
+
+            //
+            // match UUID
+            //
+            if slip3.public_key != uuid {
+                continue;
+            }
+
+            total_slip2_in = total_slip2_in.saturating_add(slip2.amount);
+            candidate_inputs.push((slip1, slip2, slip3, nft.slip1));
+            collected += candidate_inputs.last().unwrap().0.amount;
+
+            if collected >= amount {
+                break;
+            }
+        }
+
+        //
+        // if insufficient → return empty (NO mutation)
+        //
+        if collected < amount {
+            warn!(
+                "Requested more Saito than available. requested : {:?}, available : {:?}",
+                amount, collected
+            );
+            return (vec![], vec![]);
+        }
+
+        //
+        // second pass: commit inputs
+        //
+        let mut inputs: Vec<Slip> = vec![];
+        let change_slip1_creator = candidate_inputs
+            .first()
+            .map(|(s1, _, _, _)| s1.public_key)
+            .unwrap_or(self.public_key);
+
+        for (s1, s2, s3, utxo_key) in candidate_inputs {
+            inputs.push(s1.clone());
+            inputs.push(s2.clone());
+            inputs.push(s3.clone());
+
+            //
+            // mark spent (same semantics as generate_slips)
+            //
+            self.unspent_slips.remove(&utxo_key);
+        }
+
+        //
+        // generate NFT change (if any)
+        //
+        let mut outputs: Vec<Slip> = vec![];
+        let change = collected - amount;
+
+        if change > 0 {
+            let dep_to_recipients_floor = total_slip2_in
+                .saturating_mul(amount)
+                .checked_div(collected)
+                .unwrap_or(0);
+            let dep_to_change = total_slip2_in.saturating_sub(dep_to_recipients_floor);
+
+            let change_slip1 = Slip {
+                public_key: change_slip1_creator,
+                amount: change,
+                slip_type: SlipType::Bound,
+                ..Default::default()
+            };
+
+            let change_slip2 = Slip {
+                public_key: self.public_key,
+                amount: dep_to_change,
+                slip_type: SlipType::Normal,
+                ..Default::default()
+            };
+
+            let change_slip3 = Slip {
+                public_key: uuid,
+                amount: 0,
+                slip_type: SlipType::Bound,
+                ..Default::default()
+            };
+
+            outputs.push(change_slip1);
+            outputs.push(change_slip2);
+            outputs.push(change_slip3);
         }
 
         (inputs, outputs)
@@ -676,15 +1004,368 @@ impl Wallet {
         sign(message_bytes, &self.private_key)
     }
 
+    pub fn create_transaction(
+        &mut self,
+        recipients: Vec<SaitoPublicKey>,
+        saito_amounts: Vec<Currency>,
+        fee: Currency,
+    ) -> Result<Transaction, Error> {
+        //
+        // ----------------------------------------------------
+        // SANITY CHECKS
+        // ----------------------------------------------------
+        //
+        if recipients.len() != saito_amounts.len() {
+            return Err(Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "recipients and saito_amounts length mismatch",
+            ));
+        }
+
+        //
+        // total SAITO required for recipients
+        //
+        let total_saito_to_recipients: Currency = saito_amounts.iter().sum();
+
+        //
+        // total SAITO required (recipients + fee)
+        //
+        let total_saito_required: Currency = total_saito_to_recipients + fee;
+
+        //
+        // ----------------------------------------------------
+        // STEP 1: CREATE TRANSACTION
+        // ----------------------------------------------------
+        //
+        let mut tx = Transaction::default();
+        tx.transaction_type = TransactionType::Normal;
+
+        //
+        // ----------------------------------------------------
+        // STEP 2: SELECT SAITO INPUTS
+        // ----------------------------------------------------
+        //
+        let (saito_input_slips, saito_change_slips) = self.generate_slips(total_saito_required);
+        if total_saito_required > 0 && saito_input_slips.is_empty() {
+            return Err(Error::new(
+                std::io::ErrorKind::Other,
+                "insufficient SAITO balance",
+            ));
+        }
+        if tx.from.is_empty() {
+            let zero_value_input = Slip {
+                public_key: self.public_key,
+                amount: 0,
+                slip_type: SlipType::Normal,
+                ..Default::default()
+            };
+            tx.add_from_slip(zero_value_input);
+        }
+
+        //
+        // ----------------------------------------------------
+        // ADD INPUT SLIPS
+        // ----------------------------------------------------
+        //
+        for slip in saito_input_slips.iter() {
+            tx.add_from_slip(slip.clone());
+        }
+
+        //
+        // ----------------------------------------------------
+        // STEP 3: BUILD OUTPUT SLIPS (RECIPIENT PAYMENTS)
+        // ----------------------------------------------------
+        //
+        for i in 0..recipients.len() {
+            let recipient = recipients[i];
+            let saito_amount_for_recipient = saito_amounts[i];
+
+            let saito_output_slip = Slip {
+                public_key: recipient,
+                amount: saito_amount_for_recipient,
+                slip_type: SlipType::Normal,
+                ..Default::default()
+            };
+
+            tx.add_to_slip(saito_output_slip);
+        }
+
+        //
+        // ----------------------------------------------------
+        // STEP 4: ADD CHANGE OUTPUTS
+        // ----------------------------------------------------
+        //
+        for slip in saito_change_slips {
+            tx.add_to_slip(slip);
+        }
+        if tx.to.is_empty() {
+            let zero_value_output = Slip {
+                public_key: self.public_key,
+                amount: 0,
+                slip_type: SlipType::Normal,
+                ..Default::default()
+            };
+            tx.add_to_slip(zero_value_output);
+        }
+
+        Ok(tx)
+    }
+
+    //
+    // this function SENDS existing NFTs, it does not CREATE them. to CREATE
+    // a new NFT, you need to use the function create_bound_transaction().
+    // this will error out if it is asked to create a transaction and no
+    // NFT_UUID is provided or exists in the wallet.
+    //
+    pub fn create_nft_transaction(
+        &mut self,
+        recipients: Vec<SaitoPublicKey>,
+        nft_amounts: Vec<Currency>,
+        nft_uuid: SaitoPublicKey,
+        fee: Currency,
+        saito_deposit: Currency,
+        tx_msg: Vec<u8>,
+    ) -> Result<Transaction, Error> {
+        //
+        // ----------------------------------------------------
+        // SANITY CHECKS
+        // ----------------------------------------------------
+        //
+        if recipients.len() != nft_amounts.len() {
+            return Err(Error::new(
+                ErrorKind::InvalidInput,
+                "NFT error - more recipients than NFTs",
+            ));
+        }
+
+        let num_recipients: Currency = recipients.len() as Currency;
+
+        //
+        // ----------------------------------------------------
+        // STEP 1: GET NFT INPUTS
+        // ----------------------------------------------------
+        //
+        let total_nft_requested: Currency = nft_amounts.iter().sum();
+
+        let (nft_input_slips, nft_change_slips) =
+            self.generate_nft_slips(nft_uuid, total_nft_requested);
+
+        if nft_input_slips.is_empty() {
+            return Err(Error::new(
+                ErrorKind::InvalidInput,
+                "NFT insufficient NFT balance",
+            ));
+        }
+
+        let creator_public_key = nft_input_slips[0].public_key;
+
+        let mut total_nft_in: Currency = 0;
+        let mut total_dep_in: Currency = 0;
+        let mut inp_idx = 0;
+
+        while inp_idx + 2 < nft_input_slips.len() {
+            total_nft_in = total_nft_in.saturating_add(nft_input_slips[inp_idx].amount);
+
+            total_dep_in = total_dep_in.saturating_add(nft_input_slips[inp_idx + 1].amount);
+
+            inp_idx += 3;
+        }
+
+        if total_nft_in == 0 {
+            return Err(Error::new(
+                ErrorKind::InvalidInput,
+                "NFT error - zero NFT input amount",
+            ));
+        }
+
+        if total_nft_requested > total_nft_in {
+            return Err(Error::new(
+                ErrorKind::InvalidInput,
+                "NFT error - requested amounts exceed selected inputs",
+            ));
+        }
+
+        let dep_recipients_floor = total_dep_in
+            .saturating_mul(total_nft_requested)
+            .checked_div(total_nft_in)
+            .unwrap_or(0);
+
+        //
+        // ----------------------------------------------------
+        // STEP 2: GET SAITO INPUTS (FEE + OPTIONAL DEPOSIT)
+        // ----------------------------------------------------
+        //
+        let total_saito_required: Currency = fee + saito_deposit;
+
+        let (saito_input_slips, saito_change_slips) = self.generate_slips(total_saito_required);
+
+        if total_saito_required > 0 && saito_input_slips.is_empty() {
+            return Err(Error::new(
+                ErrorKind::InvalidInput,
+                "NFT insufficient SAITO balance",
+            ));
+        }
+
+        //
+        // ----------------------------------------------------
+        // STEP 3: CREATE TRANSACTION
+        // ----------------------------------------------------
+        //
+        let mut tx = Transaction::default();
+        tx.transaction_type = TransactionType::Bound;
+
+        //
+        // ADD INPUTS
+        //
+        for slip in nft_input_slips.iter() {
+            tx.add_from_slip(slip.clone());
+        }
+        for slip in saito_input_slips.iter() {
+            tx.add_from_slip(slip.clone());
+        }
+
+        //
+        // ----------------------------------------------------
+        // STEP 4: BUILD NFT OUTPUTS
+        // ----------------------------------------------------
+        //
+        let saito_base_share_per_recipient: Currency = if num_recipients > 0 {
+            saito_deposit / num_recipients
+        } else {
+            0
+        };
+
+        let mut saito_remainder_to_allocate: Currency = if num_recipients > 0 {
+            saito_deposit % num_recipients
+        } else {
+            0
+        };
+
+        let mut saito_remaining_to_assign: Currency = saito_deposit;
+
+        let mut preserved_remaining: Currency = dep_recipients_floor;
+        let mut nft_weight_remaining: Currency = total_nft_requested;
+
+        for i in 0..recipients.len() {
+            let recipient = recipients[i];
+            let nft_amount_for_recipient = nft_amounts[i];
+
+            let preserved_deposit_for_recipient: Currency = if nft_weight_remaining > 0 {
+                preserved_remaining.saturating_mul(nft_amount_for_recipient) / nft_weight_remaining
+            } else {
+                0
+            };
+
+            preserved_remaining =
+                preserved_remaining.saturating_sub(preserved_deposit_for_recipient);
+
+            nft_weight_remaining = nft_weight_remaining.saturating_sub(nft_amount_for_recipient);
+
+            //
+            // exact additive SAITO allocation
+            //
+            let mut saito_extra_for_recipient = saito_base_share_per_recipient;
+
+            if saito_remainder_to_allocate > 0 {
+                saito_extra_for_recipient = saito_extra_for_recipient.saturating_add(1);
+
+                saito_remainder_to_allocate -= 1;
+            }
+
+            saito_remaining_to_assign =
+                saito_remaining_to_assign.saturating_sub(saito_extra_for_recipient);
+
+            let slip2_amount =
+                preserved_deposit_for_recipient.saturating_add(saito_extra_for_recipient);
+
+            //
+            // NFT OUTPUT GROUP
+            //
+            let nft_amount_slip = Slip {
+                public_key: creator_public_key,
+                amount: nft_amount_for_recipient,
+                slip_type: SlipType::Bound,
+                ..Default::default()
+            };
+
+            let saito_deposit_slip = Slip {
+                public_key: recipient,
+                amount: slip2_amount,
+                slip_type: SlipType::Normal,
+                ..Default::default()
+            };
+
+            let nft_uuid_slip = Slip {
+                public_key: nft_uuid,
+                amount: 0,
+                slip_type: SlipType::Bound,
+                ..Default::default()
+            };
+
+            tx.add_to_slip(nft_amount_slip);
+            tx.add_to_slip(saito_deposit_slip);
+            tx.add_to_slip(nft_uuid_slip);
+        }
+
+        debug_assert_eq!(preserved_remaining, 0);
+        debug_assert_eq!(nft_weight_remaining, 0);
+        debug_assert_eq!(saito_remaining_to_assign, 0);
+
+        //
+        // ----------------------------------------------------
+        // STEP 5: ADD NFT CHANGE OUTPUTS
+        // ----------------------------------------------------
+        //
+        for slip in nft_change_slips {
+            tx.add_to_slip(slip);
+        }
+
+        //
+        // ----------------------------------------------------
+        // STEP 6: ADD SAITO CHANGE OUTPUTS
+        // ----------------------------------------------------
+        //
+        for slip in saito_change_slips {
+            tx.add_to_slip(slip);
+        }
+
+        let mut sum_nft_tuple_slip2_out: Currency = 0;
+        let mut out_idx = 0usize;
+
+        while out_idx + 2 < tx.to.len() {
+            if tx.to[out_idx].slip_type == SlipType::Bound
+                && (tx.to[out_idx + 1].slip_type == SlipType::Normal
+                    || tx.to[out_idx + 1].slip_type == SlipType::ATR)
+                && tx.to[out_idx + 2].slip_type == SlipType::Bound
+            {
+                sum_nft_tuple_slip2_out =
+                    sum_nft_tuple_slip2_out.saturating_add(tx.to[out_idx + 1].amount);
+
+                out_idx += 3;
+            } else {
+                out_idx += 1;
+            }
+        }
+
+        debug_assert_eq!(
+            sum_nft_tuple_slip2_out,
+            total_dep_in.saturating_add(saito_deposit)
+        );
+
+        tx.data = tx_msg;
+
+        Ok(tx)
+    }
+
     pub async fn create_bound_transaction(
         &mut self,
         nft_num: u64,                     // number of nft to create
         nft_create_deposit_amt: Currency, // AMOUNT to deposit in slip2 (output)
         tx_msg: Vec<u8>,                  // DATA field to attach to TX
         recipient: &SaitoPublicKey,       // receiver
-        network: Option<&Network>,
-        latest_block_id: u64,
-        genesis_period: u64,
+        _network: Option<&Network>,
+        _latest_block_id: u64,
+        _genesis_period: u64,
         nft_type: String,
     ) -> Result<Transaction, Error> {
         let mut transaction = Transaction::default();
@@ -711,41 +1392,11 @@ impl Wallet {
         // };
 
         //
-        // now we compute the unique UTXO key for the input slip. since every
-        // slip will have a unique UTXO key, this is the UUID for the NFT. by
-        // assigning each NFT the UUID from the slip that is used to create it,
-        // we ensure that each NFT will have an unforgeable ID.
-        //
-        // let utxo_key = input_slip.get_utxoset_key(); // Compute the unique UTXO key for the input slip
-
-        //
-        // check that our wallet has this slip available. this check avoids
-        // issues where the slip we are using to create our NFT has already
-        // been spent for some reason. note that this is a safety check for
-        // US rather than a security check for the network, since double-spends
-        // are not possible, so users cannot "re-spend" UTXO to create
-        // duplicate NFTs after their initial NFTs have been created.
-        //
-        // if !self.unspent_slips.contains(&utxo_key) {
-        //     info!("UTXO Key not found: {:?}", utxo_key);
-        //     return Err(Error::new(
-        //         ErrorKind::NotFound,
-        //         format!("UTXO not found: {:?}", utxo_key),
-        //     ));
-        // }
-
-        //
         // Instead of reconstructing an input slip from params, we generate
         // enough slips to cover `nft_create_deposit_amt`. Any output from
         // `generate_slips` will become our change slip.
         //
-
-        let (mut generated_inputs, generated_outputs) = self.generate_slips(
-            nft_create_deposit_amt,
-            network,
-            latest_block_id,
-            genesis_period,
-        );
+        let (mut generated_inputs, generated_outputs) = self.generate_slips(nft_create_deposit_amt);
 
         //
         // Drop any slips with zero amount
@@ -871,7 +1522,7 @@ impl Wallet {
         //       • 8 bytes of nft_uuid_block_id,
         //       • 8 bytes of nft_uuid_transaction_id,
         //       • 1 byte of nft_uuid_slip_id (totaling 17 bytes)
-        //       • 16 bytes padded by remainder of recipient's public key
+        //       • 16 bytes padded by nft_type
         //
         // the transaction includes a copy of the NFT UUID at the head of the
         // transaction MSG field. Whenever the NFT is send between addresses
@@ -1372,15 +2023,18 @@ impl Wallet {
         let old_nft = self.nfts.remove(pos);
 
         //
-        // parse slip2 from its UTXO key
+        // parse all three NFT slips from their UTXO keys
         //
+        let mut input_slip1 = Slip::parse_slip_from_utxokey(&old_nft.slip1)
+            .map_err(|_| Error::new(ErrorKind::Other, "failed to parse slip1 from utxokey"))?;
         let mut input_slip2 = Slip::parse_slip_from_utxokey(&old_nft.slip2)
             .map_err(|_| Error::new(ErrorKind::Other, "failed to parse slip2 from utxokey"))?;
+        let mut input_slip3 = Slip::parse_slip_from_utxokey(&old_nft.slip3)
+            .map_err(|_| Error::new(ErrorKind::Other, "failed to parse slip3 from utxokey"))?;
 
-        //
-        // ensure correct type for spending; slip2 is a normal spendable slip
-        //
+        input_slip1.slip_type = SlipType::Bound;
         input_slip2.slip_type = SlipType::Normal;
+        input_slip3.slip_type = SlipType::Bound;
 
         //
         // compute original deposit amount
@@ -1391,26 +2045,23 @@ impl Wallet {
         }
 
         //
-        // build bound transaction
+        // build bound transaction — inputs are the full NFT triplet,
+        // output is only the deposit refund (no NFT group = burn)
         //
         let mut transaction = Transaction::default();
         transaction.transaction_type = TransactionType::Bound;
 
-        //
-        // add input slip to the transaction
-        //
+        transaction.add_from_slip(input_slip1);
         transaction.add_from_slip(input_slip2.clone());
+        transaction.add_from_slip(input_slip3);
 
         //
-        // create output slip (refund to current holder = input_slip2.public_key)
+        // refund the deposit to the current holder
         //
-        let mut out_slip = input_slip2.clone();
+        let mut out_slip = input_slip2;
         out_slip.amount = deposit_amount;
         out_slip.slip_type = SlipType::Normal;
 
-        //
-        // add output slip
-        //
         transaction.add_to_slip(out_slip);
         transaction.data = tx_msg;
 
@@ -1513,17 +2164,32 @@ impl Wallet {
         assert_eq!(tx.from.first().unwrap().public_key, self.public_key);
         assert_ne!(tx.transaction_type, TransactionType::GoldenTicket);
         assert!(tx.hash_for_signature.is_some());
-        self.pending_txs.insert(tx.hash_for_signature.unwrap(), tx);
+        let insert_key = tx.hash_for_signature.unwrap();
+        let sig_hex = tx.signature.to_hex();
+        let tx_type = tx.transaction_type;
+        self.pending_txs.insert(insert_key, tx);
+        self.log_wallet_pending_balance_debug(&format!(
+            "add_to_pending insert_key={} sig={} type={:?}",
+            insert_key.to_hex(),
+            sig_hex,
+            tx_type
+        ));
     }
 
     pub fn delete_pending_transaction(&mut self, tx: &Transaction) -> bool {
         let hash = tx.hash_for_signature.unwrap();
-        if self.pending_txs.remove(&hash).is_some() {
-            true
-        } else {
-            // debug!("Transaction not found in pending_txs");
-            false
+        let removed = self.pending_txs.remove(&hash).is_some();
+        debug!(
+            "[ PENDING BALANCE ] [ delete_pending_transaction tx_sig={} hash_key={} removed={} remaining_pending_txs={} ]",
+            tx.signature.to_hex(),
+            hash.to_hex(),
+            removed,
+            self.pending_txs.len()
+        );
+        if removed {
+            self.log_wallet_pending_balance_debug("delete_pending_transaction after_remove");
         }
+        removed
     }
 
     pub fn update_from_balance_snapshot(
@@ -1534,7 +2200,6 @@ impl Wallet {
         // need to reset balance and slips to avoid failing integrity from forks
         self.unspent_slips.clear();
         self.slips.clear();
-        self.available_balance = 0;
 
         snapshot.slips.iter().for_each(|slip| {
             assert_ne!(slip.utxoset_key, [0; UTXO_KEY_LENGTH]);
@@ -1551,19 +2216,12 @@ impl Wallet {
             let result = self.slips.insert(slip.utxoset_key, wallet_slip);
             if result.is_none() {
                 self.unspent_slips.insert(slip.utxoset_key);
-                self.available_balance += slip.amount;
-                info!("slip key : {:?} with value : {:?} added to wallet from snapshot for address : {:?}. slip : {}",
-                    slip.utxoset_key.to_hex(),
-                    slip.amount,
-                    slip.public_key.to_base58(),
-                    slip);
-            } else {
-                info!(
-                    "slip with utxo key : {:?} was already available",
-                    slip.utxoset_key.to_hex()
-                );
             }
         });
+
+        self.log_wallet_pending_balance_debug(
+            "update_from_balance_snapshot after slip reload (pending_txs unchanged by this fn)",
+        );
 
         if let Some(network) = network {
             network
@@ -1571,8 +2229,21 @@ impl Wallet {
                 .send_interface_event(InterfaceEvent::WalletUpdate());
         }
     }
-    pub fn set_key_list(&mut self, key_list: Vec<SaitoPublicKey>) {
-        self.key_list = key_list;
+
+    pub fn set_key_list(&mut self, mut key_list: Vec<SaitoPublicKey>) -> bool {
+        key_list.sort();
+        if key_list.len() != self.key_list.len()
+            || self
+                .key_list
+                .iter()
+                .zip(key_list.iter())
+                .any(|(a, b)| a != b)
+        {
+            self.key_list = key_list;
+            return true;
+        }
+
+        false
     }
 
     pub fn create_staking_transaction(
@@ -1653,7 +2324,6 @@ impl Wallet {
 
         let mut should_break_slips = false;
         if collected_amount < staking_amount {
-            debug!("not enough funds in staking slips. searching in normal slips. current_balance : {:?}", self.available_balance);
             let required_from_unspent_slips = staking_amount - collected_amount;
             let mut collected_from_unspent_slips: Currency = 0;
             let mut unspent_slips_to_remove = vec![];
@@ -1687,20 +2357,19 @@ impl Wallet {
             if collected_from_unspent_slips < required_from_unspent_slips {
                 warn!("insufficient funds to stake block. requested: {:?}, collected: {:?} required_from_unspent: {:?}",
                     staking_amount,collected_amount,required_from_unspent_slips);
-                warn!("wallet balance : {:?}", self.available_balance);
-                return Err(Error::from(ErrorKind::NotFound));
+                return Err(Error::new(
+                    ErrorKind::Other,
+                    "Failed to generate input slip for creating NFT",
+                ));
             }
 
             for key in unspent_slips_to_remove {
-                trace!("removing unspent slip : {}", key.to_hex());
                 self.unspent_slips.remove(&key);
             }
             collected_amount += collected_from_unspent_slips;
-            self.available_balance -= collected_from_unspent_slips;
         }
 
         for key in unlocked_slips_to_remove {
-            trace!("removing unlocked staking slip : {}", key.to_hex());
             self.staking_slips.remove(&key);
         }
 
@@ -1744,29 +2413,45 @@ impl Wallet {
         Ok((selected_staking_inputs, outputs))
     }
 
-    pub fn get_nft_list(&self) -> Vec<DetailedNFT> {
-        self.nfts
-            .iter()
-            .map(|nft| {
-                //
-                // parse each utxokey back into a Slip
-                //
-                let s1 = Slip::parse_slip_from_utxokey(&nft.slip1)
-                    .expect("bound utxokey must parse to Slip");
-                let s2 = Slip::parse_slip_from_utxokey(&nft.slip2)
-                    .expect("normal utxokey must parse to Slip");
-                let s3 = Slip::parse_slip_from_utxokey(&nft.slip3)
-                    .expect("bound utxokey must parse to Slip");
+    /// Returns the Saito public key of the party that sent/spent NFT inputs in `tx`.
+    /// Matches bound-tx signer rules in `transaction.rs` (CREATE vs SEND/SPLIT/MERGE).
+    pub fn return_nft_sender_publickey(&self, tx: &Transaction) -> SaitoPublicKey {
+        if tx.from.is_empty() {
+            return [0u8; 33];
+        }
 
-                DetailedNFT {
-                    id: nft.id.clone(),
-                    tx_sig: nft.tx_sig,
-                    slip1: s1,
-                    slip2: s2,
-                    slip3: s3,
-                }
-            })
-            .collect()
+        let is_create = tx.from[0].slip_type == SlipType::Normal
+            && tx.to.len() >= 3
+            && tx.to[0].slip_type == SlipType::Bound
+            && tx.to[1].slip_type == SlipType::Normal
+            && tx.to[2].slip_type == SlipType::Bound;
+
+        if is_create {
+            return tx.from[0].public_key;
+        }
+
+        if tx.from.len() >= 2 && tx.is_nft(&tx.from, 0) {
+            return tx.from[1].public_key;
+        }
+
+        tx.from[0].public_key
+    }
+
+    fn extract_nft_ticker_from_tx(tx: &Transaction) -> String {
+        let json_str = String::from_utf8_lossy(&tx.data);
+        let json_str = json_str.trim();
+
+        if let Ok(v) = serde_json::from_str::<serde_json::Value>(json_str) {
+            if let Some(ticker) = v["ticker"].as_str() {
+                return ticker.to_string();
+            }
+
+            if let Some(ticker) = v["data"]["ticker"].as_str() {
+                return ticker.to_string();
+            }
+        }
+
+        String::new()
     }
 
     pub fn add_nft(
@@ -1776,30 +2461,28 @@ impl Wallet {
         slip3: SaitoUTXOSetKey,
         id: Vec<u8>,
         tx_sig: SaitoSignature,
+        ticker: String,
     ) {
-        //
-        // construct the NFT we’d like to insert
-        //
         let new_nft = NFT {
             slip1,
             slip2,
             slip3,
             id,
             tx_sig,
+            ticker,
         };
 
-        //
-        // only push if there is no existing NFT with all fields equal
-        //
-        let exists = self.nfts.iter().any(|nft| {
+        if let Some(existing) = self.nfts.iter_mut().find(|nft| {
             nft.slip1 == new_nft.slip1
                 && nft.slip2 == new_nft.slip2
                 && nft.slip3 == new_nft.slip3
                 && nft.id == new_nft.id
                 && nft.tx_sig == new_nft.tx_sig
-        });
-
-        if !exists {
+        }) {
+            if existing.ticker.is_empty() && !new_nft.ticker.is_empty() {
+                existing.ticker = new_nft.ticker;
+            }
+        } else {
             self.nfts.push(new_nft);
         }
     }
@@ -1853,7 +2536,7 @@ impl Display for WalletSlip {
 mod tests {
     use crate::core::consensus::wallet::Wallet;
     use crate::core::defs::SaitoPublicKey;
-    use crate::core::routing::io::storage::Storage;
+    use crate::core::storage::storage::Storage;
     use crate::core::util::crypto::generate_keys;
     use crate::core::util::test::test_manager::test::TestManager;
 
@@ -1979,7 +2662,7 @@ mod tests {
         };
         slip.generate_utxoset_key();
         wallet.add_slip(&slip, true, Some(&t.network));
-        assert_eq!(wallet.available_balance, 1_000_000);
+        assert_eq!(wallet.get_available_balance(), 1_000_000);
 
         let result = wallet.find_slips_for_staking(1_000_000, 1, 0);
         assert!(result.is_ok());
@@ -1991,7 +2674,6 @@ mod tests {
 
         assert_eq!(wallet.staking_slips.len(), 0);
         assert_eq!(wallet.unspent_slips.len(), 0);
-        assert_eq!(wallet.available_balance, 0);
 
         let result = wallet.find_slips_for_staking(1_000, 2, 0);
         assert!(result.is_err());
@@ -2031,7 +2713,7 @@ mod tests {
         };
         slip.generate_utxoset_key();
         wallet.add_slip(&slip, true, Some(&t.network));
-        assert_eq!(wallet.available_balance, 2_500_000);
+        assert_eq!(wallet.get_available_balance(), 2_500_000);
 
         let result = wallet.find_slips_for_staking(1_000_000, 1, 0);
         assert!(result.is_ok());
@@ -2049,7 +2731,6 @@ mod tests {
 
         assert_eq!(wallet.staking_slips.len(), 0);
         assert_eq!(wallet.unspent_slips.len(), 0);
-        assert_eq!(wallet.available_balance, 0);
 
         let result = wallet.find_slips_for_staking(1_000, 2, 0);
         assert!(result.is_err());
@@ -2090,7 +2771,6 @@ mod tests {
         };
         slip.generate_utxoset_key();
         wallet.add_slip(&slip, true, Some(&t.network));
-        assert_eq!(wallet.available_balance, 0);
 
         let result = wallet.find_slips_for_staking(1_000_000, 1, 0);
         assert!(result.is_ok());
@@ -2101,7 +2781,6 @@ mod tests {
 
         assert_eq!(wallet.staking_slips.len(), 0);
         assert_eq!(wallet.unspent_slips.len(), 0);
-        assert_eq!(wallet.available_balance, 0);
 
         let result = wallet.find_slips_for_staking(1_000, 2, 0);
         assert!(result.is_err());
@@ -2109,33 +2788,4 @@ mod tests {
         assert_eq!(wallet.staking_slips.len(), 0);
         assert_eq!(wallet.unspent_slips.len(), 0);
     }
-
-    // #[tokio::test]
-    // #[serial_test::serial]
-    // async fn save_and_restore_wallet_test() {
-    //     info!("current dir = {:?}", std::env::current_dir().unwrap());
-    //
-    //     let _t = TestManager::new();
-    //
-    //     let keys = generate_keys();
-    //     let mut wallet = Wallet::new(keys.1, keys.0);
-    //     let public_key1 = wallet.public_key.clone();
-    //     let private_key1 = wallet.private_key.clone();
-    //
-    //     let mut storage = Storage {
-    //         io_interface: Box::new(TestIOHandler::new()),
-    //     };
-    //     wallet.save(&mut storage).await;
-    //
-    //     let keys = generate_keys();
-    //     wallet = Wallet::new(keys.1, keys.0);
-    //
-    //     assert_ne!(wallet.public_key, public_key1);
-    //     assert_ne!(wallet.private_key, private_key1);
-    //
-    //     wallet.load(&mut storage).await;
-    //
-    //     assert_eq!(wallet.public_key, public_key1);
-    //     assert_eq!(wallet.private_key, private_key1);
-    // }
 }

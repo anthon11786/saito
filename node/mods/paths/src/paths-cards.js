@@ -1,8 +1,4 @@
 
-  returnSpaceNameForLog() {
-    return `<span class="showcard ${card}" id="${card}">${card}</span>`;
-  }
-
   popup(card) {
 
     let c = null;
@@ -2500,6 +2496,7 @@ deck['ap49'] = {
         canEvent : function(paths_self, faction) { return 1; } ,
         onEvent : function(paths_self, faction) {
 	  paths_self.game.state.events.sinai_pipeline = 1;
+	  return 1;
 	} ,
       }
 

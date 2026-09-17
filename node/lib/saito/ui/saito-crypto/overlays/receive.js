@@ -1,6 +1,24 @@
+/**
+ * Crypto receive overlay — waiting for / confirming inbound payment.
+ *
+ * Presentation: `mods/crypto/web/css/crypto-overlays.css` (`.crypto-receive-overlay`).
+ *
+ * Completion is one-shot via completeReceiveOnce():
+ *   - Continue click → completeReceiveOnce()
+ *   - Payment arrived → success UI, then completeReceiveOnce()
+ * Overlay close must not re-fire the completion callback.
+ */
+
 const ReceiveTemplate = require('./receive.template');
 const SaitoOverlay = require('./../../saito-overlay/saito-overlay');
-const SaitoUser = require('./../../saito-user/saito-user');
+
+function escapeHtml(value = '') {
+  return String(value)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
 
 class Receive {
   constructor(app, mod, container = '') {
@@ -10,35 +28,81 @@ class Receive {
 
     this.overlay.clickBackdropToClose = false;
 
-    this.counter_party = new SaitoUser(
-      this.app,
-      this.mod,
-      '#receive-crypto-request-container .counterparty-details'
-    );
+    /** @type {ReturnType<Receive['bindElements']> | null} */
+    this.el = null;
+
+    this.expected_hash = null;
+    this.mycallback = null;
+    this.receive_completed = false;
 
     this.app.connection.on('saito-crypto-receive-render-request', (details) => {
       this.render(details);
     });
 
-    this.app.connection.on('saito-crypto-receive-confirm', (details) => {
-      this.updateOverlay(details);
+    this.app.connection.on('on-receive-expected-payment', (hash, details) => {
+      if (hash == this.expected_hash) {
+        this.onReceivePayment();
+      }
     });
   }
 
   /**
-   * Shows a confirmation overlay before initiating a crypto transfer
-   * @param ticker { string } - name of a currency
-   * @param amount { string } - the amount of crypto
-   * @param publicKey { string } - Saito public key of recipient
-   * @param address { string } - address of receiver (for currency)
-   * @param trusted { boolean } - flag for whether to autoprocess
-   * @param mycallback { function} - to run when approved
-   *
+   * @returns {null | {
+   *   root: HTMLElement,
+   *   title: HTMLElement | null,
+   *   amount: HTMLElement | null,
+   *   countdown: HTMLElement | null,
+   *   closeBtn: HTMLButtonElement | null
+   * }}
+   */
+  bindElements() {
+    const root = document.getElementById('receive-crypto-request-root');
+    if (root) {
+      return {
+        root,
+        title: root.querySelector('#crypto_receive_title'),
+        amount: root.querySelector('#crypto_receive_amount'),
+        countdown: root.querySelector('#crypto_receive_countdown'),
+        closeBtn: root.querySelector('#crypto_receive_continue')
+      };
+    } else {
+      return null;
+    }
+  }
+
+  /**
+   * One-shot: run the completion callback and close the overlay.
+   * Safe to call from Continue or from payment-arrived auto-continue.
+   */
+  completeReceiveOnce() {
+    if (this.receive_completed) {
+      return;
+    }
+    this.receive_completed = true;
+    this.expected_hash = null;
+
+    const cb = this.mycallback;
+    this.mycallback = null;
+    if (typeof cb === 'function') {
+      cb();
+    }
+
+    this.overlay.close();
+  }
+
+  attachEvents() {
+    if (this.el?.closeBtn) {
+      this.el.closeBtn.addEventListener('click', () => {
+        this.completeReceiveOnce();
+      });
+    }
+  }
+
+  /**
+   * Shows a confirmation overlay while waiting for an inbound crypto transfer.
+   * @param details {{ ticker: string, amount: string, publicKey: string, address: string, mycallback?: function }}
    */
   render(details) {
-    //
-    // Verify complete information
-    //
     if (!details?.ticker || !details?.amount) {
       console.error('Missing ticker/amount in Receive Crypto Overlay');
       return;
@@ -49,87 +113,43 @@ class Receive {
       return;
     }
 
-    console.log('Show overlay');
-    this.overlay.show(ReceiveTemplate(this.app, this.mod, details), () => {
-      console.log('&&&&&&&&&&& close overlay -- run call back!!!');
-      if (details.mycallback) {
-        details.mycallback();
-      }
+    this.expected_hash = details.hash;
+    this.mycallback = typeof details.mycallback === 'function' ? details.mycallback : null;
+    this.receive_completed = false;
+
+    const publicKey = details.publicKey;
+    details.partyName = escapeHtml(this.app.keychain.returnUsername(publicKey));
+    details.partyKey = escapeHtml(publicKey);
+
+    this.overlay.show(ReceiveTemplate(details), () => {
+      this.expected_hash = null;
+      // Completion is owned by completeReceiveOnce(); close must not re-fire it.
+      this.mycallback = null;
     });
+    this.overlay.blockClose();
 
-    this.counter_party.publicKey = details.publicKey;
-
-    this.counter_party.render();
-
-    let html = `
-			<div class="profile-public-key">
-				${details.address.slice(0, 8)}...${details.address.slice(-8)}
-            </div>`;
-
-    this.counter_party.updateUserline(html);
+    this.el = this.bindElements();
+    if (!this.el?.root) {
+      console.error('Error rendering receive overlay');
+      return;
+    }
 
     this.attachEvents();
-
-    if (details?.trusted) {
-      console.log('Trusted!');
-      this.timeout = setTimeout(() => {
-        this.overlay.close();
-        this.timeout = null;
-      }, 3000);
-      this.countDown();
-    }
   }
 
-  countDown() {
-    // Countdown clock
-    setTimeout(() => {
-      let c = document.querySelector(
-        '#receive-crypto-request-container .crypto-transfer-countdown span'
-      );
-      if (c) {
-        let value = parseInt(c.innerHTML);
-        value = Math.max(value - 1, 0);
-        c.innerHTML = value.toString();
-        this.countDown();
-      }
-    }, 900);
-  }
+  onReceivePayment() {
+    this.expected_hash = null;
 
-  attachEvents() {
-    if (document.getElementById('crypto_receipt_btn')) {
-      document.getElementById('crypto_receipt_btn').onclick = (e) => {
-        let ignoreBtn = document.querySelector('#ignore_checkbox');
-        if (ignoreBtn?.checked) {
-          this.mod.saveGamePreference('crypto_transfers_inbound_trusted', 1);
-        }
-        this.overlay.close();
-      };
+    const root = this.bindElements();
+    if (root?.title) {
+      root.title.textContent = 'Payment Received';
     }
-  }
-
-  updateOverlay(results) {
-    let success = results?.hash && !results?.err;
-
-    if (document.getElementById('receive-crypto-request-container')) {
-      document.querySelector('.spinner').style.display = 'none';
-
-      if (success) {
-        document.querySelector('#auth_title').innerHTML = `Received Payment`;
-        document.querySelector('#game-crypto-icon').style.display = 'block';
-      } else {
-        document.querySelector('#auth_title').innerHTML = `Failure`;
-        document.querySelector('#game-crypto-failure-icon').style.display = 'block';
-      }
-
-      if (this.timeout) {
-        clearTimeout(this.timeout);
-        setTimeout(() => {
-          this.overlay.close();
-          this.timeout = null;
-        }, 3000);
-        document.querySelector('#receive-crypto-request-container .crypto-transfer-countdown span');
-      }
+    if (root?.root) {
+      root.root.dataset.receiveState = 'success';
     }
+
+    // Auto-Continue: same one-shot path as the Continue button.
+    this.completeReceiveOnce();
   }
 }
 

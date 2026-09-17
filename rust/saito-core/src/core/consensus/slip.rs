@@ -1,7 +1,7 @@
 use std::fmt::{Display, Formatter};
 use std::io::{Error, ErrorKind};
 
-use log::{debug, error, trace};
+use log::{debug, error, info, trace};
 use num_derive::{FromPrimitive, ToPrimitive};
 use num_traits::{FromPrimitive, ToPrimitive};
 use serde::{Deserialize, Serialize};
@@ -25,6 +25,7 @@ pub enum SlipType {
     RouterOutput = 7,
     BlockStake = 8,
     Bound = 9,
+    P2SH = 10,
 }
 
 #[serde_with::serde_as]
@@ -74,13 +75,14 @@ impl Default for Slip {
 }
 
 impl Slip {
-    /// runs when block is purged for good or staking slip deleted
+    //
+    // when block is purged and slips deleted
+    //
     pub fn delete(&self, utxoset: &mut UtxoSet) -> bool {
         if self.get_utxoset_key() == [0; UTXO_KEY_LENGTH] {
             error!("ERROR 572034: asked to remove a slip without its utxoset_key properly set!");
             return false;
         }
-        debug!("deleting slip from utxo : {}", self);
         utxoset.remove_entry(&self.get_utxoset_key());
         true
     }
@@ -143,11 +145,25 @@ impl Slip {
 
     pub fn parse_slip_from_utxokey(key: &SaitoUTXOSetKey) -> Result<Slip, Error> {
         let mut slip = Slip::default();
-        slip.public_key = key[0..33].to_vec().try_into().unwrap();
-        slip.block_id = u64::from_be_bytes(key[33..41].try_into().unwrap());
-        slip.tx_ordinal = u64::from_be_bytes(key[41..49].try_into().unwrap());
+        slip.public_key = key[0..33]
+            .try_into()
+            .or(Err(Error::from(ErrorKind::InvalidData)))?;
+        slip.block_id = u64::from_be_bytes(
+            key[33..41]
+                .try_into()
+                .or(Err(Error::from(ErrorKind::InvalidData)))?,
+        );
+        slip.tx_ordinal = u64::from_be_bytes(
+            key[41..49]
+                .try_into()
+                .or(Err(Error::from(ErrorKind::InvalidData)))?,
+        );
         slip.slip_index = key[49];
-        slip.amount = u64::from_be_bytes(key[50..58].try_into().unwrap());
+        slip.amount = u64::from_be_bytes(
+            key[50..58]
+                .try_into()
+                .or(Err(Error::from(ErrorKind::InvalidData)))?,
+        );
         slip.slip_type = SlipType::from_u8(key[58]).ok_or(Error::from(ErrorKind::InvalidData))?;
 
         slip.utxoset_key = *key;
@@ -159,24 +175,8 @@ impl Slip {
     pub fn on_chain_reorganization(&self, utxoset: &mut UtxoSet, spendable: bool) {
         if self.amount > 0 {
             if spendable {
-                trace!(
-                    "adding slip to utxo : {:?}-{:?}-{:?} with value : {:?} key: {:?}",
-                    self.block_id,
-                    self.tx_ordinal,
-                    self.slip_index,
-                    self.amount,
-                    self.utxoset_key.to_hex()
-                );
                 utxoset.insert(self.utxoset_key, spendable);
             } else {
-                trace!(
-                    "removing slip from utxo : {:?}-{:?}-{:?} with value : {:?} key: {:?}",
-                    self.block_id,
-                    self.tx_ordinal,
-                    self.slip_index,
-                    self.amount,
-                    self.utxoset_key.to_hex()
-                );
                 utxoset.remove(&self.utxoset_key);
             }
         }
@@ -381,5 +381,18 @@ mod tests {
         //     blockchain.utxoset.contains_key(&slip.get_utxoset_key()),
         //     false
         // );
+    }
+
+    #[test]
+    fn parse_slip_from_utxokey_accepts_valid_all_zero_key() {
+        let key = [0u8; UTXO_KEY_LENGTH];
+        assert!(Slip::parse_slip_from_utxokey(&key).is_ok());
+    }
+
+    #[test]
+    fn parse_slip_from_utxokey_rejects_invalid_slip_type_byte() {
+        let mut key = [0u8; UTXO_KEY_LENGTH];
+        key[UTXO_KEY_LENGTH - 1] = 255; // 255 is not a valid SlipType variant
+        assert!(Slip::parse_slip_from_utxokey(&key).is_err());
     }
 }

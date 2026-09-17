@@ -1,5 +1,5 @@
 .league-overlay {
-	background: var(--saito-background-color);
+	background: var(--saito-background);
 	width: 90vw;
 	padding: 2rem 1rem;
 	display: flex;
@@ -110,7 +110,7 @@
 .league-overlay-content-box {
 	border-radius: 0.5rem;
 	overflow-y: auto;
-	border: 1px solid var(--border-color-general-dividers);
+	border: 1px solid var(--saito-border);
 	flex: 1;
 }
 
@@ -157,7 +157,7 @@
 	position: relative;
 	left: 50%;
 	transform: translateX(-50%);
-	border-radius: var(--saito-border-radius);
+	border-radius: var(--saito-radius);
 }
 
 #admin_details {
@@ -286,7 +286,7 @@ span.attention {
 }
 
 .editable_field {
-	border: 1px solid var(--saito-border-color);
+	border: 1px solid var(--saito-border);
 	cursor: text;
 }
 
@@ -316,24 +316,6 @@ span.attention {
 
 .league-page-tab.mobile-only {
 	display: none;
-}
-
-.explanation {
-	padding: 1rem;
-	font-style: italic;
-}
-
-.league-settings .saitox-table {
-	grid-template-columns: 1fr repeat(3, max-content);
-}
-
-.league-settings .saitox-table > div {
-	justify-content: center;
-}
-
-.league-settings .clickable-element:hover {
-	color: var(--saito-font-color-light);
-	background: var(--saito-surface-hover);
 }
 
 @media screen and (max-width: 900px) {
@@ -382,7 +364,7 @@ span.attention {
 	}
 	.league-overlay {
 		width: 100vw;
-		max-height: calc(95 * var(--saito-vh));
+		max-height: 95svh;
 	}
 	.contactAdminWarning {
 		min-height: 0;
@@ -427,20 +409,12 @@ span.attention {
 		left: 1rem;
 		top: 1.4rem;
 		text-shadow:
-			1px 1px 2px var(--saito-background-color),
-			-1px -1px 2px var(--saito-background-color),
-			1px -1px 2px var(--saito-background-color),
-			-1px 1px 2px var(--saito-background-color);
+			1px 1px 2px var(--saito-background),
+			-1px -1px 2px var(--saito-background),
+			1px -1px 2px var(--saito-background),
+			-1px 1px 2px var(--saito-background);
 		/* testing, haven t seen any of this */
 	}
-}
-
-.league-rankings .sidebar-title {
-	display: flex;
-	justify-content: space-between;
-	width: 100%;
-	padding-right: 1rem;
-	color: var(--saito-font-color-heavy);
 }
 
 .ranking-overlay {
@@ -451,5 +425,5 @@ span.attention {
 	flex-direction: column;
 	gap: 1rem;
 	font-size: 1.8rem;
-	border: 1px solid var(--saito-border-color);
+	border: 1px solid var(--saito-border);
 }

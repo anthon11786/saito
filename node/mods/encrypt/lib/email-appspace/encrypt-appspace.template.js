@@ -1,5 +1,5 @@
-module.exports  = () => {
-	return `
+module.exports = () => {
+  return `
 <div class="email-appspace-encrypt">
   <h3>Encrypt transations and messages:</h3>
   <p>
@@ -8,10 +8,10 @@ module.exports  = () => {
   <br />
   <div class="grid-2">
     <div>Address:</div>
-    <div><input id="email-to-address" type="text" placeholder="Recipient Address"></div>
+    <div><input id="email-to-address" type="text" class="saito-input" placeholder="Recipient Address"></div>
     <div></div>
     <div>
-      <button class="email-submit">Encrypt</button>
+      <button class="email-submit saito-button-primary">Encrypt</button>
     </div>
   </div>
 </div> 

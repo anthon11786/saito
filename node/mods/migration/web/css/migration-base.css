@@ -1,6 +1,6 @@
 .main {
   background-image: url(/saito/img/tiled-logo.svg);
-  background-color: var(--saito-background-color);
+  background-color: var(--saito-background);
   position: fixed;
   width: 100vw;
   height: 100vh;
@@ -19,7 +19,7 @@
   justify-content: center;
   align-items: center;
   border-radius: 1rem;
-  border: 1px solid var(--saito-border-color);
+  border: 1px solid var(--saito-border);
   padding: 7rem;
   background: linear-gradient(135deg, #0008, #0000);
 }
@@ -48,18 +48,82 @@
 }
 
 .withdraw-form-fields .saito-button-row {
-  flex-direction: column;
+  align-items: stretch;
+  flex-direction: row;
+}
+
+.withdraw-form-fields .saito-button-row > button {
+  flex: 1 1 0;
+  width: 0;
+  min-width: 0;
+  min-height: 4rem;
+}
+
+#automatic {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 1rem;
+}
+
+.migration-button-spinner {
+  width: 1.8rem;
+  height: 1.8rem;
+  flex: 0 0 1.8rem;
+  border: 2px solid currentColor;
+  border-top-color: transparent;
+  border-radius: 50%;
+  animation: migration-button-spin 0.8s linear infinite;
+}
+
+@keyframes migration-button-spin {
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 .footer-note {
   text-align: center;
 }
 
-input[type='text'] {
+/* The shared crypto deposit dialog needs a compact migration-specific layout. */
+#saito-deposit-form.saito-crypto-deposit.migration-deposit {
+  box-sizing: border-box;
+  max-height: min(90svh, 70rem);
+  overflow-y: auto;
+  color: var(--saito-foreground);
+}
+
+#saito-deposit-form.saito-crypto-deposit.migration-deposit .call-to-action {
   width: 100%;
-  padding: 0.5rem;
-  border-radius: 0.5rem;
-  border: 1px solid #888a;
+  box-sizing: border-box;
+}
+
+#saito-deposit-form.saito-crypto-deposit.migration-deposit > footer.saito-button-row {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 1.5rem;
+  margin-top: 0.5rem;
+}
+
+#saito-deposit-form.saito-crypto-deposit.migration-deposit .saito-crypto-deposit__footer-meta {
+  margin-right: 0;
+  align-items: center;
+  text-align: center;
+  width: 100%;
+}
+
+#saito-deposit-form.saito-crypto-deposit.migration-deposit .network-confirmations {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  line-height: 1.35;
+}
+
+#saito-deposit-form.saito-crypto-deposit.migration-deposit > footer #submit {
+  width: 100%;
+  min-width: 0;
+  margin: 0;
 }
 
 .migration-check {
@@ -75,7 +139,7 @@ input[type='text'] {
 .user-id-check {
   padding: 1rem;
   border: 1px solid;
-  border-radius: var(--saito-border-radius);
+  border-radius: var(--saito-radius);
 }
 
 .confirmation-block {
@@ -93,5 +157,17 @@ input[type='text'] {
     border: none;
     background: none;
     border-radius: 0px;
+  }
+
+  .withdraw-form-fields .saito-button-row {
+    flex-direction: column;
+  }
+
+  .withdraw-form-fields .saito-button-row > button {
+    width: 100%;
+  }
+
+  #saito-deposit-form.saito-crypto-deposit.migration-deposit > footer.saito-button-row {
+    grid-template-columns: 1fr;
   }
 }

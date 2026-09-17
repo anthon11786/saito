@@ -1,0 +1,19 @@
+/* Arcade embed mount — placement / visibility only; Invite appearance lives in Arcade */
+
+.redsquare-arcade {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  min-width: 0;
+}
+
+.redsquare-arcade .arcade-invites {
+  min-width: 0;
+}
+
+.redsquare-arcade:empty,
+.redsquare-arcade:not(:has(.saito-sidebar-header)):not(:has(.sidebar-header)):not(
+    :has(.arcade-invite)
+  ) {
+  display: none;
+}

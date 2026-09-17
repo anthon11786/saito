@@ -1,5 +1,4 @@
 const VaultMainTemplate = require('./main.template.js');
-const AccessFileOverlay = require('./overlays/load-nfts.js');
 const FileUploadOverlay = require('./overlays/file-upload.js');
 
 class VaultMain {
@@ -8,7 +7,6 @@ class VaultMain {
     this.mod = mod;
     this.container = container;
 
-    this.access_file_overlay = new AccessFileOverlay(this.app, this.mod);
     this.file_upload_overlay = new FileUploadOverlay(this.app, this.mod);
   }
 
@@ -38,12 +36,12 @@ class VaultMain {
 
   attachEvents() {
     try {
-      document.querySelector('.vault-access-textlink').onclick = (e) => {
-        this.access_file_overlay.render();
-      };
-
       document.querySelector('#vault-secure-btn').onclick = (e) => {
         this.file_upload_overlay.render();
+      };
+
+      document.querySelector('#vault-access-link').onclick = (e) => {
+        this.mod.access_file_overlay.render();
       };
     } catch (err) {
       console.error('Vault main attachEvents error:', err);

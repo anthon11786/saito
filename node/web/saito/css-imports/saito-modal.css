@@ -1,317 +1,178 @@
 /*
-NOTE: the .saito-model class is a grid with two sectiions
-This alows for a header with a header with title to be added without extra CSS
+  SaitoModal — layout shell for pickers / menus.
+  Typography and control appearance inherit the Saito design system.
 */
 
-.saito-modal {
+.saito-modal,
+.saito-contacts,
+.saito-share-link,
+.saito-user-menu {
   min-width: 70rem;
   height: min-content;
   max-width: 80vw;
+  max-height: 95vh;
   padding: var(--border-padding-wide);
   display: grid;
-  grid-template-rows: min-content 1fr min-content; /* last item optional */
-  max-height: 95vh;
-  border: var(--border-thickness-thick) solid var(--border-color-general-dividers);
-  border-radius: var(--saito-border-radius);
-  background-image: url(/saito/img/tiled-logo.svg);
+  grid-template-rows: min-content 1fr min-content;
 }
 
 .saito-modal-title {
-  font-size: 3rem;
-  padding: unset;
-  padding-bottom: 0.5rem;
+  margin: 0;
+  padding-bottom: var(--saito-space-sm, 0.5rem);
   overflow: hidden;
   text-overflow: ellipsis;
-  color: var(--saito-font-color-heavy);
+  font-size: 2.5rem;
+  color: var(--saito-foreground);
 }
 
 .saito-modal-content {
   overflow: auto;
 }
 
-.saito-modal-share-link {
-  background-color: var(--saito-background-color);
+.saito-share-link {
+  background-color: var(--saito-background);
 }
 
 .saito-contact {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 1rem;
-  border-radius: var(--saito-border-radius);
-  padding: 0.5rem;
-  margin-top: 0.5rem;
+  gap: var(--saito-space-md);
+  margin-top: var(--saito-space-sm, 0.5rem);
+  padding: var(--saito-space-sm, 0.5rem);
+  border-radius: var(--saito-radius);
 }
 
-/* We want to trigger the click event on the container */
-
-.saito-contact .saito-user .saito-identicon-box,
-.saito-contact .saito-user .saito-userline,
-.saito-contact .saito-user .saito-address {
+/* Click events target the contact container, not nested user chrome */
+.saito-contact .saito-user {
   pointer-events: none;
 }
 
-.secure_contact_notice {
+.secure-contact-notice {
   position: absolute;
   left: 3rem;
   top: 0;
   z-index: 2;
-  color: var(--saito-font-color-light);
-  /* testing */
+  color: var(--saito-muted-foreground);
   text-shadow: 2px 2px 2px var(--saito-black);
 }
 
-.saito-contact.unconfirmed {
-  filter: brightness(0.7) grayscale(1);
-}
-
 .saito-modal-title + .saito-modal-content {
-  border-top: var(--border-thickness-thick) solid var(--border-color-general-dividers);
+  border-top: 3px solid var(--saito-border);
 }
 
 .saito-modal-content .saito-user {
   height: 5rem;
   align-items: center;
-  font-size: 20px;
 }
 
-.saito-modal .saito-modal-content .saito-user .saito-identicon-box {
+.saito-modal-content .saito-user .saito-identicon-box {
   width: 4.5rem;
   height: 4.5rem;
 }
 
-.saito-modal-menu .saito-modal-title .saito-user {
+.saito-user-menu .saito-modal-title .saito-user {
+  width: calc(100% - 2.5rem);
   height: 6rem;
   padding: 0 1.25rem;
-  cursor: default;
   align-items: center;
-  width: calc(100% - 2.5rem);
   white-space: nowrap;
+  cursor: default;
 }
 
-.saito-modal-menu .saito-modal-title .saito-user .saito-identicon-box {
+.saito-user-menu .saito-modal-title .saito-identicon-box {
   width: 5.5rem;
   height: 5.5rem;
 }
 
-/* saito-modal-menu
-/* theming for a simple menu with font-awesome icon and text in a two col grid */
+.saito-user-menu .saito-identicon-box {
+  cursor: default;
+}
 
+/* Menu options — layout + touch density; type from design tokens */
 .saito-modal-menu-option {
-  font-size: 3rem;
-  height: 6rem;
-  padding: 1.5rem 3rem;
   display: grid;
-  align-items: center;
-  grid-gap: 1rem;
   grid-template-columns: 4rem 1fr;
+  align-items: center;
+  gap: var(--saito-space-md);
+  height: 6rem;
+  margin-top: 0.25rem;
+  padding: 1.5rem 3rem;
+  border-radius: var(--saito-radius);
+  font-size: 2rem;
   cursor: pointer;
   position: relative;
-  border-radius: var(--saito-border-radius);
-  margin-top: 0.25rem;
 }
 
 .saito-modal-tagline {
-  margin-top: 0.5rem;
-  margin-bottom: 1rem;
+  margin: var(--saito-space-sm, 0.5rem) 0 var(--saito-space-md);
   font-style: italic;
 }
 
 .saito-modal-point {
-  font-size: 2rem;
-  padding: 0.5rem;
   display: grid;
-  align-items: center;
-  grid-gap: 2rem;
   grid-template-columns: 4rem 1fr;
+  align-items: center;
+  gap: var(--saito-space-lg);
+  padding: var(--saito-space-sm, 0.5rem);
+  font-size: 2rem;
 }
 
 .saito-modal-point i {
-  font-size: 3rem;
+  justify-self: center;
+  font-size: 2.5rem;
+}
+
+.saito-modal-menu-option > i,
+.saito-modal-menu-option > .saito-modal-menu-option-icon {
   justify-self: center;
 }
 
-.saito-modal-menu-option > i {
-  justify-self: center;
-  margin-right: 2rem;
+.saito-modal-menu-option-icon {
+  width: 2.5rem;
+  height: 2.5rem;
+  background: currentcolor;
+  -webkit-mask: var(--saito-menu-icon) center / contain no-repeat;
+  mask: var(--saito-menu-icon) center / contain no-repeat;
 }
 
-.saito-modal-menu-option > div {
-  float: left;
-  margin-right: 2rem;
-  font-size: 2rem;
-  vertical-align: middle;
-  margin-bottom: auto;
-  margin-top: auto;
-  line-height: 3rem;
-  height: 3rem;
-}
-
-.saito-modal-text-input {
-  margin-left: 3rem;
-  margin-right: 3rem;
-  width: 50rem;
-  max-width: 50rem;
-  margin-top: 0.75rem;
-}
-
-#saito-confirm-add-publickey {
-  background-color: var(--saito-white);
-  height: auto;
-  width: 30vh;
-  border-radius: 1.5rem;
-  padding: 2rem;
-}
-
-#saito-confirm-add-publickey .saito-identicon-box {
-  display: inline-block;
-  margin-left: 50%;
-  transform: translateX(-50%);
-  width: 8rem;
-  height: 8rem;
-}
-
-#saito-confirm-add-publickey > .saito-address {
-  width: 100%;
-  max-width: 100%;
-  overflow: inherit;
-  display: block;
-  height: auto;
-  word-break: break-word;
-  text-overflow: inherit;
-  white-space: break-spaces;
-  text-align: center;
-  margin-top: 5rem;
-  margin-bottom: 1rem;
-}
-
-#saito-confirm-add-publickey > .saito-contact-status {
-  text-align: center;
+.saito-modal-menu-option > div,
+.saito-modal-menu-option-label {
+  display: flex;
+  align-items: center;
+  min-width: 0;
 }
 
 .saito-modal-title .saito-user .saito-address {
-  font-size: 4rem;
-}
-
-.share-link {
-  color: var(--saito-font-color);
-}
-
-/* Exclusively for modal-add-user-confirm.template */
-
-.confirm-modal-wrapper {
-  font-size: 1.5em;
-  padding: 1.5em;
-  font-weight: bold;
-}
-
-.welcome-invite-box {
-  min-width: 200px;
-  min-height: 120px;
-  max-width: 325px;
-  padding: 10px;
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  font-size: 25px;
-  border: 1px solid var(--saito-border-color);
-  margin: 1em;
-}
-
-/* LIST SELECTION MODAL */
-
-.game-selection-list-overlay {
-  background-color: black;
-  /* testing, i have it as white locally. */
-  max-height: 90vh;
-  overflow-y: scroll;
-  font-size: 2rem;
-  min-width: 400px;
-}
-
-.selection-list li {
-  cursor: pointer;
-  border-bottom: 1px solid transparent;
-  padding: 10px 0px 10px 20px;
-  list-style: none;
-}
-
-.selection-list li:hover {
-  background-color: #33669999;
-  /* testing */
-}
-
-.selection-list li .tiptext {
-  width: fit-content;
-  background-color: #000a;
-  color: #ffffff !important;
-  min-width: 0px;
-  padding: 3px;
-  pointer-events: none;
-  top: 5px;
-  right: 0;
-}
-
-/* Exclusively for modal-add-user-confirm.template */
-
-.confirm-modal-wrapper {
-  font-size: 1.5em;
-  padding: 1.5em;
-  font-weight: bold;
-}
-
-.register-modal-controls {
-  display: flex;
-  flex-direction: row-reverse;
-  justify-content: space-between;
-  align-items: center;
-}
-
-#signup {
-  margin: 0;
-  width: 15px;
-  height: 21px;
+  font-size: 3.5rem;
 }
 
 .saito-overlaid-icon {
-  color: var(--saito-white);
   position: absolute;
   left: 34%;
   top: 34%;
-  background: #000a;
-  width: min(90%, 5rem);
-  height: min(90%, 5rem);
   display: flex;
   justify-content: center;
   align-items: center;
+  width: min(90%, 5rem);
+  height: min(90%, 5rem);
   border-radius: 50%;
-  border: 1px solid var(--saito-font-color);
+  border: 1px solid var(--saito-foreground);
+  background: var(--saito-secondary);
+  color: var(--saito-secondary-foreground);
 }
-
-/* Identicons aren't clickable in modals menus */
-
-.saito-modal-menu .saito-identicon-box {
-  cursor: default;
-}
-
-/* mobile modals */
 
 @media only screen and (max-width: 1000px) {
   .saito-modal {
+    width: 90vw;
     min-width: unset;
     max-width: unset;
-    padding: 1rem;
-    width: 90vw;
+    padding: var(--saito-space-md);
     grid-template-columns: 100%;
   }
+
   .saito-modal > * {
     max-width: 100%;
-  }
-  .modal-content-blank {
-    width: 100%;
-  }
-  i.fas.fa-arrow-right {
-    right: -1em;
   }
 }
 
@@ -319,18 +180,13 @@ This alows for a header with a header with title to be added without extra CSS
   .saito-modal-menu-option {
     margin: 0 1rem;
   }
-  .saito-modal-menu-option > i {
-    font-size: 2.2rem;
-  }
-  .saito-modal-menu-option > div {
-    font-size: 2rem;
-  }
 }
 
 @media only screen and (max-width: 525px) {
-  .saito-modal-menu .saito-modal-title .saito-user {
+  .saito-user-menu .saito-modal-title .saito-user {
     margin: 0;
   }
+
   .saito-modal-menu-option {
     margin: 0;
     padding: 1.5rem 1rem;
@@ -338,27 +194,28 @@ This alows for a header with a header with title to be added without extra CSS
 }
 
 .qr-share-overlay {
-  padding: 2rem;
-  border: var(--saito-border);
   width: max-content;
+  padding: var(--saito-space-lg);
+  border: var(--saito-border);
 }
 
 .qr-share-header {
-  font-size: 3rem;
   display: flex;
   justify-content: center;
+  font-size: 2.5rem;
 }
 
 #qr-share-link {
-  margin: 2rem;
+  margin: var(--saito-space-lg);
 }
 
-#qr-share-link img {
+#qr-share-link img,
+#qr-share-link svg {
   height: auto;
   max-width: 24rem;
   width: 24vh;
-  border: var(--border-thickness-medium) solid var(--saito-primary);
   padding: var(--border-padding-normal);
-  border-radius: var(--saito-border-radius);
-  background: var(--saito-background-color);
+  border: 2px solid var(--saito-primary);
+  border-radius: var(--saito-radius);
+  background: var(--saito-background);
 }

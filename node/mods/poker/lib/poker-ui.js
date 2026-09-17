@@ -55,10 +55,11 @@ class PokerUI {
     $('.game-playerbox-seat-1').appendTo('.mystuff');
 
     if (this.game.player == 0) {
-      this.observerControls.render();
-    } else {
-      this.observerControls.remove();
+      this.displayHand();
     }
+
+    // observer controls are for true spectators, not players or pending joiners
+    // if (this.game.player == 0 && !this.game.pending_join) {}
   }
 
   displayButton() {
@@ -81,7 +82,12 @@ class PokerUI {
 
   displayHand() {
     if (this.game.player == 0) {
-      this.updateStatus(`you are observing the game`, -1);
+      this.updateStatus(
+        this.game.pending_join
+          ? `Waiting to be dealt in -- you will join at the start of the next hand`
+          : `you are observing the game`,
+        -1
+      );
       return;
     }
 
@@ -107,12 +113,11 @@ class PokerUI {
   }
 
   //
-  // Updates the status / text information body of player box
+  // Updates the status / text information body of player box.
+  // With no player specified this is "my" box -- for a non-player viewer
+  // (game.player == 0) that is the viewer box in seat 1.
   //
-  displayPlayerNotice(msg, player) {
-    if (!player) {
-      return;
-    }
+  displayPlayerNotice(msg, player = this.game.player) {
     if (player == this.game.player) {
       this.playerbox.updateBody(
         `<div class="status" id="status"></div><div class="controls" id="controls"></div>`,

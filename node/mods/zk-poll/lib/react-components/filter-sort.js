@@ -1,10 +1,10 @@
 import React from 'react';
 import { Filter, SortDesc } from 'lucide-react';
 
-const FilterSort = ({ 
-  filterOptions, 
-  sortOption, 
-  onFilterChange, 
+const FilterSort = ({
+  filterOptions,
+  sortOption,
+  onFilterChange,
   onSortChange,
   onSearchChange,
   searchTerm
@@ -17,16 +17,16 @@ const FilterSort = ({
           <input
             type="text"
             placeholder="Search polls by description..."
-            className="filter-sort__search-input"
+            className="saito-input filter-sort__search-input"
             value={searchTerm}
             onChange={(e) => onSearchChange(e.target.value)}
           />
         </div>
-        
+
         {/* Filters and Sort */}
         <div className="filter-sort__controls">
-          <select 
-            className="filter-sort__select"
+          <select
+            className="saito-form-select filter-sort__select"
             value={filterOptions.status}
             onChange={(e) => onFilterChange('status', e.target.value)}
           >
@@ -35,9 +35,9 @@ const FilterSort = ({
             <option value="ended">Ended</option>
             <option value="not-started">Not Started</option>
           </select>
-          
+
           <select
-            className="filter-sort__select"
+            className="saito-form-select filter-sort__select"
             value={filterOptions.voteRange}
             onChange={(e) => onFilterChange('voteRange', e.target.value)}
           >
@@ -48,7 +48,7 @@ const FilterSort = ({
           </select>
 
           <select
-            className="filter-sort__select"
+            className="saito-form-select filter-sort__select"
             value={sortOption}
             onChange={(e) => onSortChange(e.target.value)}
           >

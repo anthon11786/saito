@@ -1,186 +1,231 @@
-.hud, .hud-long {
-	width: 55rem;
-	max-width: 100vw;
-	z-index: 50 !important;
-	padding: 3px 0 0 0;
-	height: auto;
-}
+.game.settlers {
+  .hud,
+  .hud-long {
+    width: 45.833rem;
+    max-width: 100vw;
+    z-index: 50;
+    padding: 3px 0 0 0;
+    height: auto;
+  }
 
-/* Wrapper for settlers status messages? */
+  /* Wrapper for settlers status messages? */
 
-.hud-header {
-	display: none;
-}
+  .hud-header {
+    display: none;
+  }
 
-.hud-body {
-	min-height: 12rem;
-	width: 100%;
-	display: flex;
-	flex-direction: column;
-	justify-content: space-around;
-	padding: 0 0 1rem;
-}
+  .hud-body {
+    min-height: 10rem;
+    width: 100%;
+    display: flex;
+    flex-direction: column;
+    justify-content: space-around;
+    padding: 0 0 0.833rem;
+  }
 
+  /* override default #efefef background */
 
-
-/* override default #efefef background */
-
-.hud-body .status {
+  .hud-body .status {
     background-color: transparent;
     box-shadow: none;
     padding: 0;
     width: 100%;
-    min-height: 15rem;
+    min-height: 12.5rem;
     display: flex;
     flex-direction: column;
     align-items: flex-start;
-    padding: 0.5rem 0.4rem 0.5rem 1.6rem;
-    gap: 0.75rem;
-}
+    padding: 0.417rem 0.333rem 0.417rem 1.333rem;
+    gap: 0.625rem;
+  }
 
-.hud-status-card-list{
-	display: flex;
-}
+  .hud-status-card-list {
+    display: flex;
+  }
 
+  /* hide scrollbars */
 
-/* hide scrollbars */
+  .hud .controls {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+    overflow-y: auto;
+    overflow-x: auto;
+    /*min-height: 3.75rem;*/
+    margin: 0.417rem;
+    padding: 0.375rem 0.5rem 0.542rem;
+    box-sizing: border-box;
+  }
 
-.hud .controls {
-	-ms-overflow-style: none;
-	scrollbar-width: none;
-	overflow-y: auto;
-	overflow-x: auto;
-	/*min-height: 4.5rem;*/
-	margin: 0.5rem;
-}
+  .hud .controls ul {
+    min-height: 6.25rem;
+    display: flex;
+    flex-direction: row;
+    justify-content: space-between;
+    gap: 0.833rem;
+    width: 100%;
+    min-width: max-content;
+    align-items: center;
+  }
 
-.hud .controls ul {
-	min-height: 7.5rem;
-	display: flex;
-	flex-direction: row;
-	justify-content: space-between;
-	gap: 1rem;
-	width: 100%;
-	align-items: center;
-}
+  .hud .controls ul li {
+    background: linear-gradient(180deg, #dfd4b6, #bda878);
+    padding: 0.458rem 0.333rem 0.375rem;
+    border: 3px solid #424143;
+    border-radius: 0.833rem;
+    list-style: none;
+    height: 5.833rem;
+    width: 5.833rem;
+    font-size: 2.167rem;
+    color: rgba(51, 24, 0, 0.35);
+    cursor: default;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 0.208rem;
+    opacity: 0.48;
+    position: relative;
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.35);
+    transition:
+      background 140ms ease,
+      box-shadow 140ms ease,
+      color 140ms ease,
+      opacity 140ms ease,
+      transform 140ms ease;
+  }
 
+  .hud .controls ul li#rolldice {
+    margin-left: 1.667rem;
+    width: 7.5rem;
+    overflow: hidden;
+  }
 
-.hud .controls ul li {
-	background-color: lightgray;
-	padding: 0.5rem;
-	border: 3px solid #424143;
-	border-radius: 1.5rem;
-	list-style: none;
-	height: 7rem;
-	width: 7rem;
-	font-size: 3rem;
-	color: darkgray;
-	cursor: default;
-}
+  .settlers-control-label {
+    font-size: 0.958rem;
+    line-height: 1;
+    text-transform: uppercase;
+    letter-spacing: 0;
+    font-weight: 700;
+  }
 
-.hud .controls ul li#rolldice {
-	margin-left: 2rem;
-	width: 9rem;
-	overflow: hidden;
-}
+  .hud .controls ul li i {
+    z-index: 2;
+  }
 
+  .animated-mask {
+    z-index: 1;
+    background-color: chocolate;
+  }
 
-.hud .controls ul li i {
-	z-index: 2;
-}
+  .hud .controls ul > div {
+    width: 5.833rem;
+  }
 
-.animated-mask {
-	z-index: 1;
-	background-color: chocolate;
-}
+  .hud .controls ul li.enabled {
+    background: linear-gradient(180deg, #f0df9a, #b79e76);
+    color: var(--text-color);
+    cursor: pointer;
+    opacity: 1;
+    box-shadow:
+      0 3px 8px rgba(0, 0, 0, 0.22),
+      inset 0 1px 0 rgba(255, 255, 255, 0.45);
+  }
 
-.hud .controls ul > div {
-	width: 7rem;
-}
+  .hud .controls ul li.enabled:hover {
+    background: linear-gradient(180deg, #f8e87c, #c7a969);
+    box-shadow:
+      0 5px 14px rgba(0, 0, 0, 0.28),
+      0 0 0 2px rgba(255, 255, 255, 0.45),
+      inset 0 1px 0 rgba(255, 255, 255, 0.55);
+    transform: translate(-1px, -1px);
+  }
 
-.hud .controls ul li.enabled {
-	background-color: #b79e76;
-	color: var(--text-color);
-	cursor: pointer;
-}
+  .hud .controls ul li.primary-action.enabled {
+    background: linear-gradient(180deg, #ffd45c, #b87527);
+    box-shadow:
+      0 4px 12px rgba(0, 0, 0, 0.3),
+      0 0 0 2px rgba(255, 212, 92, 0.38),
+      inset 0 1px 0 rgba(255, 255, 255, 0.5);
+  }
 
-.hud .controls ul li.enabled:hover {
-	background-color: #e2d26c;
-	filter: drop-shadow(2px 2px 2px var(--text-color));
-	transform: translate(-1px, -1px);
-	/*Trying a darker shade #cbaf83*/
-}
+  .hud .controls ul li.primary-action.enabled:hover {
+    background: linear-gradient(180deg, #ffe17e, #ca8530);
+  }
 
-/* rp updates */
+  /* rp updates */
 
-.hud {
-	overflow: visible;
-}
+  .hud {
+    overflow: visible;
+  }
 
-.player-notice img {
-	max-width: 45px;
-}
+  .player-notice img {
+    max-width: 45px;
+  }
 
-@media only screen and (max-width: 600px) and (orientation: portrait) {
-	.saitoa {
-		padding: 0.5rem;
-	}
+  @media only screen and (max-width: 600px) and (orientation: portrait) {
+    .saitoa {
+      padding: 0.417rem;
+    }
 
-	.hud{
-		margin-bottom: 0;
-	}
+    .hud {
+      margin-bottom: 0;
+    }
 
-	.hud-body {
-		width: calc(100% - 2rem);
-	}
+    .hud-body {
+      width: calc(100% - 1.667rem);
+    }
 
-	body .player-box {
-		height: auto !important;
-		width: 100% !important;
-		display: block !important;
-		top: 0px !important;
-		z-index: 200 !important;
-		max-width: 90vw;
-		margin-left: 5vw;
-		margin-right: 5vw;
-		margin-top: 5vw;
-	}
+    body .player-box {
+      height: auto;
+      width: 100%;
+      display: block;
+      top: 0px;
+      z-index: 200;
+      max-width: 90vw;
+      margin-left: 5vw;
+      margin-right: 5vw;
+      margin-top: 5vw;
+    }
 
-	.hud-body .controls ul {
-		gap: 0.5rem;
-	}
+    .hud .controls ul {
+      min-width: 0;
+      gap: 0.417rem;
+    }
 
-	.hud-body .controls ul li {
-		min-width: 10rem;
-		border-width: 2px;
-		padding: 0.25rem 0.5rem;
-	}
+    .hud .controls ul li {
+      flex: 1 1 0;
+      min-width: 0;
+      width: auto;
+      border-width: 2px;
+      padding: 0.208rem 0.417rem;
+      height: 5.417rem;
+      font-size: 2rem;
+    }
 
-	.controls {
-		margin-top: unset;
-	}
+    .controls {
+      margin-top: unset;
+    }
 
-	.hud .controls ul {
-		gap: 0.5rem;
-	}
+    .hud .controls ul li#rolldice {
+      margin-left: 0;
+      width: auto;
+    }
 
-	.hud .controls ul li#rolldice {
-		margin-left: 0.5rem;
-	}
+    .settlers-control-label {
+      font-size: 0.833rem;
+    }
+  }
 
-}
+  @media only screen and (max-height: 600px) and (orientation: landscape) {
+    .hud {
+      max-width: 50vw;
+      max-height: 50vh;
+      margin-bottom: 0.833rem;
+    }
 
-
-@media only screen and (max-height: 600px) and (orientation: landscape) {
-	.hud {
-		max-width: 50vw;
-		max-height: 50vh;
-		margin-bottom: 1rem;
-	}
-
-	.hud.hud-long {
-		left: unset;
-		transform: unset;
-		right: 2rem;
-	}
+    .hud.hud-long {
+      left: unset;
+      transform: unset;
+      right: 1.667rem;
+    }
+  }
 }

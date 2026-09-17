@@ -1,18 +1,59 @@
+/* Chat / bubble tokens — owned by saito-chat (not shared design-system API) */
+:root {
+  --saito-chat-background: var(--saito-background);
+  --saito-chat-background-image: var(--saito-card-wash);
+  --saito-chat-shell-background: var(--saito-card-wash);
+  --saito-bubble-background: linear-gradient(
+    145deg,
+    color-mix(in srgb, var(--saito-popover) 88%, transparent),
+    color-mix(in srgb, var(--saito-card) 80%, transparent)
+  );
+  --saito-bubble-shadow: var(--saito-elevation-0);
+  --saito-chat-active-background: var(--saito-accent);
+  --saito-chat-notification-gradient: linear-gradient(90deg, transparent, var(--saito-chart-2), transparent);
+}
+
+/*
+ * =============================================================================
+ * Saito Chat component — canonical reusable defaults
+ * File: web/saito/css-imports/saito-chat.css → bundled into /saito/saito.css
+ *
+ * Owns: manager list, floating/static popup, messages/bubbles, composer,
+ *       overlay chrome, Chat Settings (contact directory + prefs), and
+ *       component-level responsive behavior.
+ *
+ * Does NOT own: /chat page columns or splash → mods/chat/web/css/chat-base.css
+ *               /chat profile rail → mods/chat/web/css/chat-sidebar.css
+ *               RedSquare/Arcade embeds → those modules' CSS only
+ * =============================================================================
+ */
+
+/* --- Chat manager (conversation list) --- */
+
 .chat-manager {
   min-height: 25%;
   /*flex: 1;*/
   position: relative;
   display: grid;
-  grid-template-rows: 40px 1fr;
+  /* Content-sized header — avoid empty band under CHATS before the list */
+  grid-template-rows: auto 1fr;
   user-select: none;
+  background-color: var(--saito-chat-background);
+  background-image: var(--saito-chat-background-image);
 }
 
 .chat-manager .saito-userline {
   text-overflow: ellipsis;
   overflow: hidden;
-  width: 13rem;
+  width: 100%;
+  max-width: 100%;
   white-space: nowrap;
-  height: 1.8rem;
+  min-width: 0;
+  height: auto;
+  line-height: 1.55;
+  color: var(--saito-muted-foreground);
+  font-style: normal;
+  transition: color 0.2s;
 }
 
 .chat-manager .saito-userline .img-prev {
@@ -25,69 +66,77 @@
   display: flex;
   flex-direction: column;
   gap: 1rem;
-  border: 1px solid var(--saito-border-color);
-  border-radius: var(--saito-border-radius);
-  background-image: url(/saito/img/tiled-logo.svg);
-  background-color: var(--saito-background-color);
+  border: 1px solid var(--saito-border);
+  border-radius: var(--saito-radius);
+  background-image: var(--saito-chat-background-image);
+  background-color: var(--saito-chat-background);
 }
 
 .chat-popup-img-enhanced {
   max-height: 80vh;
   max-width: 95vw;
-  border: 1px solid var(--saito-border-color);
-  border-radius: var(--saito-border-radius);
+  border: 1px solid var(--saito-border);
+  border-radius: var(--saito-radius);
 }
 
 .chat-manager .saito-user {
-  padding: 0.75rem 0.5rem;
-  border-radius: var(--saito-border-radius);
+  grid-template-columns: min-content minmax(0, 1fr) min-content;
+  grid-template-rows: 2rem 1.8rem;
+  align-items: center;
+  column-gap: 1rem;
+  padding: 0.75rem 0.8rem;
+  border-radius: var(--saito-radius);
   overflow: hidden;
-  min-height: 4.5rem;
   cursor: pointer;
   transition:
     background-color 0.2s,
     color 0.2s;
+  min-height: 5rem;
+}
+
+.chat-manager .saito-address {
+  min-width: 0;
+  max-width: 100%;
+  align-self: end;
 }
 
 .chat-manager .chat-group-name {
-  transition: inherit;
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
-.chat-manager .saito-user:hover {
-  background-color: var(--saito-primary);
-  color: var(--saito-white);
-}
-
-.chat-manager .saito-user:hover .saito-userline,
-.chat-manager .saito-user:hover .saito-address {
+/* Hover from shared .saito-menu-select-heavy; keep secondary line in the active row. */
+.chat-manager .saito-user:hover .saito-userline {
   color: inherit;
 }
 
 .chat-manager-list {
-  gap: 0.5rem;
+  gap: 0.2rem;
   display: flex;
   flex-direction: column;
   min-height: 22rem;
   max-height: 100%; /*calc(100% - 5rem);*/
   position: relative;
+  margin-top: 0;
+  padding: 0;
 }
 
 .chat-manager-list .saito-address {
-  font-size: 1.5rem;
+  font-size: 1.45rem;
+  font-weight: 500;
   line-height: 1.8rem;
 }
 
 .chat-manager-list .saito-userline {
-  font-size: 1.5rem;
+  font-size: 1.32rem;
+  line-height: 1.55;
 }
 
-.chat-manager-list.saito-sidebar-element {
-  padding: 1rem;
-  border: var(--border-thickness-thin) solid var(--saito-border-color);
-}
 
 .new-notification {
-  background: linear-gradient(90deg, #0003 47%, var(--saito-primary), #0003 53%);
+  background: var(--saito-chat-notification-gradient);
   background-size: 300%;
   animation: notificationAnimation 1.8s ease;
 }
@@ -140,29 +189,29 @@
   display: block;
 }
 
-.chat-popup .link-preview {
+.chat-popup .saito-link-preview {
   max-width: 40rem;
 }
 
-.chat-popup .link-info {
+.chat-popup .saito-link-preview-info {
   padding: 1rem;
 }
 
-.chat-popup .saito-treated-link[data-link='local_link'] .link-img.has-picture {
+.chat-popup .saito-treated-link[data-link='local_link'] .saito-link-preview-img.has-picture {
   max-height: 10rem;
 }
 
 /* Chat teaser indicating said chat is open in a popup */
 .saito-chat-active {
-  background-color: color-mix(in srgb, var(--saito-gray-700) 27%, transparent);
-  color: var(--saito-font-color-secondary);
+  background-color: var(--saito-chat-active-background);
+  color: var(--saito-muted-foreground);
 }
 
 .chat-body blockquote {
   cursor: help;
 }
 
-/* Embedded chat container */
+/* --- Floating / embedded popup shell --- */
 
 .chat-static {
   height: 100%;
@@ -170,25 +219,24 @@
   position: relative;
 }
 
-.chat-static .chat-minimizer-icon,
-.chat-static .chat-maximizer-icon,
-.chat-static .chat-container-close,
-.chat-static .fa-comment-dots {
+/* Embedded/static chat: no floating window chrome */
+.chat-static .chat-header-nav {
   display: none;
 }
 
 .chat-container {
   position: fixed;
   bottom: 0px;
-  border: var(--border-thickness-thin) solid var(--saito-border-color);
-  background: var(--saito-background-color);
-  color: var(--saito-font-color);
+  border: 1px solid var(--saito-border);
+  background-color: var(--saito-popover);
+  background-image: var(--saito-popover-wash);
+  color: var(--saito-foreground);
   max-height: 100vh;
   min-width: 30rem;
   min-height: 20rem;
   height: 50rem;
   width: 36rem;
-  border-radius: var(--saito-border-radius);
+  border-radius: var(--saito-radius-lg);
   z-index: 20;
   /* making z-index greater than overlay so that users
      can chat or send each other their crypto address without
@@ -197,7 +245,7 @@
   /* So weird, at 15 it blocks the z-index 20 slide in menu*/
   /* reason: the slidein is child of saito header, so whatever z-index is assigned to saito header,
   the child (slidein menu) inherits it */
-  box-shadow: var(--saito-box-shadow);
+  box-shadow: var(--saito-elevation-3);
 }
 
 .chat-container,
@@ -208,7 +256,7 @@
 
 .chat-popup {
   display: grid;
-  grid-template-rows: min-content 1fr min-content;
+  grid-template-rows: min-content minmax(0, 1fr) min-content;
   grid-template-columns: 100%;
   align-items: center;
 }
@@ -222,9 +270,9 @@
 }
 
 .chat-container.minimized {
-  height: 3rem;
+  height: 2.5rem;
   min-height: unset;
-  grid-template-rows: 30px auto;
+  grid-template-rows: 2.5rem auto;
 }
 
 .chat-container.minimized .chat-body,
@@ -234,14 +282,6 @@
   overflow: hidden;
   padding: 0;
   opacity: 0;
-  /*
-  This works but is a little abrupt
-  display: none;
-  */
-}
-
-.chat-container.minimized .chat-header {
-  min-height: unset;
 }
 
 .chat-body img {
@@ -252,69 +292,66 @@
   width: 100%;
 }
 
+/* --- Header (single compact title row) --- */
+
+/* Single compact title bar: [title] [menu] [min][max][close] */
 .chat-header {
   z-index: inherit;
-  min-height: 6rem;
-  border-top-left-radius: inherit;
-  border-top-right-radius: inherit;
-  width: 100%;
-}
-
-.chat-header > .chat-header-nav {
   display: flex;
-  align-items: end;
-  justify-content: flex-end;
-  border-bottom: 1px solid var(--saito-border-color); /* border splitting the header on chat popup*/
+  align-items: center;
+  /* Compact chrome — sized to title/controls, not the taller composer band */
+  height: 2.5rem;
+  min-height: 2.5rem;
+  width: 100%;
   cursor: grab;
-  font-size: 1.7rem;
+  border-bottom: 1px solid var(--saito-border);
   border-top-left-radius: inherit;
   border-top-right-radius: inherit;
-  padding-left: 1rem;
-  overflow: hidden; /* for extreme border radius */
+  background-color: var(--saito-background);
+  overflow: hidden;
 }
 
-.chat-header > .chat-header-nav > i {
-  margin: 0;
-  color: var(--saito-font-color-heavy); /* popup-button colour */
-  font-size: 1.4rem;
-  display: inline-block;
-  position: relative;
-  transition: all 0.2s;
-  cursor: pointer;
-  padding: 0.5rem;
+.chat-container .chat-header {
+  background-color: var(--saito-popover);
+}
+
+.chat-details {
+  display: flex;
+  flex: 1 1 auto;
+  align-items: center;
+  gap: var(--saito-space-sm);
+  min-width: 0;
+  margin-left: var(--saito-space-md);
+}
+
+.chat-header-nav {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  align-self: stretch;
+}
+
+.chat-header-nav > i {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.5rem;
   height: 100%;
-  width: 2.4rem;
-  text-align: center;
+  margin: 0;
+  padding: 0;
+  color: var(--saito-foreground);
+  font-size: 1.2rem;
+  cursor: pointer;
+  transition: all 0.2s;
 }
 
-.chat-header > .chat-header-nav > i:hover {
+.chat-header-nav > i:hover {
   background-color: var(--saito-primary);
-  color: var(--saito-background-color);
+  color: var(--saito-primary-foreground);
 }
 
 .fix-me {
   cursor: pointer;
-}
-
-.chat-container.minimized .chat-header-nav {
-  align-items: center;
-  height: 3rem;
-}
-
-.chat-container.minimized .chat-header-nav > i {
-  padding: 0.8rem 0.5rem;
-}
-
-.chat-header-info {
-  height: 4rem;
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) min-content;
-  align-items: center;
-  box-shadow: 0px 2px 2px -2px; /* added some depth to the header here. Across all themes, but I feel it is necessary. */
-}
-
-.chat-container.minimized .chat-header-info {
-  display: none;
 }
 
 .chat-actions {
@@ -324,42 +361,31 @@
 
 .chat-action-icons {
   display: flex;
+  flex: 0 0 auto;
   flex-direction: row;
-  height: 100%;
   align-items: center;
-  font-size: 2rem;
-  color: var(--saito-font-color-heavy); /* ellipsis */
+  align-self: stretch;
+  color: var(--saito-foreground);
+  font-size: 1.25rem;
 }
 
 .chat-action-item,
 .chat-action-menu,
 .chat-mobile-back {
-  cursor: pointer;
-  height: 4rem;
-  width: 3.5rem;
   display: flex;
-  justify-content: center;
   align-items: center;
+  justify-content: center;
+  width: 2.5rem;
+  height: 100%;
+  cursor: pointer;
   transition: all 0.2s;
-}
-
-.chat-action-menu {
-  width: 3rem;
 }
 
 .chat-action-item:hover,
 .chat-action-menu:hover {
   background-color: var(--saito-primary);
-  color: var(--saito-background-color);
+  color: var(--saito-primary-foreground);
 }
-
-.chat-action-item:hover i,
-.chat-action-menu:hover i {
-}
-
-/*.chat-header > i:last-child:hover {
-  transform: rotate(90deg) scale(1.1);
-}*/
 
 .chat-header .chat-group {
   max-width: 100%;
@@ -367,74 +393,78 @@
   white-space: nowrap;
   text-overflow: ellipsis;
   cursor: default;
-  font-size: 1.7rem;
+  /* Window chrome — slightly above message body, not a page heading */
+  font-size: 1.35rem;
+  font-family: var(--saito-font-medium);
+  line-height: 1.3;
 }
 
 .chat-header .chat-group.saito-address {
   cursor: pointer;
 }
 
-.chat-header-nav .chat-details,
-.chat-header-info .chat-details {
-  display: flex;
-  flex-direction: row;
-  gap: 1rem;
-  margin-left: 1rem;
-  align-items: center;
-}
-
-.chat-header-nav .chat-details {
-  display: none;
-}
-
-.chat-header-nav .chat-details .chat-group {
-  max-width: 82%;
-}
-
-.chat-popup.minimized .chat-header .chat-header-nav .chat-details {
-  display: flex;
-}
-
 .chat-mobile-back {
   display: none;
-  font-size: 24px;
+  flex: 0 0 auto;
+  font-size: 1.25rem;
 }
 
+/* --- Message body, bubbles, avatars, timestamps --- */
+
 .chat-body {
-  padding: 1rem;
+  padding: 0.75rem;
   display: block;
   height: 100%;
+  min-height: 0;
   overflow: clip auto;
-  background-image: url(/saito/img/tiled-logo.svg);
-  background-color: var(--saito-background-color);
+  background-image: var(--saito-chat-background-image);
+  background-color: var(--saito-chat-background);
+}
+
+.chat-container .chat-body {
+  background-color: var(--saito-background);
+  background-image:
+    linear-gradient(
+      180deg,
+      transparent,
+      color-mix(in srgb, var(--saito-black) 18%, transparent)
+    ),
+    url('/saito/img/tiled-logo.svg');
 }
 
 .chat-body > .saito-user {
-  padding-bottom: 1.5rem;
+  /* Space between message groups (not bubble padding) */
+  padding-bottom: 1.1rem;
   cursor: default;
   grid-template-rows: min-content 1fr;
-  min-height: 5.5rem;
-  gap: 0 2rem;
+  min-height: 0;
+  gap: 0 0.75rem;
+}
+
+.chat-body > .saito-user:last-child {
+  padding-bottom: 0;
 }
 
 .chat-body .saito-user .saito-userline {
-  /* others messages*/
-  font-size: 1.6rem;
-  padding: 0.75rem;
-  padding-right: 3rem;
-  border-radius: 0.5rem 0.5rem 0.5rem 0;
-  background: var(--saito-background-color);
-  box-shadow: var(--saito-box-shadow);
-  margin-right: 1rem;
+  /* Compact UI body — not Saito prose --font-size-medium */
+  font-size: 1.25rem;
+  line-height: 1.35;
+  padding: 0.4rem 0.7rem;
+  border-radius: var(--saito-radius);
+  border: 1px solid var(--saito-border);
+  background: var(--saito-bubble-background);
+  box-shadow: var(--saito-bubble-shadow);
+  margin-right: 0.75rem;
   height: fit-content;
   overflow: visible;
 }
 
 .chat-body .saito-user > .saito-address {
-  margin-bottom: 0.5rem;
-  font-size: 1.4rem;
-  font-family: var(--saito-font);
-  color: var(--saito-font-color-light);
+  margin-bottom: 0.2rem;
+  font-size: 1.083rem;
+  font-family: var(--saito-font-medium);
+  line-height: 1.3;
+  color: var(--saito-muted-foreground);
 }
 
 .chat-body .saito-user-self.saito-user {
@@ -444,8 +474,7 @@
 
 /* self's messages -- inverse of other people's messages */
 .chat-body .saito-user-self.saito-user .saito-userline {
-  box-shadow: var(--saito-box-shadow);
-  border-radius: var(--saito-border-radius);
+  box-shadow: var(--saito-bubble-shadow);
 }
 
 /* hide my own name */
@@ -469,37 +498,27 @@
 
 .chat-body .saito-identicon-box {
   align-self: end;
-}
-
-.chat-manager .saito-userline {
-  color: var(--saito-font-color-secondary);
-  font-style: italic;
+  width: 3rem;
+  height: 3rem;
 }
 
 .saito-time-stamp {
-  font-size: 1.4rem;
+  font-size: 1.083rem;
+  line-height: 1.3;
   text-align: center;
-  color: var(--saito-font-color-secondary);
+  color: var(--saito-muted-foreground);
   font-style: italic;
-  margin: 3px 0;
+  margin: 0.35rem 0;
 }
 
 .saito-chat-notice {
-  color: var(--saito-font-color-secondary);
+  color: var(--saito-muted-foreground);
   font-style: italic;
-}
-
-.saito-chat-line-controls {
-  display: flex;
-  flex-direction: column;
-  justify-content: space-between;
-  align-items: center;
-  grid-row: span 2;
 }
 
 .chat-message-line {
   position: relative;
-  padding: 0.25rem;
+  padding: 0.15rem 0;
   word-wrap: anywhere;
   white-space: normal;
 }
@@ -507,6 +526,9 @@
 .chat-message-line p {
   overflow: hidden;
   height: min-content;
+  /* Defeat saito-base `p { font-size: medium }` inside bubbles */
+  font-size: inherit;
+  line-height: inherit;
 }
 
 .chat-message-line li {
@@ -519,7 +541,7 @@
 
 .chat-body .saito-userline {
   width: unset !important;
-  min-width: 10rem;
+  min-width: 0;
   max-width: 600px;
 }
 
@@ -531,9 +553,10 @@
   right: -5rem;
   bottom: 1; /* bumped it down a notch, and closer to the element */
   z-index: 9;
-  background: var(--saito-background-color);
-  border-radius: var(--saito-border-radius);
-  border: var(--border-thickness-thin) solid var(--saito-border-color);
+  background-color: var(--saito-popover);
+  background-image: var(--saito-popover-wash);
+  border-radius: var(--saito-radius);
+  border: 1px solid var(--saito-border);
   font-size: 1.1rem; /* made this way smaller, but this way access immediately below the line works better */
   opacity: 0; /* Initial opacity set to 0 for invisibility */
   transition: opacity 0.3s ease-in-out; /* Transition effect on opacity */
@@ -562,7 +585,7 @@
   bottom: 0;
   display: flex;
   width: 40px;
-  font-size: 1.3rem;
+  font-size: 1.1rem;
   font-weight: bold;
   align-items: center;
   gap: 0.25rem;
@@ -585,33 +608,58 @@
   cursor: pointer;
 }
 
+/* --- Composer / footer --- */
+
 .chat-footer {
-  min-height: 4.5rem;
+  min-height: 3rem;
   height: fit-content;
-  font-size: 2rem;
-  /*position: absolute;
-  bottom: 0;*/
+  font-size: 1.25rem;
   width: 100%;
   padding: 0;
   display: flex;
   flex-flow: row;
-  align-items: end;
+  align-items: center;
   z-index: 2;
-  border-top: 1px solid var(--saito-border-color);
+  border-top: 1px solid var(--saito-border);
   border-bottom-left-radius: inherit;
   border-bottom-right-radius: inherit;
-  background: var(--saito-background-color);
+  background: var(--saito-chat-shell-background);
   position: relative;
+}
+
+.chat-container .chat-footer {
+  background-color: var(--saito-popover);
+  background-image: none;
 }
 
 .chat-container blockquote {
   color: inherit;
-  line-height: 2.5rem;
-  margin: 0.5rem 0;
+  line-height: 1.35;
+  margin: 0.35rem 0;
 }
 
 .chat-footer .saito-emoji {
-  padding: 1.3rem 0.5rem;
+  top: 50%;
+  bottom: auto;
+  width: 3rem;
+  height: 3rem;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.25rem;
+  transform: translateY(-50%);
+}
+
+/* Footer is the composer surface — no nested bordered card */
+.chat-footer .saito-input .text-input:not(.post-tweet-textarea) {
+  min-height: 3rem;
+  border-color: transparent;
+  box-shadow: none;
+  padding: 0.5rem 0.75rem;
+  padding-right: 3rem;
+  font-size: 1.25rem;
+  line-height: 1.35;
 }
 
 /* This is the submit paper airplane icon */
@@ -621,12 +669,36 @@
   cursor: pointer;
   z-index: 2;
   transition: all 0.2s;
-  font-size: 2rem;
-  padding: 1.3rem 1rem 1.3rem 0.5rem;
+  font-size: 1.25rem;
+  align-content: center;
+  text-align: center;
+  width: 3rem;
+  height: 3rem;
 }
 
-.chat-footer i:hover {
-  transform: rotate(45deg);
+.chat-footer > .chat-input-submit.saito-button-mouse-over {
+  align-self: center;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 3rem;
+  height: 3rem;
+  padding: 0;
+  line-height: 1;
+}
+
+.chat-footer > .chat-input-submit:hover {
+  animation: saito-button-mouse-over-pulse 0.9s ease-in-out infinite;
+  transform: scale(1.06);
+}
+
+.chat-footer .saito-emoji:hover {
+  transform: translateY(-50%);
+}
+
+.chat-footer .selection-box-tabs i:hover,
+.chat-footer .saito-box-tab:hover {
+  transform: none;
 }
 
 .dockedLeft {
@@ -658,21 +730,7 @@
 }
 
 .remove_user:hover {
-  color: var(--saito-font-color-secondary);
-}
-
-.chat-main-container {
-  background-color: var(--saito-background-color);
-  background-image: url(/saito/img/tiled-logo.svg);
-}
-
-.chat-main-container .chat-body {
-  background-color: unset;
-  background-image: unset;
-}
-
-.chat-main-container .saito-sidebar.left {
-  background-color: var(--saito-background-color);
+  color: var(--saito-muted-foreground);
 }
 
 .saito-chat-button {
@@ -680,45 +738,32 @@
   width: fit-content;
   margin: auto;
   padding: 4px;
-  color: var(--saito-border-color);
+  color: var(--saito-border);
   font-style: italic;
   font-size: 1.4rem;
 }
 
 .saito-chat-button:hover {
-  font-style: unset;
-  color: var(--saito-font-color-heavy); /* testing */
+  font-style: normal;
+  color: var(--saito-foreground);
 }
 
-/* Mobile Overlay */
-
-.close-chat-manager {
-  margin-right: auto;
-  display: none;
-  position: relative;
-  height: 100%;
-}
-
-.chat-manager-overlay .close-chat-manager {
-  display: block;
-}
-
-.close-chat-manager i {
-  position: absolute;
-  left: 0;
-  top: 0;
-  padding: 0.6rem 1.1rem;
-  color: var(--saito-header-color);
-  background: var(--saito-header-background);
-  font-size: 24px;
-}
+/* --- Manager overlay / mobile menu (reusable outside /chat page) --- */
 
 .chat-manager-options {
-  height: 100%;
-  min-width: 40px;
   display: flex;
   align-items: center;
   justify-content: center;
+  border-radius: var(--saito-radius);
+  color: var(--saito-muted-foreground);
+  transition:
+    background-color 0.2s,
+    color 0.2s;
+}
+
+.chat-manager-options:hover {
+  background-color: color-mix(in srgb, var(--saito-card) 86%, var(--saito-accent));
+  color: var(--saito-foreground);
 }
 
 .chat-manager-overlay .chat-manager-header {
@@ -727,41 +772,60 @@
 }
 
 .chat-manager-overlay {
-  background-color: var(--saito-background-color); /* testing */
-  position: absolute;
+  background-color: var(--saito-popover);
+  position: fixed;
   left: 0;
   top: var(--saito-header-height);
   z-index: 90;
   width: 300px;
-  border: var(--border-thickness-thin) solid var(--saito-border-color);
-  box-shadow: var(--saito-box-shadow);
-  border-radius: var(--saito-border-radius);
+  border: 1px solid var(--saito-border);
+  box-shadow: var(--saito-elevation-3);
+  border-radius: var(--saito-radius);
   height: fit-content;
   overflow: hidden;
+}
+
+.chat-manager-overlay-content {
+  height: 100%;
+}
+
+.chat-manager-overlay-settings,
+.chat-manager-mobile-menu {
+  display: none;
+}
+
+.chat-manager-mobile-menu {
+  align-items: stretch;
+  gap: var(--saito-space-xs);
+  padding: var(--saito-space-md) 0
+    calc(var(--saito-space-md) + env(safe-area-inset-bottom, 0px));
+}
+
+.chat-manager-mobile-menu .item {
+  position: relative;
+  margin: 0;
+}
+
+.chat-manager-mobile-menu .item.active {
+  border-color: var(--saito-primary);
 }
 
 .floating-cm-overlay .chat-manager-header {
   cursor: grab;
 }
 
-.alternate-close-button,
-.floating-cm-overlay .chat-manager-options,
-.chat-manager-overlay.floating-cm-overlay .close-chat-manager {
-  display: none;
-}
-
-.chat-manager-overlay .chat-manager-list.saito-sidebar-element {
-  box-shadow: unset;
-  padding: unset;
-  border: unset;
-}
-
-.floating-cm-overlay .alternate-close-button {
+.alternate-close-button {
   display: flex;
   align-items: center;
   justify-content: center;
   height: 100%;
   width: 30px;
+}
+
+.chat-manager-overlay .chat-manager-list.saito-sidebar-element {
+  padding: 0;
+  border: 0;
+  background: transparent;
 }
 
 .chat-manager-overlay.floating-cm-overlay .chat-manager {
@@ -776,22 +840,17 @@
 .chat-popup.maximized .chat-maximizer-icon,
 .chat-popup.minimized .chat-minimizer-icon {
   background-color: var(--saito-primary);
-  color: var(--saito-background-color);
+  color: var(--saito-primary-foreground);
 }
 
 @media screen and (max-width: 720px) {
-  .chat-manager-overlay .chat-manager-title {
-    display: none;
-  }
-
   .chat-header i.chat-sizing-icon {
     display: none;
   }
 
-  .chat-header > .chat-header-nav > i.chat-container-close {
-    width: 4rem;
-    text-align: center;
-    font-size: 2.4rem;
+  .chat-header-nav > i.chat-container-close {
+    width: 2.5rem;
+    font-size: 1.25rem;
   }
 
   .chat-container,
@@ -805,68 +864,560 @@
 }
 
 @media screen and (max-width: 600px) {
-  .chat-manager-overlay {
-    top: 0;
-    height: 100vh;
-    height: calc(100 * var(--saito-vh));
+  .chat-manager-mobile-menu {
     width: 100vw;
-    max-height: -webkit-fill-available;
-    max-width: -webkit-fill-available;
-    border-radius: unset;
+    padding: 0;
+  }
+  .chat-manager-mobile-menu button {
+      scale: 0.8;
+  }
+
+  .chat-manager-overlay {
+    top: var(--chat-manager-overlay-top, var(--saito-header-height));
+    bottom: 0;
+    display: grid;
+    grid-template-rows: minmax(0, 1fr) auto;
+    height: auto;
+    width: 100vw;
+    max-height: none;
+    max-width: none;
+    border: 0;
+    border-radius: 0;
+    box-shadow: none;
+    background-color: var(--saito-background);
+  }
+
+  .chat-manager-overlay-content {
+    min-height: 0;
+    overflow: hidden;
   }
 
   .chat-manager-overlay .chat-manager {
-    margin-left: auto;
-    margin-right: auto;
-    min-height: 25rem;
+    min-height: 0;
     height: 100%;
-    grid-template-rows: var(--saito-header-height) 1fr;
+    grid-template-rows: auto minmax(0, 1fr);
   }
 
-  .chat-manager-overlay .close-chat-manager i {
-    width: 45px;
-    height: 70px;
-    font-size: 3rem;
-    padding: 2rem 0.8rem;
+  .chat-manager-overlay .chat-manager-list {
+    min-height: 0;
+    overflow-y: auto;
+    background-color: var(--saito-background);
+  }
+
+  .chat-manager-overlay-settings {
+    min-height: 0;
+    overflow-y: auto;
+    background-color: var(--saito-background);
+  }
+
+  .chat-manager-overlay[data-chat-overlay-view='settings'] .chat-manager-overlay-content {
+    display: none;
+  }
+
+  .chat-manager-overlay[data-chat-overlay-view='settings'] .chat-manager-overlay-settings {
+    display: block;
+  }
+
+  .chat-manager-overlay-view-title {
+    position: sticky;
+    top: 0;
+    z-index: 1;
+  }
+
+  .chat-manager-overlay-settings-content {
+    padding: var(--saito-space-md);
+  }
+
+  .chat-manager-mobile-menu {
+    display: flex;
+    justify-content: space-between;
   }
 
   .chat-container {
     margin: 0;
     min-width: unset;
     width: 100vw;
-    height: 100vh;
-    height: calc(100 * var(--saito-vh));
-    max-height: -webkit-fill-available;
+    height: var(--chat-viewport-height, 100dvh);
+    transition: none;
+    max-height: none;
     max-width: -webkit-fill-available;
     border-radius: 0;
+    background: var(--saito-background);
+    z-index: 91;
     /* For the keyboard */
-    right: 0;
-    bottom: 0;
-    top: 0;
-    left: 0;
+    right: 0 !important;
+    bottom: auto !important;
+    top: var(--chat-viewport-top, 0px) !important;
+    left: 0 !important;
   }
 
-  .chat-header > .chat-header-nav {
+  .chat-container .chat-header,
+  .chat-container .chat-footer,
+  .chat-container .chat-body {
+    background-color: var(--saito-background);
+  }
+
+  /* Full-screen chat: back + title + menu; hide window chrome */
+  .chat-header-nav {
     display: none;
-  }
-
-  .chat-header-info {
-    grid-template-columns: min-content minmax(0, 1fr) min-content;
   }
 
   .chat-mobile-back {
     display: flex;
-    margin: 1rem;
   }
 
   /* emoji-picker breaks this */
   .chat-manager-overlay + .chat-container {
-    height: 100vh;
-    height: calc(var(--saito-vh) * 100);
-    z-index: 90;
+    height: var(--chat-viewport-height, 100dvh);
+    transition: none;
+    z-index: 91;
+  }
+}
+
+/* --- Chat Settings / Contacts (reusable outside /chat page) --- */
+
+.chat-settings {
+  --chat-settings-panel-height: min(72vh, 56rem);
+  display: flex;
+  flex-direction: column;
+  height: var(--chat-settings-panel-height);
+  min-height: var(--chat-settings-panel-height);
+  max-height: var(--chat-settings-panel-height);
+  overflow: hidden;
+}
+
+.module-settings-overlay:has(.chat-settings) {
+  width: min(52rem, 95vw);
+}
+
+.chat-settings-stages {
+  display: flex;
+  align-items: stretch;
+  flex: 1 1 auto;
+  width: 200%;
+  min-height: 0;
+  height: 100%;
+  transition: transform 0.28s ease;
+  will-change: transform;
+}
+
+.chat-settings[data-chat-settings-stage='detail'] .chat-settings-stages {
+  transform: translateX(-50%);
+}
+
+.chat-settings.chat-settings-no-anim .chat-settings-stages {
+  transition: none;
+}
+
+.chat-settings-stage {
+  flex: 0 0 50%;
+  width: 50%;
+  min-width: 0;
+  min-height: 0;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: var(--saito-space-md);
+  overflow: hidden;
+}
+
+/* Title rides inside each stage so list ↔ detail slide as one panel */
+.chat-settings-panel-title {
+  flex: 0 0 auto;
+  margin: 0;
+  font-size: var(--font-size-large);
+  font-family: var(--saito-font-medium);
+  font-weight: normal;
+  line-height: 1.2;
+}
+
+/* Home: search + Add Contact as one control row (canonical Saito 3.6rem height) */
+.chat-settings-toolbar {
+  display: grid;
+  flex: 0 0 auto;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: var(--saito-space-sm);
+  align-items: center;
+  width: 100%;
+}
+
+.chat-settings-search-wrap {
+  display: grid;
+  grid-template-columns: 3.2rem minmax(0, 1fr);
+  align-items: center;
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
+  height: 3.6rem;
+  min-height: 3.6rem;
+  max-height: 3.6rem;
+  border: 1px solid var(--saito-border);
+  border-radius: var(--saito-radius);
+  background-color: var(--saito-secondary);
+  overflow: hidden;
+}
+
+.chat-settings-search-wrap > i {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--saito-muted-foreground);
+  pointer-events: none;
+  font-size: 1.4rem;
+}
+
+.chat-settings-search-wrap > .chat-settings-search,
+.chat-settings-search-wrap > input.saito-input.chat-settings-search {
+  width: 100%;
+  min-width: 0;
+  height: 100%;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  padding-top: 0;
+  padding-bottom: 0;
+  padding-left: var(--saito-space-xs);
+  padding-right: var(--saito-space-sm);
+  font-size: 1.6rem;
+  line-height: 1.2;
+}
+
+/*
+ * Add Contact: match search-field height exactly.
+ * Global .saito-button-secondary uses margin + vertical padding that made this
+ * button taller/detached; .compact only clears min-width, not vertical padding.
+ */
+.chat-settings-add-contact.saito-button-secondary,
+.chat-settings-add-contact {
+  box-sizing: border-box;
+  margin: 0;
+  align-self: center;
+  width: auto;
+  min-width: 0;
+  max-width: 100%;
+  height: 3.6rem;
+  min-height: 3.6rem;
+  max-height: 3.6rem;
+  padding-top: 0;
+  padding-bottom: 0;
+  padding-left: 1.2rem;
+  padding-right: 1.2rem;
+  line-height: 1.2;
+}
+
+/* Contact directory — fills remaining home height; prefs stay pinned below */
+.chat-settings-list {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  width: 100%;
+  min-height: 0;
+  overflow-y: auto;
+  border: 1px solid var(--saito-border);
+  border-radius: var(--saito-radius);
+}
+
+.chat-settings-empty {
+  flex: 1 1 auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--saito-space-lg);
+  color: var(--saito-muted-foreground);
+  text-align: center;
+}
+
+.chat-settings-contact {
+  display: grid;
+  grid-template-columns: 3.6rem minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--saito-space-sm);
+  width: 100%;
+  padding: var(--saito-space-sm) var(--saito-space-md);
+  border: 0;
+  border-bottom: 1px solid color-mix(in srgb, var(--saito-border) 70%, transparent);
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.chat-settings-contact:last-child {
+  border-bottom: 0;
+}
+
+.chat-settings-contact:hover,
+.chat-settings-contact:focus-visible {
+  background: color-mix(in srgb, var(--saito-primary) 12%, transparent);
+}
+
+.chat-settings-contact .saito-identicon,
+.chat-settings-contact .saito-identicon-box {
+  width: 3.6rem;
+  height: 3.6rem;
+}
+
+.chat-settings-contact-meta {
+  min-width: 0;
+}
+
+.chat-settings-contact-name {
+  display: flex;
+  align-items: center;
+  gap: var(--saito-space-xs);
+  font-family: var(--saito-font-medium);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chat-settings-contact-key {
+  color: var(--saito-muted-foreground);
+  font-family: var(--saito-font-monospace);
+  font-size: 0.92em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chat-settings-contact-secure {
+  color: var(--saito-primary);
+  font-size: 0.85em;
+}
+
+.chat-settings-contact-chevron {
+  color: var(--saito-muted-foreground);
+}
+
+/* Prefs under directory — list border is the divider; no extra rule line */
+.chat-settings-prefs-block {
+  display: flex;
+  flex: 0 0 auto;
+  flex-direction: column;
+  gap: var(--saito-space-md);
+  padding-top: var(--saito-space-sm);
+}
+
+.chat-settings-prefs-heading,
+.chat-settings-section-heading {
+  margin: 0;
+  font-family: var(--saito-font-medium);
+  font-size: 1.67rem;
+  font-weight: normal;
+  line-height: 1.2;
+}
+
+.chat-settings-prefs {
+  display: flex;
+  flex-direction: column;
+  gap: var(--saito-space-sm);
+}
+
+.chat-settings-pref {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  column-gap: var(--saito-space-sm);
+}
+
+.chat-settings-pref > .saito-checkbox,
+.chat-settings-pref > input.saito-checkbox[type='checkbox'] {
+  margin: 0;
+  justify-self: start;
+}
+
+.chat-settings-pref-label {
+  min-width: 0;
+  cursor: pointer;
+}
+
+/* Detail header: back + Contacts title (same title language as home stage) */
+.chat-settings-detail-header {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: var(--saito-space-sm);
+  min-width: 0;
+}
+
+.chat-settings-detail-header .chat-settings-panel-title {
+  min-width: 0;
+}
+
+.chat-settings-detail-scroll {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  gap: var(--saito-space-md);
+  min-height: 0;
+  overflow-y: auto;
+}
+
+/* Compact identity — RedSquare/profile name/key proportions, smaller avatar */
+.chat-settings-identity {
+  display: grid;
+  grid-template-columns: 3.2rem minmax(0, 1fr);
+  gap: var(--saito-space-sm);
+  align-items: center;
+}
+
+.chat-settings-identity .saito-identicon,
+.chat-settings-identity .saito-identicon-box {
+  width: 3.2rem;
+  height: 3.2rem;
+}
+
+.chat-settings-identity-meta {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+
+.chat-settings-identity-name {
+  display: block;
+  width: fit-content;
+  max-width: 100%;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--saito-foreground);
+  font-family: var(--saito-font-medium);
+  font-weight: 700;
+  font-size: 1.45rem;
+  line-height: 1.25;
+  text-align: left;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.chat-settings-identity-name:hover,
+.chat-settings-identity-name:focus-visible {
+  color: var(--saito-primary);
+}
+
+.chat-settings-identity-key-row {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  width: fit-content;
+  max-width: 100%;
+  min-width: 0;
+}
+
+.chat-settings-pubkey {
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--saito-font-monospace);
+  font-size: 1.25rem;
+  line-height: 1.35;
+  color: var(--saito-muted-foreground);
+}
+
+.chat-settings-identity-key-row .saito-profile-copy-key {
+  flex: 0 0 auto;
+}
+
+.chat-settings-section-divider {
+  border-top: 1px solid var(--saito-border);
+}
+
+.chat-settings-options-block,
+.chat-settings-encryption-block {
+  display: flex;
+  flex-direction: column;
+  gap: var(--saito-space-sm);
+}
+
+/* Contact actions — two columns on desktop detail panel; single column when narrow */
+.chat-settings-options {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  column-gap: var(--saito-space-sm);
+  row-gap: 0.15rem;
+  align-items: stretch;
+}
+
+/* Compact contact options — reuse menu option structure, denser than fullscreen modal */
+.chat-settings-options .saito-modal-menu-option {
+  height: auto;
+  min-height: 4.2rem;
+  margin-top: 0;
+  padding: var(--saito-space-sm) var(--saito-space-md);
+  font-size: inherit;
+  grid-template-columns: 2.8rem minmax(0, 1fr);
+  gap: var(--saito-space-sm);
+  min-width: 0;
+}
+
+.chat-settings-options .saito-modal-menu-option-label {
+  white-space: normal;
+  line-height: 1.25;
+}
+
+.chat-settings-option-danger,
+.chat-settings-option-danger .saito-modal-menu-option-label {
+  color: var(--saito-destructive, #e0524d);
+}
+
+/* Label/icon keep destructive color via the rule above; force white on heavy-select orange hover */
+.chat-settings-option-danger:hover,
+.chat-settings-option-danger:hover > i,
+.chat-settings-option-danger:hover .saito-modal-menu-option-label {
+  color: var(--saito-primary-foreground, #fff);
+}
+
+.chat-settings-option-danger:hover .saito-modal-menu-option-icon {
+  background: var(--saito-primary-foreground, #fff);
+}
+
+.chat-settings-encryption-note {
+  color: var(--saito-muted-foreground);
+  font-size: 0.92em;
+  line-height: 1.4;
+}
+
+.chat-settings-encryption-block .saito-button-secondary {
+  margin: var(--saito-space-xs) 0 0;
+  align-self: start;
+}
+
+@media (max-width: 600px) {
+  .module-settings-overlay:has(.chat-settings) {
+    width: 100%;
   }
 
-  .chat-header-info {
-    height: 6rem;
+  .chat-settings {
+    --chat-settings-panel-height: min(82vh, 56rem);
+  }
+
+  .chat-settings-add-contact.saito-button-secondary,
+  .chat-settings-add-contact {
+    padding-left: 1rem;
+    padding-right: 1rem;
+  }
+
+  .chat-settings-options {
+    grid-template-columns: 1fr;
+  }
+
+  .chat-settings-options .saito-modal-menu-option {
+    padding-left: var(--saito-space-sm);
+    padding-right: var(--saito-space-sm);
+  }
+}
+
+@media (min-width: 601px) {
+  .chat-settings-pubkey {
+    white-space: normal;
+    overflow-wrap: anywhere;
+    text-overflow: unset;
   }
 }

@@ -18,17 +18,33 @@ class SaitoRecover {
       this.modal_overlay.show(PhraseTemplate());
     }
 
-    document.querySelector('.saito-overlay-form-input').focus();
-
     this.attachEvents();
+    this.focusPrimaryInput();
+  }
+
+  focusPrimaryInput() {
+    let input =
+      document.getElementById('private-key-input') || document.getElementById('seed-phrase-input');
+    if (!input) {
+      return;
+    }
+    // Defer until overlay is painted so paste works without an extra click
+    requestAnimationFrame(() => {
+      input.focus({ preventScroll: true });
+    });
   }
 
   attachEvents() {
-    if (document.getElementById('private-key-submit')) {
-      document.getElementById('private-key-submit').onclick = (e) => {
-        let privatekey = document.getElementById('private-key-input').value;
-        this.loadPrivateKey(privatekey);
-      };
+    // Form submit covers both the Enter button and RETURN in the input
+    if (document.getElementById('private-key-input')) {
+      let form = document.getElementById('key-entry-template');
+      if (form) {
+        form.onsubmit = (e) => {
+          e.preventDefault();
+          let privatekey = document.getElementById('private-key-input').value;
+          this.loadPrivateKey(privatekey);
+        };
+      }
     }
 
     if (document.getElementById('seed-phrase-submit')) {

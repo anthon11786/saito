@@ -11,6 +11,14 @@ export default class Peer extends WasmWrapper<WasmPeer> {
     super(peer!);
   }
 
+  public get() {
+    return this.instance.get();
+  }
+
+  public get id(): bigint {
+    return this.instance.id;
+  }
+
   public get publicKey(): string {
     return this.instance.public_key;
   }
@@ -40,5 +48,14 @@ export default class Peer extends WasmWrapper<WasmPeer> {
   }
   public get status(): string {
     return this.instance.status;
+  }
+  public get host(): string {
+    return this.instance.host || "";
+  }
+  public get port(): number {
+    return this.instance.port || 0;
+  }
+  public get protocol(): string {
+    return this.instance.protocol || "";
   }
 }

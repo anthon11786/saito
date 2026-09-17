@@ -1,15 +1,16 @@
 module.exports = (app, mod) => {
   let html = `
-    <div class="nft-list-container">
+    <div class="saito-nft-list vault-nfts">
 
-      <div class="saito-overlay-form-header">
-        <div class="saito-overlay-form-header-title">NFT ACCESS KEYS</div>
+      <header class="saito-overlay-form-header">
+        <button type="button" class="create-nft-btn saito-button-square" data-vault-upload aria-label="Upload File"><i class="fa-solid fa-plus" aria-hidden="true"></i></button>
+        <h2 class="saito-overlay-form-header-title">VAULT ACCESS KEYS</h2>
+      </header>
+
+      <div class="nft-list" id="nft-list">
       </div>
 
-      <div class="nft-page">
-        <div class="nft-list" id="nft-list">
-        </div>
-      </div>
+      <div id="nft-list-instructions" class="nft-list-instructions"></div>
 
     </div>
   `;

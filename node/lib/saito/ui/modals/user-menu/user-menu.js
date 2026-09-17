@@ -2,9 +2,10 @@ const SaitoOverlay = require('../../saito-overlay/saito-overlay');
 const userMenuTemplate = require('./user-menu.template');
 
 class UserMenu {
-  constructor(app, publicKey) {
+  constructor(app, publicKey, options = {}) {
     this.app = app;
     this.user_publickey = publicKey;
+    this.options = options;
     this.overlay = new SaitoOverlay(app, null, true, true);
     this.callbacks = {};
   }
@@ -12,7 +13,7 @@ class UserMenu {
   async render() {
     let myPublicKey = await this.app.wallet.getPublicKey();
 
-    if (!this.app.wallet.isValidPublicKey(this.user_publickey)) {
+    if (!this.app.crypto.isPublicKey(this.user_publickey)) {
       console.warn('Invalid publicKey for User Menu!');
       return;
     }
@@ -24,22 +25,39 @@ class UserMenu {
       let mods = this.app.modules.mods;
 
       let index = 0;
+      let contactActionAdded = false;
       for (const mod of mods) {
         let item = mod.respondTo('user-menu', {
           publicKey: this.user_publickey
         });
         if (item instanceof Array) {
           item.forEach((j) => {
+            if (this.options.contactAction === 'delete' && j.text === 'Add Contact') {
+              j = this.returnDeleteContactItem();
+              contactActionAdded = true;
+            }
             let id = `user_menu_item_${index}`;
             thisobj.callbacks[id] = j.callback;
             thisobj.addMenuItem(j, id);
             index++;
           });
         } else if (item != null) {
+          if (this.options.contactAction === 'delete' && item.text === 'Add Contact') {
+            item = this.returnDeleteContactItem();
+            contactActionAdded = true;
+          }
           let id = `user_menu_item_${index}`;
           thisobj.callbacks[id] = item.callback;
           thisobj.addMenuItem(item, id);
         }
+        index++;
+      }
+
+      if (this.options.contactAction === 'delete' && !contactActionAdded) {
+        let id = `user_menu_item_${index}`;
+        let item = this.returnDeleteContactItem();
+        thisobj.callbacks[id] = item.callback;
+        thisobj.addMenuItem(item, id);
         index++;
       }
 
@@ -93,9 +111,31 @@ class UserMenu {
     });
   }
 
+  returnDeleteContactItem() {
+    return {
+      text: 'Delete Contact',
+      icon: 'fa-solid fa-user-minus',
+      callback: async (app, publicKey) => {
+        const confirmed = await sconfirm('Delete this contact?');
+        if (!confirmed) {
+          return;
+        }
+
+        app.keychain.removeKey(publicKey);
+        if (typeof this.options.onDelete === 'function') {
+          this.options.onDelete(publicKey);
+        }
+      }
+    };
+  }
+
   addMenuItem(item, id) {
+    const icon = item.image
+      ? `<span class="saito-modal-menu-option-icon" style="--saito-menu-icon: url('${item.image}')" aria-hidden="true"></span>`
+      : `<i class="${item.icon}" aria-hidden="true"></i>`;
+
     document.querySelector('#saito-user-menu .saito-modal-content').innerHTML += `
-          <div id="${id}" class="saito-modal-menu-option"><i class="${item.icon}"></i><div>${item.text}</div></div>
+          <div id="${id}" class="saito-modal-menu-option">${icon}<div class="saito-modal-menu-option-label">${item.text}</div></div>
         `;
   }
 }

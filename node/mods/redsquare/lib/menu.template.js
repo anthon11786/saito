@@ -1,45 +1,46 @@
-module.exports = (app, mod) => {
-	let html = `
+module.exports = (menu) => {
+  let badge = '';
 
- 	    <ul class="redsquare-menu saito-menu-select-subtle">
-		<li class="item redsquare-menu-home">
-	            <i class="fas fa-house"></i>
-	            <span>Home</span>
-		</li>
-		<li class="item redsquare-menu-notifications">
-	            <i class="fas fa-bell"></i>
-	            <span>Notifications</span>
-		</li>
-		<li class="item redsquare-menu-profile">
-	            <i class="fas fa-user"></i>
-	            <span>Profile</span>
-		</li>
-	`;
-	if (app.modules.returnModulesRespondingTo('saito-moderation-core')?.length) {
-		html += `
-		<li class="item redsquare-menu-settings">
-        	    <i class="fas fa-cog"></i>
-        	    <span>Settings</span>
-        	  </li>
-	  `;
-	}
-	if (mod.debug) {
-		html += ` 
-		<li class="item redsquare-menu-help">
-        	    <i class="fa-solid fa-question"></i>
-        	    <span>Debug</span>
-        	  </li>
+  if (menu.notification_count > 0) {
+    badge = `<span class="saito-notification-dot badge" aria-hidden="true">${menu.notification_count}</span>`;
+  }
 
-		`;
-	}
+  const chatItem = menu.has_chat
+    ? `
+        <li class="item" data-nav="chat">
+          <span class="icon">
+            <i class="fa-solid fa-comments"></i>
+          </span>
+          <span class="label">Chat</span>
+        </li>
+      `
+    : '';
 
-	html += `
-          </ul>
-          <button class="tweet-button">
-          	<i class="redsquare-tweet-icon fa-solid fa-pen"></i>
-			<span>Post</span>
-		  </button>
-  	`;
-
-	return html;
+  // Chat owns its UI; RedSquare only provides its desktop and mobile containers.
+  return `
+    <nav class="menu">
+      <ul class="list saito-menu-select-subtle">
+        <li class="item active" data-nav="home">
+          <span class="icon">
+            <i class="fa-solid fa-house"></i>
+          </span>
+          <span class="label">Home</span>
+        </li>
+        <li class="item" data-nav="notifications">
+          <span class="icon">
+            <i class="fa-solid fa-bell"></i>
+            ${badge}
+          </span>
+          <span class="label">Notifications</span>
+        </li>
+        ${chatItem}
+        <li class="item" data-nav="settings">
+          <span class="icon">
+            <i class="fa-solid fa-gear"></i>
+          </span>
+          <span class="label">Settings</span>
+        </li>
+      </ul>
+    </nav>
+  `;
 };

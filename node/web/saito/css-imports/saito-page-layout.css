@@ -20,13 +20,14 @@
 
 .saito-sidebar.left {
   position: sticky;
-  height: calc(100 * var(--saito-vh) - var(--saito-header-height));
+  height: calc(100dvh - var(--saito-header-height));
   top: 0;
   padding: 1.5rem 1rem 1rem 0.5rem;
   overflow: hidden;
   display: flex;
   flex-direction: column;
   gap: 1rem;
+  transition: height 0.3s;
 }
 
 .saito-sidebar.right {
@@ -42,32 +43,7 @@
   margin: 0;
 }
 
-.saito-sidebar-element {
-  /* side bar controls*/
-  padding: var(--border-padding-normal);
-  border-radius: var(--saito-border-radius);
-}
-
-.sidebar-header {
-  display: flex;
-  align-items: center;
-  font-size: 2rem;
-  justify-content: space-between;
-  min-height: 40px;
-  color: var(--saito-font-color-heavy);
-  text-transform: uppercase;
-  font-family: var(--saito-font);
-}
-
-.sidebar-header > div {
-  width: fit-content;
-  cursor: pointer;
-  transition: transform 0.4s;
-}
-
-.sidebar-header > div.sidebar-title {
-  cursor: default;
-}
+/* Sidebar header + .saito-sidebar-element → saito-sidebar.css */
 
 /* This should be handled module by module...
 @media screen and (max-width: 900px) {

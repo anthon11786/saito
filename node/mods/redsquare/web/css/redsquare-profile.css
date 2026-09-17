@@ -1,25 +1,67 @@
-.saito-profile {
-	display: flex;
-	flex-direction: column;
-	gap: 0.5rem;
-	max-width: 600px;
-	border: 1px solid var(--saito-border-color);
-	border-top: none;
+/* Red Square profile host — nav only.
+ * Card presentation lives in shared SaitoProfile (saito-profile.css).
+ */
+
+.redsquare-profile {
+  min-width: 0;
 }
 
-.saito-profile > .saito-profile-controls {
-	display: none;
+.redsquare-profile .saito-profile-footer:not(:empty) {
+  display: block;
 }
 
-.saito-profile-description.can-edit.empty .saito-description-edit {
-	border-bottom: 1px dashed;
-	width: fit-content;
-	margin-left: 1rem;
-	color: var(--saito-border-color);
-	font-weight: bold;
+.redsquare-profile .saito-profile-footer .nav,
+.redsquare-profile-nav {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(5.5rem, 1fr));
+  margin: 0;
+  padding: 0;
+  border-top: 1px solid var(--saito-border);
 }
 
-.saito-profile-description.can-edit .saito-profile-description p {
-	font-size: 1.5rem;
-	padding-right: 1.5rem;
+.redsquare-profile .saito-profile-footer .nav .item,
+.redsquare-profile-nav .item {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 0;
+  min-height: 3.8rem;
+  padding: 1rem 0.4rem;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  text-align: center;
+  text-decoration: none;
+  text-transform: capitalize;
+  font-size: 1.3rem;
+  font-weight: 600;
+  line-height: 1.2;
+  color: var(--saito-muted-foreground);
+}
+
+.redsquare-profile .saito-profile-footer .nav .item:hover,
+.redsquare-profile .saito-profile-footer .nav .item:focus-visible,
+.redsquare-profile-nav .item:hover,
+.redsquare-profile-nav .item:focus-visible {
+  color: var(--saito-foreground);
+  outline: none;
+}
+
+.redsquare-profile .saito-profile-footer .nav .item.active,
+.redsquare-profile-nav .item.active {
+  color: var(--saito-foreground);
+  text-decoration: none;
+}
+
+.redsquare-profile .saito-profile-footer .nav .item.active::after,
+.redsquare-profile-nav .item.active::after {
+  content: '';
+  position: absolute;
+  left: 18%;
+  right: 18%;
+  bottom: 0;
+  height: 0.25rem;
+  border-radius: 0.25rem 0.25rem 0 0;
+  background: var(--saito-primary);
 }

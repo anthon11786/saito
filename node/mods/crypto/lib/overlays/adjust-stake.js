@@ -2,154 +2,142 @@ const SaitoOverlay = require('./../../../../lib/saito/ui/saito-overlay/saito-ove
 const AdjustStakeTemplate = require('./adjust-stake.template');
 
 class AdjustStake {
-	constructor(app, mod) {
-		this.app = app;
-		this.mod = mod;
-		this.overlay = new SaitoOverlay(app, mod, false);
-	}
+  constructor(app, mod) {
+    this.app = app;
+    this.mod = mod;
+    this.overlay = new SaitoOverlay(app, mod, false);
+  }
 
-	async render(obj) {
-		if (obj?.accept_callback) {
-			this.accept_callback = obj.accept_callback;
-		}
-		if (obj?.reject_callback) {
-			this.reject_callback = obj.reject_callback;
-		}
+  bindSelectOnZeroFocus(input) {
+    if (!input) {
+      return;
+    }
 
-		this.min_stake = parseFloat(obj.stake.min);
-		this.match_stake = this.min_stake;
+    const selectIfZero = () => {
+      if (parseFloat(input.value) === 0) {
+        input.select();
+      }
+    };
 
-		let current_balance = Number(await this.app.wallet.returnPreferredCryptoBalance());
+    input.addEventListener('focus', selectIfZero);
+    input.addEventListener('click', selectIfZero);
+  }
 
-		this.max_stake = current_balance;
+  async render(obj) {
+    if (obj?.accept_callback) {
+      this.accept_callback = obj.accept_callback;
+    }
+    if (obj?.reject_callback) {
+      this.reject_callback = obj.reject_callback;
+    }
 
-		for (let i in obj.stake) {
-			if (parseFloat(obj.stake[i]) > this.match_stake) {
-				this.match_stake = parseFloat(obj.stake[i]);
-			}
-		}
+    this.min_stake = parseFloat(obj.stake.min);
+    this.match_stake = this.min_stake;
 
-		// Don't allow upping the ante
-		if (obj.game_mod?.opengame) {
-			this.max_stake = Math.min(current_balance, this.match_stake);
-		}
+    let current_balance = Number(await this.app.wallet.returnPreferredCryptoBalance());
 
-		this.ticker = obj.ticker;
+    this.max_stake = current_balance;
 
-		this.overlay.show(AdjustStakeTemplate(this.app, this), this.reject_callback);
-		this.overlay.blockClose('#enable_staking_yes');
-		this.attachEvents();
-	}
+    for (let i in obj.stake) {
+      if (parseFloat(obj.stake[i]) > this.match_stake) {
+        this.match_stake = parseFloat(obj.stake[i]);
+      }
+    }
 
-	attachEvents() {
-		let stake_input = document.getElementById('amount_to_stake_input');
-		if (!stake_input) {
-			return;
-		}
+    if (obj.game_mod?.opengame) {
+      this.max_stake = Math.min(current_balance, this.match_stake);
+    }
 
-		stake_input.onclick = (e) => {
-			stake_input.select();
-		};
+    this.ticker = obj.ticker;
 
-		let match_button = document.querySelector('.select_match');
-		if (match_button) {
-			if (!match_button.classList.contains('nomatch')) {
-				match_button.onclick = (e) => {
-					stake_input.value = this.match_stake;
-				};
-			}
-		}
+    this.overlay.show(AdjustStakeTemplate(this.app, this), this.reject_callback);
+    this.overlay.blockClose('#enable_staking_yes');
+    this.attachEvents();
+  }
 
-		let min_button = document.querySelector('.select_min');
-		if (min_button) {
-			min_button.onclick = (e) => {
-				stake_input.value = this.min_stake;
-			};
-		}
+  attachEvents() {
+    let stake_input = document.getElementById('amount_to_stake_input');
+    if (!stake_input) {
+      return;
+    }
 
-		let max_button = document.querySelector('.select_max');
-		if (max_button) {
-			max_button.onclick = (e) => {
-				stake_input.value = this.max_stake;
-			};
-		}
+    this.bindSelectOnZeroFocus(stake_input);
 
-		stake_input.onkeydown = async (e) => {
-			let amount = stake_input.value;
-			this.app.browser.validateAmountLimit(amount, e);
-		};
+    let match_button = document.querySelector('.select_match');
+    if (match_button && !match_button.classList.contains('nomatch')) {
+      match_button.onclick = (e) => {
+        stake_input.value = this.match_stake;
+      };
+    }
 
-		stake_input.oninput = async (e) => {
-			this.validateAmount();
-		};
+    let min_button = document.querySelector('.select_min');
+    if (min_button) {
+      min_button.onclick = (e) => {
+        stake_input.value = this.min_stake;
+      };
+    }
 
-		if (document.querySelector('#approve-crypto-request-container #enable_staking_yes')) {
-			document.querySelector('#approve-crypto-request-container #enable_staking_yes').onclick =
-				async (e) => {
-					if (!this.validateAmount()) {
-						return;
-					}
+    let max_button = document.querySelector('.select_max');
+    if (max_button) {
+      max_button.onclick = (e) => {
+        stake_input.value = this.max_stake;
+      };
+    }
 
-					let confirm = document.querySelector(
-						'#approve-crypto-request-container #approve-crypto-stake-confirm-input'
-					).checked;
+    stake_input.onkeydown = (e) => {
+      this.app.browser.validateAmountLimit(stake_input.value, e);
+    };
 
-					if (!confirm) {
-						salert('You need to confirm');
-						return;
-					}
+    stake_input.oninput = (e) => {
+      this.validateAmount();
+    };
 
-					let amount = parseFloat(stake_input.value);
+    document.querySelector('#enable_staking_yes').onclick = (e) => {
+      if (!this.validateAmount()) {
+        return;
+      }
 
-					if (this.accept_callback) {
-						this.accept_callback(amount);
-					}
-					this.overlay.close();
-				};
-		}
+      if (this.accept_callback) {
+        this.accept_callback(parseFloat(stake_input.value));
+      }
+      this.overlay.close();
+    };
 
-		if (document.querySelector('#approve-crypto-request-container #enable_staking_no')) {
-			document.querySelector('#approve-crypto-request-container #enable_staking_no').onclick = (
-				e
-			) => {
-				if (this.reject_callback) {
-					this.reject_callback();
-				}
-				this.overlay.close();
-			};
-		}
-	}
+    document.querySelector('#enable_staking_no').onclick = (e) => {
+      if (this.reject_callback) {
+        this.reject_callback();
+      }
+      this.overlay.close();
+    };
+  }
 
-	validateAmount() {
-		let amount = document.getElementById('amount_to_stake_input').value;
-		let input_err = document.querySelector('#stake-amount-error');
-		let errorMsg = '';
+  validateAmount() {
+    let amount = document.getElementById('amount_to_stake_input').value;
+    let input_err = document.querySelector('#stake-amount-error');
+    let errorMsg = '';
 
-		amount = parseFloat(amount);
+    amount = parseFloat(amount);
 
-		input_err.innerText = '';
-		input_err.style.display = 'none';
+    input_err.innerText = '';
+    input_err.style.display = 'none';
 
-		// Basic input
-		if (amount < 0) {
-			errorMsg = 'You need to select a non-negative value';
-		} else if (amount > this.max_stake) {
-			errorMsg = `You don't have that much to stake`;
-		} else if (amount < this.min_stake) {
-			errorMsg = `You need to stake at least ${this.min_stake}`;
-		}
+    if (amount < 0) {
+      errorMsg = 'You need to select a non-negative value';
+    } else if (amount > this.max_stake) {
+      errorMsg = `You don't have that much to stake`;
+    } else if (amount < this.min_stake) {
+      errorMsg = `You need to stake at least ${this.min_stake}`;
+    }
 
-		if (errorMsg) {
-			input_err.innerText = errorMsg;
-			input_err.style.display = 'block';
+    if (errorMsg) {
+      input_err.innerText = errorMsg;
+      input_err.style.display = 'block';
+      this.mod.validateBalance(amount, this.ticker);
+      return false;
+    }
 
-			this.mod.validateBalance(amount, this.ticker);
-
-			return false;
-		}
-
-		return true;
-	}
+    return true;
+  }
 }
 
 module.exports = AdjustStake;

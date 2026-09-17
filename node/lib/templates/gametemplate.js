@@ -74,10 +74,10 @@ const GameBoardSizer = require('./../saito/ui/game-board-sizer/game-board-sizer'
 const GameHexGrid = require('./../saito/ui/game-hexgrid/game-hexgrid');
 const GameAcknowledgeOverlay = require('./../saito/ui/game-acknowledge-overlay/game-acknowledge-overlay');
 const GameHelp = require('./../saito/ui/game-help/game-help');
-const GameScoreboard = require('./../saito/ui/game-scoreboard/game-scoreboard');
+const GameScoreBoard = require('./../saito/ui/game-scoreboard/game-scoreboard');
 const GameHammerMobile = require('./../saito/ui/game-hammer-mobile/game-hammer-mobile');
 const GameRaceTrack = require('./../saito/ui/game-racetrack/game-racetrack');
-const GameObserverControls = require('./../saito/ui/game-observer/game-observer');
+const GameObserver = require('./../saito/ui/game-observer/game-observer');
 
 const JSON = require('json-bigint');
 
@@ -86,23 +86,25 @@ class GameTemplate extends ModTemplate {
     super(app);
 
     this.name = 'Game';
+    this.is_game_template = true;
     this.game_length = 30; //Estimated number of minutes to complete a game
     this.game = {};
     this.moves = [];
     this.future = [];
+    this.deferred_game_end = []; // stopgame/gameover txs parked while engine halted/active
     this.description = 'Peer to peer gaming on the blockchain';
     this.endmoves = [];
     this.commands = [];
     this.game_state_pre_move = '';
 
-    this.social = {
+    this.social = this.buildSocial({
       creator: 'Saito Team',
       twitter: '@SaitoOfficial',
       title: this.returnName(),
-      url: 'https://saito.io/arcade/',
+      url: '/arcade/',
       description: this.description,
       image: 'https://saito.tech/wp-content/uploads/2023/11/arcade-300x300.png'
-    };
+    });
 
     this.recordOptions = {
       container: 'body',
@@ -181,11 +183,11 @@ class GameTemplate extends ModTemplate {
     this.menu = new GameMenu(app, this);
     this.hammer = new GameHammerMobile(app, this);
     this.sizer = new GameBoardSizer(app, this); //yes constructor
-    this.scoreboard = new GameScoreboard(app, this);
+    this.scoreboard = new GameScoreBoard(app, this);
     this.hexgrid = new GameHexGrid(app, this);
     this.overlay = new SaitoOverlay(app, this, false);
     this.acknowledge_overlay = new GameAcknowledgeOverlay(app, this);
-    this.observerControls = new GameObserverControls(app, this);
+    this.observerControls = new GameObserver(app, this);
     this.racetrack = new GameRaceTrack(app, this);
     this.game_help = new GameHelp(app, this);
 
@@ -275,7 +277,12 @@ class GameTemplate extends ModTemplate {
     // Want to handle SaitoTalk through the game menu -- not the saito-header
     this.disable_talk = true;
 
-    this.enable_observer = true;
+    // Observer (spectate / review) UI is disabled pending a rebuild of the
+    // GameObserver replay engine -- this flag gates the "watch game" / "review
+    // game" arcade buttons and the in-game Observer Link menu option. Flip back
+    // to true when the observer is functional again. (Does not affect the
+    // open-table join flow, which uses initializeObserverMode() directly.)
+    this.enable_observer = false;
 
     app.connection.on('update-username-in-game', () => {
       if (this.gameBrowserActive()) {
@@ -395,7 +402,9 @@ class GameTemplate extends ModTemplate {
 
   async render(app) {
     try {
+      document.documentElement.setAttribute('data-theme', 'lite');
       await super.render(app);
+      document.documentElement.setAttribute('data-theme', 'lite');
       app.connection.emit('set-relay-status-to-busy', {});
 
       if (this.header) {
@@ -412,7 +421,7 @@ class GameTemplate extends ModTemplate {
       //
       // try to fetch games moves if we have finished init
       //
-      if (this.game.step.game > 2) {
+      if (this.game?.step?.game > 2) {
         this.fetchRecentMoves();
       }
     } catch (err) {
@@ -479,12 +488,6 @@ class GameTemplate extends ModTemplate {
       return 0;
     }
 
-    console.log('[OBS_TRACE] initializeHTML() (first run)', {
-      game_player: this.game?.player,
-      game_id: this.game?.id?.substring?.(0, 12),
-      browser_active: this.browser_active
-    });
-
     //
     // Query server to make sure you know and remember your new friends names
     this.app.connection.emit('registry-fetch-identifiers-and-update-dom', this.game.players);
@@ -528,9 +531,7 @@ class GameTemplate extends ModTemplate {
       }
     }
 
-    if (this.game.player == 0) {
-      document.body.classList.add('observer-mode');
-    }
+    this.syncBodyGameClasses();
 
     //
     // load initial display preferences
@@ -560,9 +561,6 @@ class GameTemplate extends ModTemplate {
         } catch (_) {}
         return game_id === this.game.id;
       } catch (err) {
-        if (this.game?.player === 0) {
-          console.log('[OBS_TRACE] gameBrowserActive() catch', err?.message);
-        }
         return false;
       }
     }
@@ -572,24 +570,26 @@ class GameTemplate extends ModTemplate {
 
   async attachEvents(app) {
     if (this?.game?.id) {
-      console.log('[OBS_TRACE] attachEvents() calling initializeGameQueue', {
-        game_id: this.game.id?.substring?.(0, 12),
-        game_player: this.game?.player
-      });
       await this.initializeGameQueue(this.game.id);
     } else {
-      document.documentElement.setAttribute('data-theme', 'arcade');
+      document.documentElement.setAttribute('data-theme', 'lite');
 
-      let header = new SaitoHeader(this.app, this);
-      await header.initialize(this.app);
-      header.header_location = '/';
-
-      //document.querySelector("body").classList.add("scrollable-page");
-
-      if (document.getElementById('game-loader-screen')) {
+      //
+      // Splash/loader header only when the module has not already mounted one
+      // (e.g. N-WASM custom shell creates this.header in render) and the splash
+      // loader UI is actually present. Avoids a second SaitoHeader/SelectNFT
+      // and a duplicate saito-nft-list-render-request listener.
+      //
+      if (!this.header && document.getElementById('game-loader-screen')) {
+        let header = new SaitoHeader(this.app, this);
+        await header.initialize(this.app);
+        header.header_location = '/';
         await header.render();
         setTimeout(() => {
-          document.getElementById('game-loader-screen').remove();
+          let loader = document.getElementById('game-loader-screen');
+          if (loader) {
+            loader.remove();
+          }
         }, 1500);
         this.browser_active = false;
       }
@@ -759,10 +759,6 @@ class GameTemplate extends ModTemplate {
   async initializeObserverMode(tx, use_state = false) {
     let game_id = tx.signature;
     let txmsg = tx.returnMessage();
-    console.log('[OBS_TRACE] initializeObserverMode()', {
-      game_id: game_id?.substring?.(0, 12),
-      use_state
-    });
 
     // console.log(' !!!!!\n GT: OBSERVER MODE\n !!!!!\n', game_id, JSON.parse(JSON.stringify(txmsg)));
 
@@ -910,8 +906,8 @@ class GameTemplate extends ModTemplate {
       if (this.game.id && !this._observer_stub_bootstrap) this.saveGame(this.game.id);
     }
 
-    if (this.game?.player === 0 && this.observerControls) {
-      this.observerControls.initialize(this.game.id);
+    if (this.game?.player === 0 && this.observerControls && !this.game?.pending_join) {
+      //this.observerControls.initialize(this.game.id);
     }
 
     //
@@ -964,7 +960,7 @@ class GameTemplate extends ModTemplate {
         return;
       }
 
-      if (this.hasSeenTransaction(tx, Number(blk.id))) {
+      if (this.hasSeenTransaction(tx, blk)) {
         return;
       }
 
@@ -1011,10 +1007,14 @@ class GameTemplate extends ModTemplate {
       // gameover requests
       //
       if (txmsg.request === 'gameover') {
-        await this.receiveGameoverTransaction(blk, tx, conf, this.app);
+        if (!this.deferGameEndTransactionIfBusy('gameover', tx)) {
+          await this.receiveGameOverTransaction(blk, tx, conf, this.app);
+        }
       } else if (txmsg.request === 'stopgame') {
         // stopgame requests
-        await this.receiveStopGameTransaction(tx.from[0].publicKey, txmsg);
+        if (!this.deferGameEndTransactionIfBusy('stopgame', tx)) {
+          await this.receiveStopGameTransaction(tx.from[0].publicKey, txmsg);
+        }
       } else if (txmsg.request === 'game') {
         //
         // TODO - poker init fails if this is commented out
@@ -1033,14 +1033,6 @@ class GameTemplate extends ModTemplate {
           const asFuture =
             this?.treat_all_moves_as_future || this.isFutureMove(tx.from[0].publicKey, txmsg);
           const asNext = !asFuture && this.isUnprocessedMove(tx.from[0].publicKey, txmsg);
-          console.log('[OBS_TRACE] onConfirmation(game move)', {
-            step: txmsg?.step?.game,
-            game_player: this.game?.player,
-            asFuture,
-            asNext,
-            gaming_active: this.gaming_active,
-            halted: this.halted
-          });
 
           //
           // cache recently received move
@@ -1206,15 +1198,6 @@ class GameTemplate extends ModTemplate {
               this?.treat_all_moves_as_future ||
               this.isFutureMove(gametx.from[0].publicKey, gametxmsg);
             const asNext = !asFuture && this.isUnprocessedMove(gametx.from[0].publicKey, gametxmsg);
-            if (this.game?.player === 0) {
-              console.log('[OBS_TRACE] handlePeerTransaction(game relay gamemove)', {
-                step: gametxmsg?.step?.game,
-                asFuture,
-                asNext,
-                gaming_active: this.gaming_active,
-                halted: this.halted
-              });
-            }
 
             //
             // cache recently received move
@@ -1231,9 +1214,13 @@ class GameTemplate extends ModTemplate {
             }
           } else if (message.request == 'game relay update') {
             if (gametxmsg.request == 'gameover') {
-              await this.receiveGameoverTransaction(null, gametx, 0, app);
+              if (!this.deferGameEndTransactionIfBusy('gameover', gametx)) {
+                await this.receiveGameOverTransaction(null, gametx, 0, app);
+              }
             } else if (gametxmsg.request == 'stopgame') {
-              await this.receiveStopGameTransaction(gametx.from[0].publicKey, gametxmsg);
+              if (!this.deferGameEndTransactionIfBusy('stopgame', gametx)) {
+                await this.receiveStopGameTransaction(gametx.from[0].publicKey, gametxmsg);
+              }
             } else {
               this.receiveMetaMessage(gametx);
             }
@@ -1447,49 +1434,6 @@ class GameTemplate extends ModTemplate {
 
     let txmsg = tx.returnMessage();
 
-    if (txmsg.request == 'FOLLOW') {
-      this.addFollower(txmsg.my_key);
-
-      // Don't send myself an empty game state!
-      if (!tx.isFrom(this.publicKey)) {
-        let state = this?.cacheGame ? JSON.stringify(this.cacheGame) : '';
-        this.sendMetaMessage('SHARE', state);
-      }
-      return;
-    }
-
-    if (txmsg.request == 'SHARE') {
-      if (this.expecting_state) {
-        console.info('GT [Meta] Player shared last game state', tx.from[0].publicKey);
-        // console.debug(JSON.parse(JSON.stringify(this.game)));
-
-        if (txmsg?.data != '') {
-          this.game = JSON.parse(txmsg.data);
-          this.game.player = 0;
-          this.game.live = true;
-          this.saveGame(this.game.id);
-
-          this.app.connection.emit('arcade-game-ready-render-request', {
-            name: this.name,
-            slug: this.returnSlug(),
-            id: this.game.id
-          });
-
-          // So we only process once!
-          this.expecting_state = false;
-        } else {
-          this.initializeGameQueue(txmsg.game_id);
-        }
-      }
-
-      // Sanity check that everyone has the right people in the accepted[]
-      for (let i = 0; i < tx.to.length; i++) {
-        this.addFollower(tx.to[i].publicKey);
-      }
-
-      return;
-    }
-
     if (txmsg.request == 'CALL') {
       document.getElementById('start-group-video-chat').classList.add('notification');
       document.getElementById('start-group-video-chat').innerHTML = 'Join call';
@@ -1600,6 +1544,30 @@ class GameTemplate extends ModTemplate {
     }
 
     return 0;
+  }
+
+  //
+  // ask the arcade to show the "game ready / start game" lounge for this game
+  //
+  emitGameReadyRender() {
+    this.app.connection.emit('arcade-game-ready-render-request', {
+      name: this.name,
+      slug: this.returnSlug(),
+      id: this.game.id,
+      status: 'ready'
+    });
+  }
+
+  //
+  // keep the <body> game-state classes in sync with our seat. player 0 is a
+  // non-participant (observer or a table joiner waiting for a seat).
+  //
+  syncBodyGameClasses() {
+    if (!this.app.BROWSER || !document?.body) {
+      return;
+    }
+    document.body.classList.toggle('observer-mode', this.game?.player == 0);
+    document.body.classList.toggle('pending-join', !!this.game?.pending_join);
   }
 
   visibilityChange() {
@@ -1718,9 +1686,9 @@ class GameTemplate extends ModTemplate {
 
       console.log('INJECT GAME HTML:' + this.game.player);
 
-      if (this.game?.player === 0 && this.observerControls) {
+      if (this.game?.player === 0 && this.observerControls && !this.game?.pending_join) {
         console.log('and into observerControls...');
-        this.observerControls.render();
+        //this.observerControls.render();
       }
     }
     this.game_template_injected = 1;

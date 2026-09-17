@@ -1,4 +1,3 @@
-
 class SettlersGameloop {
   /*
    * Core Game Logic
@@ -52,8 +51,8 @@ class SettlersGameloop {
           img: '/settlers/img/welcome3.png',
           line1: 'where',
           line2: 'to place?',
-          id: 'welcome' ,
-	  duration: 5000
+          id: 'welcome',
+          duration: 5000
         });
 
         return 1;
@@ -98,7 +97,7 @@ class SettlersGameloop {
         if (this.gameOverCallback) {
           this.gameOverCallback();
         } else {
-          this.sendGameOverTransaction(this.game.players[winner]);
+          this.triggerGameOver(this.game.players[winner]);
         }
 
         return 0;
@@ -126,7 +125,8 @@ class SettlersGameloop {
         } else {
           $('.controls #playcard').addClass('enabled').addClass('flashme');
 
-          let lastcard = this.game.deck[0].cards[this.game.deck[0].hand[this.game.deck[0].hand.length - 1]];
+          let lastcard =
+            this.game.deck[0].cards[this.game.deck[0].hand[this.game.deck[0].hand.length - 1]];
 
           let html = `<span class="tip">${lastcard.title}
                         <div class="tiptext">${this.rules[lastcard.action]}</div>
@@ -201,7 +201,7 @@ class SettlersGameloop {
 
         //Move Bandit
         if (this.game.player == player) {
-          this.playerPlayBandit();
+          this.playerPlayBandit(false);
         } else {
           this.updateStatus(
             `${this.game.playerNames[player - 1]} played a ${cardname} and is moving the ${
@@ -1040,7 +1040,7 @@ class SettlersGameloop {
 
         //Move Bandit
         if (this.game.player == player) {
-          this.playerPlayBandit();
+          this.playerPlayBandit(true);
         } else {
           if (player == player_who_rolled) {
             this.updateStatus(

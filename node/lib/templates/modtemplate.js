@@ -1,7 +1,7 @@
 const fs = require('fs');
 const path = require('path');
 const HomePage = require('./index');
-const SaitoEvent = require('./../saito/ui/saito-calendar/saito-calendar-event-link');
+const SaitoCalendarEvent = require('./../saito/ui/saito-calendar/saito-calendar-event-link');
 
 const JSON = require('json-bigint');
 
@@ -23,6 +23,8 @@ class ModTemplate {
     this.categories = '';
     this.sqlcache = {};
     this.sqlcache_enabled = 0;
+    this.shortlinks_enabled = 0;
+    this.shortlink_cache = {};
     this.services = [];
     this.components = []; // modules or UI objects
     this.request_no_interrupts = false; // if you don't want your module to have other modules insert HTML components, you can request it here.
@@ -39,10 +41,7 @@ class ModTemplate {
     this.eventListeners = [];
 
     this.theme_options = {
-      lite: 'fa-solid fa-sun',
-      raven: 'fa-solid fa-crow',
-      dark: 'fa-solid fa-moon',
-      prism: 'fa-solid fa-gem'
+      dark: 'fa-solid fa-moon'
     };
 
     this.processedTxs = {};
@@ -67,6 +66,55 @@ class ModTemplate {
 
     this.publicKey = '';
     // this.darkModeToggler = new Toggler(app);
+  }
+
+  returnServerOrigin() {
+    const endpoint = this.app?.options?.server?.endpoint;
+
+    if (!endpoint?.protocol || !endpoint?.host) {
+      return '';
+    }
+
+    const protocol = endpoint.protocol.replace(/:$/, '');
+    const port = endpoint.port ? `:${endpoint.port}` : '';
+
+    return `${protocol}://${endpoint.host}${port}`;
+  }
+
+  resolveSocialUrl(value) {
+    if (typeof value !== 'string' || value === '') {
+      return value;
+    }
+
+    if (/^[a-z][a-z\d+.-]*:/i.test(value) || value.startsWith('//')) {
+      return value;
+    }
+
+    const origin = this.returnServerOrigin();
+
+    if (!origin) {
+      return value;
+    }
+
+    try {
+      return new URL(value, `${origin}/`).href;
+    } catch {
+      return value;
+    }
+  }
+
+  buildSocial(social = {}) {
+    const resolved = { ...social };
+
+    if (Object.prototype.hasOwnProperty.call(resolved, 'url')) {
+      resolved.url = this.resolveSocialUrl(resolved.url);
+    }
+
+    if (Object.prototype.hasOwnProperty.call(resolved, 'image')) {
+      resolved.image = this.resolveSocialUrl(resolved.image);
+    }
+
+    return resolved;
   }
 
   ////////////////////////////
@@ -119,6 +167,27 @@ class ModTemplate {
         }
       }
     }
+
+    await this.installShortlinkDatabase(app);
+  }
+
+  async installShortlinkDatabase(app) {
+    if (app.BROWSER === 1 || !this.shortlinks_enabled) {
+      return;
+    }
+
+    const fs = app.storage.returnFileSystem();
+    const template_sql = `${__dirname}/sql/shortlinks1.sql`;
+    const dbname = this.dbname || encodeURI(this.returnSlug());
+
+    if (fs?.existsSync(template_sql)) {
+      try {
+        const data = fs.readFileSync(template_sql, 'utf8');
+        await app.storage.executeDatabase(data, dbname);
+      } catch (err) {
+        console.error(`Error installing ${this.returnName()} shortlinks table:`, err);
+      }
+    }
   }
 
   static importFunctions() {
@@ -159,6 +228,23 @@ class ModTemplate {
       app.connection.on(this.events[i], (data) => {
         this.receiveEvent(this.events[i], data);
       });
+    }
+
+    //
+    // Modules can list their dependencies
+    // This checks and shows an error that if the dependent module is missing
+    // the module may not operate correctly
+    //
+    if (this.dependencies?.length) {
+      for (let om of this.dependencies) {
+        if (!this.app.modules.returnModule(om)) {
+          console.error(
+            `WARNING/ERROR : ${this.name} may not function correctly because ${om} not installed!!!`
+          );
+        } else {
+          //console.info(`${om} successfully installed for ${this.name}`);
+        }
+      }
     }
 
     //
@@ -217,6 +303,9 @@ class ModTemplate {
           this.db_tables.push(tablename);
         }
       }
+      if (this.enable_shortlinks) {
+        this.db_tables.push('shortlinks');
+      }
     }
 
     if (this.appname === '') {
@@ -263,7 +352,7 @@ class ModTemplate {
         this.app.crypto.base64ToString(this.app.browser.returnURLParameter('event'))
       );
       if (!this?.eventOverlay) {
-        this.eventOverlay = new SaitoEvent(this.app, this, event);
+        this.eventOverlay = new SaitoCalendarEvent(this.app, this, event);
         this.eventOverlay.render();
       }
     }
@@ -485,6 +574,246 @@ class ModTemplate {
         return;
       });
     }
+  }
+  registerShortLinkRoutes(app, expressapp, express) {
+    if (!this.shortlinks_enabled) {
+      return;
+    }
+
+    expressapp.get('/' + this.returnSlug() + '/s/:code', async (req, res) => {
+      const user_agent = (req.headers['user-agent'] || '').toLowerCase();
+      const is_bot =
+        /bot|crawler|spider|facebookexternalhit|twitterbot|slackbot|discordbot|linkedinbot|telegrambot|whatsapp/i.test(
+          user_agent
+        );
+      const dbname = this.dbname || this.returnSlug();
+      const rows = await this.app.storage.queryDatabase(
+        `SELECT * FROM shortlinks WHERE shortlink = $code LIMIT 1`,
+        {
+          $code: req.params.code
+        },
+        dbname
+      );
+
+      if (!rows || rows.length === 0) {
+        res.redirect(302, '/' + this.returnSlug());
+        return;
+      }
+
+      const row = rows[0];
+      const now = Date.now();
+
+      //
+      // bots get Open Graph
+      //
+      if (is_bot) {
+        let social = this.social || {};
+
+        try {
+          const resolvedSocial = await this.returnShortLinkSocial(row, req);
+
+          if (resolvedSocial) {
+            social = { ...social, ...resolvedSocial };
+          }
+        } catch (err) {
+          console.error(`${this.returnName()} shortlink metadata lookup failed:`, err);
+        }
+
+        const title = row.title || social.title || this.returnName();
+
+        const description = social.description || '';
+
+        const image = social.image || '';
+
+        const url = `${req.protocol}://${req.get('host')}${req.originalUrl}`;
+
+        const escapeHTML = (value) => this.app.browser.escapeHTML(String(value || ''));
+        const escapedTitle = escapeHTML(title);
+        const escapedDescription = escapeHTML(description);
+        const escapedImage = escapeHTML(image);
+        const escapedUrl = escapeHTML(url);
+
+        res.send(`
+		<!DOCTYPE html>
+			<html>
+			<head>
+				<meta charset="utf-8">
+				<title>${escapedTitle}</title>
+
+				<meta property="og:title" content="${escapedTitle}">
+				<meta property="og:description" content="${escapedDescription}">
+				<meta property="og:image" content="${escapedImage}">
+				<meta property="og:url" content="${escapedUrl}">
+				<meta property="og:type" content="website">
+
+				<meta name="twitter:card" content="summary_large_image">
+				<meta name="twitter:title" content="${escapedTitle}">
+				<meta name="twitter:description" content="${escapedDescription}">
+				<meta name="twitter:image" content="${escapedImage}">
+
+			</head>
+
+			<body>
+				${escapedTitle}
+			</body>
+
+		</html>
+	  `);
+
+        return;
+      }
+
+      if (row.expires_at > 0 && row.expires_at < now) {
+        res.status(404).send('Shortlink expired');
+        return;
+      }
+
+      if (row.max_uses > 0 && row.uses >= row.max_uses) {
+        res.status(404).send('Shortlink has expired');
+        return;
+      }
+
+      await this.app.storage.runDatabase(
+        `UPDATE shortlinks SET uses = uses + 1 WHERE shortlink = $code`,
+        {
+          $code: row.shortlink
+        },
+        dbname
+      );
+
+      res.redirect(302, row.link);
+    });
+  }
+
+  // Modules with content-specific links may override the default social card.
+  async returnShortLinkSocial(row, req) {
+    return null;
+  }
+
+  //
+  // createShortLink
+  //
+  // Requests a shortlink from the server that served this page.
+  // Returns the shortened URL on success or the original URL on failure.
+  //
+  async createShortLink(longUrl) {
+    if (!this.shortlinks_enabled || !this.app.BROWSER) {
+      return longUrl;
+    }
+
+    if (this.shortlink_cache[longUrl]) {
+      return this.shortlink_cache[longUrl];
+    }
+
+    if (!longUrl || typeof longUrl !== 'string') {
+      return longUrl;
+    }
+
+    let serving_peer = null;
+
+    try {
+      let page_host = window.location.hostname.toLowerCase();
+      let page_port = window.location.port;
+      if (!page_port) {
+        page_port = window.location.protocol === 'https:' ? '443' : '80';
+      }
+      const peers = await this.app.network.getPeers();
+      for (let i = 0; i < peers.length; i++) {
+        const p = peers[i];
+        if (p.status !== 'connected' || !p.publicKey) {
+          continue;
+        }
+
+        let peer_host = String(p.host || '').toLowerCase();
+        let peer_port = String(p.port || '');
+        let peer_protocol = p.protocol;
+
+        // The advertised endpoint may name a backend behind a reverse proxy.
+        // Prefer the URL we actually connected to when identifying the page server.
+        const connection_url = p.get?.()?.url;
+        if (connection_url) {
+          try {
+            const url = new URL(connection_url);
+            if (!['ws:', 'wss:', 'http:', 'https:'].includes(url.protocol)) {
+              continue;
+            }
+            peer_host = url.hostname.toLowerCase();
+            peer_port = url.port;
+            peer_protocol = ['wss:', 'https:'].includes(url.protocol) ? 'https' : 'http';
+          } catch (err) {
+            continue;
+          }
+        }
+
+        if (!peer_port || peer_port === '0') {
+          peer_port = peer_protocol === 'https' ? '443' : '80';
+        }
+        const host_match =
+          peer_host === page_host ||
+          ((peer_host === 'localhost' || peer_host === '127.0.0.1') &&
+            (page_host === 'localhost' || page_host === '127.0.0.1'));
+        if (host_match && peer_port === String(page_port)) {
+          serving_peer = p;
+          break;
+        }
+      }
+    } catch (err) {
+      serving_peer = null;
+    }
+
+    if (!serving_peer) {
+      return longUrl;
+    }
+
+    const request = this.name.toLowerCase() + ' create shortlink';
+
+    return await Promise.race([
+      new Promise((resolve) => {
+        this.app.network.sendRequestAsTransaction(
+          request,
+
+          {
+            link: longUrl,
+            title: '',
+            expires_at: 0,
+            max_uses: 0,
+            uses: 0
+          },
+
+          (res) => {
+            if (!res || res.err || !res.shortlink || !res.shortlink.startsWith('/')) {
+              resolve(longUrl);
+              return;
+            }
+            this.shortlink_cache[longUrl] = window.location.origin + res.shortlink;
+            resolve(window.location.origin + res.shortlink);
+          },
+          serving_peer.publicKey
+        );
+      }),
+
+      new Promise((resolve) => {
+        setTimeout(() => resolve(longUrl), 8000);
+      })
+    ]);
+  }
+  async pruneShortLinks() {
+    if (!this.shortlinks_enabled) {
+      return;
+    }
+
+    const dbname = this.dbname || this.returnSlug();
+    const cutoff = Date.now() - 7 * 24 * 60 * 60 * 1000;
+    await this.app.storage.runDatabase(
+      `
+        DELETE FROM shortlinks
+        WHERE created_at < $cutoff
+      `,
+      {
+        $cutoff: cutoff
+      },
+      dbname
+    );
   }
 
   //
@@ -717,6 +1046,111 @@ class ModTemplate {
         }
 
         return 0;
+      }
+    }
+
+    //
+    // shortlinks — create
+    //
+    if (this.shortlinks_enabled) {
+      const expected_request = this.name.toLowerCase() + ' create shortlink';
+
+      if (txmsg?.request === expected_request) {
+        console.log('### SHORTLINK REGISTRATION ####');
+        console.log('### SHORTLINK REGISTRATION ####');
+        console.log('### SHORTLINK REGISTRATION ####');
+
+        if (!mycallback) {
+          return 0;
+        }
+
+        const data = txmsg.data || {};
+
+        if (!data.link || typeof data.link !== 'string') {
+          mycallback({
+            err: 'invalid_link',
+            shortlink: '',
+            code: '',
+            expires_at: 0
+          });
+          return 1;
+        }
+
+        const dbname = this.dbname || this.returnSlug();
+        console.log('dbname: ');
+
+        const response = {
+          err: 'insert_failed',
+          shortlink: '',
+          code: '',
+          expires_at: Number(data.expires_at) || 0
+        };
+
+        for (let attempt = 0; attempt < 5; attempt++) {
+          console.log('ATTEMPT !!!!!');
+          const code = Math.random().toString(36).substring(2, 10);
+          try {
+            await this.app.storage.runDatabase(
+              `INSERT INTO shortlinks (
+                id,
+                shortlink,
+                link,
+                title,
+                creator,
+                created_at,
+                expires_at,
+                max_uses,
+                uses
+              ) VALUES (
+                $id,
+                $shortlink,
+                $link,
+                $title,
+                $creator,
+                $created_at,
+                $expires_at,
+                $max_uses,
+                $uses
+              )`,
+              {
+                $id: code,
+                $shortlink: code,
+                $link: data.link,
+                $title: data.title || '',
+                $creator: peer?.publicKey || '',
+                $created_at: Date.now(),
+                $expires_at: response.expires_at,
+                $max_uses: Number(data.max_uses) || 0,
+                $uses: Number(data.uses) || 0
+              },
+
+              dbname
+            );
+
+            response.err = '';
+            response.code = code;
+            response.shortlink = '/' + this.returnSlug() + '/s/' + code;
+
+            console.log('break!');
+            break;
+          } catch (err) {
+            // collision or insert failure, retry
+            console.log('collusion or insert failure!!!!!');
+          }
+        }
+
+        mycallback(response);
+
+        this.shortlink_prune_counter++;
+
+        if (this.shortlink_prune_counter >= 100) {
+          this.shortlink_prune_counter = 0;
+          this.pruneShortLinks().catch((err) => {
+            console.error(err);
+          });
+        }
+
+        return 1;
       }
     }
 
@@ -1091,7 +1525,12 @@ class ModTemplate {
     });
   }
 
-  hasSeenTransaction(tx, blk_id = 0) {
+  hasSeenTransaction(tx, blk = null) {
+    let blk_id = 0;
+    if (blk && blk.id !== undefined && blk.id !== null) {
+      blk_id = Number(blk.id);
+    }
+
     let hashed_data = this.name + tx.signature;
     if (this.processedTxs[hashed_data] !== undefined) {
       if (this.processedTxs[hashed_data]) {

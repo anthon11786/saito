@@ -53,17 +53,56 @@ class Storage {
         return;
       }
     }
-    const response = await fetch(`/options`);
+    const response = await fetch('/options');
     let receivedOptions = await response.json();
+    const logPeers = (source: string) => {
+      const peers = this.app.options?.peers;
+      const n = Array.isArray(peers) ? peers.length : 0;
+      const first = n > 0 ? peers[0] : null;
+      const wsHint =
+        first && first.host != null && first.port != null && first.protocol != null
+          ? `${first.protocol === 'https' ? 'wss' : 'ws'}://${first.host}:${first.port}/wsopen`
+          : null;
+      const hasUrl = !!wsHint;
+      const willConnect = n > 0 && hasUrl;
+      console.log('[SAITO OPTIONS] peer list after loadOptions', {
+        source,
+        peerCount: n,
+        derivedWebSocketUrl: wsHint,
+        hasWebSocketUrl: hasUrl,
+        wasmWillAttemptConnect: willConnect,
+        firstPeer: first ? { ...first } : null
+      });
+      if (!willConnect) {
+        console.log(
+          '[SAITO OPTIONS] WASM will not open outbound sockets (no peers or incomplete host/port/protocol).'
+        );
+      }
+    };
     if (typeof Storage !== 'undefined') {
       const data = localStorage.getItem('options');
       if (data != 'null' && data != null) {
         this.app.options = JSON.parse(data);
         this.app.options.consensus = receivedOptions.consensus;
+        this.app.options.defaultModule = receivedOptions.defaultModule;
+        // Cached wallet previously only refreshed consensus from the server; peers stayed
+        // whatever was in localStorage (often []). Core builds ws://…/wsopen from peers[].
+        const cachedPeers = this.app.options.peers;
+        const cachedEmpty = !Array.isArray(cachedPeers) || cachedPeers.length === 0;
+        const serverPeers = receivedOptions.peers;
+        const serverHasPeers = Array.isArray(serverPeers) && serverPeers.length > 0;
+        if (cachedEmpty && serverHasPeers) {
+          console.log(
+            '[SAITO OPTIONS] localStorage had no peers; merging peers[] from GET /options'
+          );
+          this.app.options.peers = serverPeers;
+        }
+        logPeers('localStorage+merge');
         return;
       }
     }
     this.app.options = receivedOptions;
+    logPeers('GET_/options_only');
   }
 
   returnClientOptions(): string {
@@ -163,16 +202,23 @@ class Storage {
    * as "updated_at" in the obj
    *
    */
-  async updateTransaction(tx: Transaction, obj = {}, peer = null, preserve_ts = 0) {
+  async updateTransaction(tx: Transaction | null, obj = {}, peer = null, preserve_ts = 0) {
     const message = 'archive';
     let data: any = {};
     data.request = 'update';
-    data.optional = tx.optional;
-    data.serial_transaction = tx.serialize_to_web(this.app);
 
-    if (!(obj as any)['updated_at']) {
-      if (preserve_ts) {
-        (obj as any)['updated_at'] = tx.optional.updated_at || tx.timestamp;
+    //
+    // tx may be null for metadata-only Archive updates (e.g. owner change).
+    // Localhost forwards (tx, obj) directly to Archive.updateTransaction.
+    //
+    if (tx) {
+      data.optional = tx.optional;
+      data.serial_transaction = tx.serialize_to_web(this.app);
+
+      if (!(obj as any)['updated_at']) {
+        if (preserve_ts) {
+          (obj as any)['updated_at'] = tx.optional.updated_at || tx.timestamp;
+        }
       }
     }
 
@@ -328,6 +374,151 @@ class Storage {
     }
   }
 
+  /**
+   * Load pristine /options without clearing storage.
+   * Used after resetBrowserInstallation() has already wiped local state.
+   */
+  async loadFreshOptions() {
+    if (!this.app.BROWSER) {
+      return;
+    }
+    try {
+      const response = await fetch(`/options`);
+      this.app.options = await response.json();
+      this.saveOptions();
+    } catch (err) {
+      console.error(err);
+    }
+  }
+
+  /**
+   * Best-effort deletion of every IndexedDB database in this origin.
+   * Falls back to known Saito DB names when indexedDB.databases() is unavailable.
+   */
+  async deleteAllIndexedDatabases() {
+    if (!this.app.BROWSER || typeof indexedDB === 'undefined') {
+      return;
+    }
+
+    try {
+      if (this.localDB) {
+        try {
+          await this.localDB.dropDb();
+        } catch (err) {
+          // Connection may already be closed or DB already gone.
+        }
+        this.localDB = null;
+      }
+
+      const knownNames = [
+        'localforage',
+        'keyvaluepairs',
+        'archive_db',
+        'dyn_mods_db',
+        'popup',
+        'emoji-picker-element-en',
+        'N64WASMDB'
+      ];
+
+      let names = knownNames;
+      if (typeof indexedDB.databases === 'function') {
+        try {
+          const dbs = await indexedDB.databases();
+          const discovered = (dbs || []).map((db) => db?.name).filter(Boolean);
+          names = Array.from(new Set([...knownNames, ...discovered]));
+        } catch (err) {
+          // Safari / older browsers may throw; keep knownNames fallback.
+        }
+      }
+
+      await Promise.all(names.map((name) => this.deleteIndexedDatabase(name)));
+    } catch (err) {
+      console.error('deleteAllIndexedDatabases:', err);
+    }
+  }
+
+  deleteIndexedDatabase(name) {
+    return new Promise((resolve) => {
+      if (!name) {
+        resolve(null);
+        return;
+      }
+      try {
+        const req = indexedDB.deleteDatabase(name);
+        req.onsuccess = () => resolve(null);
+        req.onerror = () => resolve(null);
+        req.onblocked = () => resolve(null);
+      } catch (err) {
+        resolve(null);
+      }
+    });
+  }
+
+  async clearCacheStorage() {
+    if (!this.app.BROWSER || typeof caches === 'undefined') {
+      return;
+    }
+    try {
+      const keys = await caches.keys();
+      await Promise.all(keys.map((key) => caches.delete(key)));
+    } catch (err) {
+      console.error('clearCacheStorage:', err);
+    }
+  }
+
+  async unregisterServiceWorkers() {
+    if (!this.app.BROWSER || !('serviceWorker' in navigator)) {
+      return;
+    }
+    try {
+      const registrations = await navigator.serviceWorker.getRegistrations();
+      await Promise.all(registrations.map((registration) => registration.unregister()));
+    } catch (err) {
+      console.error('unregisterServiceWorkers:', err);
+    }
+  }
+
+  /**
+   * Wipe all locally persisted browser state so the origin behaves like a
+   * brand-new Saito install. Does not create a wallet — callers reload or
+   * re-init afterward.
+   *
+   * Re-opens the dyn_mods JsStore handle after the wipe so dynamic-module
+   * install still works in the same session (e.g. first-wallet resetWallet).
+   */
+  async resetBrowserInstallation() {
+    if (!this.app.BROWSER) {
+      return;
+    }
+
+    await this.clearLocalForage();
+    await this.removeAllLocalApplications();
+    await this.deleteAllIndexedDatabases();
+
+    try {
+      sessionStorage.clear();
+    } catch (err) {
+      console.error('sessionStorage.clear:', err);
+    }
+
+    try {
+      localStorage.clear();
+    } catch (err) {
+      console.error('localStorage.clear:', err);
+    }
+
+    await this.clearCacheStorage();
+    await this.unregisterServiceWorkers();
+
+    // deleteAllIndexedDatabases() nulls this.localDB; recreate the connection
+    // so loadLocalApplications / saveLocalApplication work without a reload.
+    try {
+      await this.initializeApplicationDB();
+    } catch (err) {
+      console.log('Error initializeApplicationDB after resetBrowserInstallation:', err);
+    }
+  }
+
   async resetOptionsFromKey(publicKey) {
     if (this.app.BROWSER) {
       let wallet = await localforage.getItem(publicKey);
@@ -425,7 +616,6 @@ class Storage {
       //Update hash
       this.wallet_options_hash = new_wallet_hash;
     } catch (err) {
-      // console.error('localStorage error: ', err); // full err can be large/circular
       for (let i = 0; i < localStorage.length; i++) {
         let item = localStorage.getItem(localStorage.key(i));
         let parsed_item = '';

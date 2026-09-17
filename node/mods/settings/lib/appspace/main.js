@@ -6,532 +6,648 @@ const SaitoRecover = require('./../../../../lib/saito/ui/modals/saito-recovery/s
 const jsonTree = require('json-tree-viewer');
 
 class SettingsAppspace {
-	constructor(app, mod, container = '') {
-		this.app = app;
-		this.mod = mod;
-		this.container = container;
-		this.privateKey = null;
+  constructor(app, mod, container = '') {
+    this.app = app;
+    this.mod = mod;
+    this.container = container;
+    this.privateKey = null;
 
-		this.recover = new SaitoRecover(app, mod);
-		this.overlay = new SaitoOverlay(app, mod);
-	}
+    this.recover = new SaitoRecover(app, mod);
+    this.overlay = new SaitoOverlay(app, mod);
+  }
 
-	async render() {
-		this.privateKey = await this.app.wallet.getPrivateKey();
-		this.seed_phrase = this.app.crypto.generateSeedFromPrivateKey(this.privateKey);
+  async render() {
+    this.privateKey = await this.app.wallet.getPrivateKey();
+    this.seed_phrase = this.app.crypto.generateSeedFromPrivateKey(this.privateKey);
 
-		this.overlay.show(SettingsAppspaceTemplate(this.app, this.mod, this));
+    this.overlay.show(SettingsAppspaceTemplate(this.app, this.mod, this));
 
-		this.clearSettingsWarningBar();
-		this.runBrowserNodeBuildCheck();
+    this.clearSettingsWarningBar();
+    this.runBrowserNodeBuildCheck();
 
-		/**
-		 *  No modules are implementing this, but it is an idea to let modules render a component
-		 *  into the Settings appspace overlay
-		 */
-		let settings_appspace = document.querySelector('.settings-appspace');
-		if (settings_appspace) {
-			for (let i = 0; i < this.app.modules.mods.length; i++) {
-				if (this.app.modules.mods[i].respondTo('settings-appspace') != null) {
-					let mod_settings_obj = this.app.modules.mods[i].respondTo('settings-appspace');
-					mod_settings_obj.render(this.app, this.mod);
-				}
-			}
-		}
+    /**
+     *  No modules are implementing this, but it is an idea to let modules render a component
+     *  into the Settings appspace overlay
+     */
+    let settings_appspace = document.querySelector('.settings-appspace');
+    if (settings_appspace) {
+      for (let i = 0; i < this.app.modules.mods.length; i++) {
+        if (this.app.modules.mods[i].respondTo('settings-appspace') != null) {
+          let mod_settings_obj = this.app.modules.mods[i].respondTo('settings-appspace');
+          mod_settings_obj.render(this.app, this.mod);
+        }
+      }
+    }
 
-		this.renderDebugTree();
-		this.renderStorageInfo();
-		this.renderCryptoGameSettings();
+    this.renderDebugTree();
+    this.renderStorageInfo();
+    this.renderCryptoGameSettings();
 
-		await this.attachEvents();
-	}
+    await this.attachEvents();
+  }
 
-	clearSettingsWarningBar() {
-		let bar = document.getElementById('settings-appspace-warning-bar');
-		if (!bar) {
-			return;
-		}
-		bar.style.display = 'none';
-		bar.innerHTML = '';
-		bar.removeAttribute('aria-label');
-	}
+  clearSettingsWarningBar() {
+    let bar = document.getElementById('settings-appspace-warning-bar');
+    if (!bar) {
+      return;
+    }
+    bar.style.display = 'none';
+    bar.innerHTML = '';
+    bar.removeAttribute('aria-label');
+  }
 
-	showSettingsWarningBar(message) {
-		let bar = document.getElementById('settings-appspace-warning-bar');
-		if (!bar) {
-			return;
-		}
-		bar.innerHTML = `<i class="fa-solid fa-triangle-exclamation" aria-hidden="true"></i><span class="settings-appspace-warning-bar-text"></span>`;
-		let span = bar.querySelector('.settings-appspace-warning-bar-text');
-		if (span) {
-			span.textContent = message;
-		}
-		bar.style.display = 'flex';
-		bar.setAttribute('aria-label', message);
-	}
+  showSettingsWarningBar(message) {
+    let bar = document.getElementById('settings-appspace-warning-bar');
+    if (!bar) {
+      return;
+    }
+    bar.innerHTML = `<i class="fa-solid fa-triangle-exclamation" aria-hidden="true"></i><span class="settings-appspace-warning-bar-text"></span>`;
+    let span = bar.querySelector('.settings-appspace-warning-bar-text');
+    if (span) {
+      span.textContent = message;
+    }
+    bar.style.display = 'flex';
+    bar.setAttribute('aria-label', message);
+  }
 
-	selectPeerForBuildCheck(peers) {
-		let connected = peers.filter((p) => p?.status !== 'disconnected');
-		let fullNode = connected.find((p) => p.synctype && p.synctype !== 'lite');
-		return fullNode || connected[0] || null;
-	}
+  selectPeerForBuildCheck(peers) {
+    let connected = peers.filter((p) => p?.status !== 'disconnected');
+    let fullNode = connected.find((p) => p.synctype && p.synctype !== 'lite');
+    return fullNode || connected[0] || null;
+  }
 
-	updateBuildInfoValues(browserBuild, nodePeerBuildDisplay) {
-		let browserEl = document.getElementById('settings-browser-build-value');
-		let nodeEl = document.getElementById('settings-node-peer-build-value');
-		if (browserEl) {
-			browserEl.textContent = browserBuild;
-		}
-		if (nodeEl) {
-			nodeEl.textContent = nodePeerBuildDisplay;
-		}
-	}
+  updateBuildInfoValues(browserBuild, nodePeerBuildDisplay) {
+    let browserEl = document.getElementById('settings-browser-build-value');
+    let nodeEl = document.getElementById('settings-node-peer-build-value');
+    let footerVersion = document.getElementById('settings-footer-version');
+    let footerVersionInfo = document.getElementById('settings-footer-version-info');
 
-	runBrowserNodeBuildCheck() {
-		if (!this.app.BROWSER) {
-			return;
-		}
-		let browserBuild = String(this.app.build_number);
-		this.updateBuildInfoValues(browserBuild, '—');
+    if (browserEl) {
+      browserEl.textContent = browserBuild;
+    }
+    if (nodeEl) {
+      nodeEl.textContent = nodePeerBuildDisplay;
+    }
+    if (footerVersion) {
+      footerVersion.textContent = `v${browserBuild}`;
+    }
+    if (footerVersionInfo) {
+      footerVersionInfo.title = `Browser build ${browserBuild}\nNode peer build ${nodePeerBuildDisplay}`;
+    }
+  }
 
-		(async () => {
-			try {
-				let peers = await this.app.network.getPeers();
-				let peer = this.selectPeerForBuildCheck(peers);
-				if (!peer) {
-					this.updateBuildInfoValues(browserBuild, '—');
-					this.clearSettingsWarningBar();
-					return;
-				}
-				this.app.network.sendRequestAsTransaction(
-					'settings server build',
-					{},
-					(res) => {
-						if (!res || res.err === 'no response') {
-							this.updateBuildInfoValues(browserBuild, '—');
-							this.clearSettingsWarningBar();
-							return;
-						}
-						let nodeBuild = res.build_number != null ? String(res.build_number) : '';
-						if (!nodeBuild) {
-							this.updateBuildInfoValues(browserBuild, '—');
-							this.clearSettingsWarningBar();
-							return;
-						}
-						this.updateBuildInfoValues(browserBuild, nodeBuild);
-						if (browserBuild === nodeBuild) {
-							this.clearSettingsWarningBar();
-							return;
-						}
-						this.showSettingsWarningBar(
-							`Browser build ${browserBuild} does not match connected node build ${nodeBuild}.`
-						);
-					},
-					peer.publicKey
-				);
-			} catch (err) {
-				console.error('Settings build check:', err);
-				this.updateBuildInfoValues(browserBuild, '—');
-				this.clearSettingsWarningBar();
-			}
-		})();
-	}
+  runBrowserNodeBuildCheck() {
+    if (!this.app.BROWSER) {
+      return;
+    }
+    let browserBuild = String(this.app.build_number);
+    this.updateBuildInfoValues(browserBuild, '—');
 
-	//
-	// Todo: Add a param to auto open one branch of the tree
-	//
-	renderDebugTree() {
-		//debug info
-		let el = document.querySelector('.settings-appspace-debug-content');
-		el.innerHTML = '';
+    (async () => {
+      try {
+        let peers = await this.app.network.getPeers();
+        let peer = this.selectPeerForBuildCheck(peers);
+        if (!peer) {
+          this.updateBuildInfoValues(browserBuild, '—');
+          this.clearSettingsWarningBar();
+          return;
+        }
+        this.app.network.sendRequestAsTransaction(
+          'settings server build',
+          {},
+          (res) => {
+            if (!res || res.err === 'no response') {
+              this.updateBuildInfoValues(browserBuild, '—');
+              this.clearSettingsWarningBar();
+              return;
+            }
+            let nodeBuild = res.build_number != null ? String(res.build_number) : '';
+            if (!nodeBuild) {
+              this.updateBuildInfoValues(browserBuild, '—');
+              this.clearSettingsWarningBar();
+              return;
+            }
+            this.updateBuildInfoValues(browserBuild, nodeBuild);
+            if (browserBuild === nodeBuild) {
+              this.clearSettingsWarningBar();
+              return;
+            }
+            this.showSettingsWarningBar(
+              `Browser build ${browserBuild} does not match connected node build ${nodeBuild}.`
+            );
+          },
+          peer.publicKey
+        );
+      } catch (err) {
+        console.error('Settings build check:', err);
+        this.updateBuildInfoValues(browserBuild, '—');
+        this.clearSettingsWarningBar();
+      }
+    })();
+  }
 
-		try {
-			let optjson = JSON.parse(
-				JSON.stringify(
-					this.app.options,
-					(key, value) => (typeof value === 'bigint' ? value.toString() : value) // return everything else unchanged
-				)
-			);
-			var tree = jsonTree.create(optjson, el);
-		} catch (err) {
-			console.log('error creating jsonTree: ' + err);
-		}
+  //
+  // Todo: Add a param to auto open one branch of the tree
+  //
+  renderDebugTree() {
+    //debug info
+    let el = document.querySelector('.settings-appspace-debug-content');
+    if (!el) {
+      return;
+    }
+    el.innerHTML = '';
 
-		if (document.getElementById('delete_marked')) {
-			document.getElementById('delete_marked').onclick = async (e) => {
-				let updated = false;
-				Array.from(document.querySelectorAll('.jsontree_node_marked')).forEach((node) => {
-					updated = true;
-					let path = this.getJSONPath(node).replaceAll(`"]`, '').split('["');
+    try {
+      let optjson = JSON.parse(
+        JSON.stringify(
+          this.app.options,
+          (key, value) => (typeof value === 'bigint' ? value.toString() : value) // return everything else unchanged
+        )
+      );
+      var tree = jsonTree.create(optjson, el);
+    } catch (err) {
+      console.log('error creating jsonTree: ' + err);
+    }
 
-					let obj = this.app.options;
-					while (path.length > 1) {
-						let key = path.shift();
-						if (key) {
-							obj = obj[key];
-						}
-					}
+    if (document.getElementById('delete_marked')) {
+      document.getElementById('delete_marked').onclick = async (e) => {
+        let updated = false;
+        Array.from(document.querySelectorAll('.jsontree_node_marked')).forEach((node) => {
+          updated = true;
+          let path = this.getJSONPath(node).replaceAll(`"]`, '').split('["');
 
-					let final_key = path.shift();
-					console.log(obj, final_key);
-					if (Array.isArray(obj)) {
-						obj.splice(parseInt(final_key), 1);
-					} else {
-						delete obj[final_key];
-					}
-				});
-				this.renderDebugTree();
-				let c = await sconfirm(
-					`Would you like to save your ${updated ? 'updated ' : ''}options file?`
-				);
-				if (c) {
-					this.app.storage.saveOptions();
-				}
-			};
-		}
-	}
+          let obj = this.app.options;
+          while (path.length > 1) {
+            let key = path.shift();
+            if (key) {
+              obj = obj[key];
+            }
+          }
 
-	getJSONPath(node) {
-		if (node.classList.contains('jsontree_tree')) {
-			return '';
-		}
+          let final_key = path.shift();
+          console.log(obj, final_key);
+          if (Array.isArray(obj)) {
+            obj.splice(parseInt(final_key), 1);
+          } else {
+            delete obj[final_key];
+          }
+        });
+        this.renderDebugTree();
+        let c = await sconfirm(
+          `Would you like to save your ${updated ? 'updated ' : ''}options file?`
+        );
+        if (c) {
+          this.app.storage.saveOptions();
+        }
+      };
+    }
+  }
 
-		let currentPath = '';
-		//Find the label
-		if (node.classList.contains('jsontree_node')) {
-			if (node.children[0].classList.contains('jsontree_label-wrapper')) {
-				//currentPath = node.querySelector(".jsontree_label").textContent;
-				currentPath = '[' + node.querySelector('.jsontree_label').textContent + ']';
-			}
-		}
+  getJSONPath(node) {
+    if (node.classList.contains('jsontree_tree')) {
+      return '';
+    }
 
-		return this.getJSONPath(node.parentElement) + currentPath;
-	}
+    let currentPath = '';
+    //Find the label
+    if (node.classList.contains('jsontree_node')) {
+      if (node.children[0].classList.contains('jsontree_label-wrapper')) {
+        //currentPath = node.querySelector(".jsontree_label").textContent;
+        currentPath = '[' + node.querySelector('.jsontree_label').textContent + ']';
+      }
+    }
 
-	renderCryptoGameSettings() {
-		let html = ``;
+    return this.getJSONPath(node.parentElement) + currentPath;
+  }
 
-		if (this.app.options.gameprefs != null) {
-			let gameprefs = this.app.options.gameprefs;
-			for (var key in gameprefs) {
-				if (key.includes('inbound_trusted') || key.includes('outbound_trusted')) {
-					let option_name = key.split('_');
-					html += `<div class="settings-appspace-app">
+  renderCryptoGameSettings() {
+    let html = ``;
+
+    if (this.app.options.gameprefs != null) {
+      let gameprefs = this.app.options.gameprefs;
+      for (var key in gameprefs) {
+        if (key.includes('inbound_trusted') || key.includes('outbound_trusted')) {
+          let option_name = key.split('_');
+          html += `<div class="settings-appspace-app">
 			              <div class="saito-switch">
-			                <input type="checkbox" id="${key}" class="crypto_transfers_checkbox" name="${key}" 
+			                <input type="checkbox" id="${key}" class="saito-checkbox crypto_transfers_checkbox" name="${key}" 
 			                ${parseInt(gameprefs[key]) == 1 ? `checked="checked"` : ``}">
 			              </div>
 			              <div class="settings-appspace-crypto-transfer-name">${option_name[2]} ${option_name[3]}</div>
 			          </div>`;
-				}
-			}
-		}
-		if (html) {
-			document.querySelector('#settings-appspace-crypto-transfer').innerHTML = html;
-		} else {
-			// hide container from settings overlay
-			document.querySelector('.settings-appspace-crypto-transfer-container').style.display = 'none';
-		}
-	}
+        }
+      }
+    }
+    if (html) {
+      document.querySelector('#settings-appspace-crypto-transfer').innerHTML = html;
+    } else {
+      // hide container from settings overlay
+      let cryptoContainer = document.querySelector('.settings-appspace-crypto-transfer-container');
+      if (cryptoContainer) {
+        cryptoContainer.style.display = 'none';
+      }
+    }
+  }
 
-	renderStorageInfo() {
-		navigator.storage
-			.estimate()
-			.then((estimate) => {
-				if (estimate?.usage && estimate?.quota) {
-					let percentage = (estimate.usage / estimate.quota) * 100;
-					document.querySelector('.settings-appspace-indexdb-info .quota').innerHTML =
-						this.app.browser.formatNumberToLocale(estimate.quota);
-					document.querySelector('.settings-appspace-indexdb-info .usage').innerHTML =
-						this.app.browser.formatNumberToLocale(estimate.usage);
-					document.querySelector('.settings-appspace-indexdb-info .percent').innerHTML =
-						this.app.browser.formatNumberToLocale(percentage);
-				} else {
-					console.warn('Unexpected storage estimate: ', estimate);
-				}
-			})
-			.catch((err) => {
-				console.error(err);
-			});
+  formatStorageBytes(bytes) {
+    let value = Number(bytes);
+    if (!Number.isFinite(value) || value < 0) {
+      return '—';
+    }
+    if (value >= 1024 * 1024 * 1024) {
+      return `${(value / (1024 * 1024 * 1024)).toFixed(1)} GB`;
+    }
+    if (value >= 1024 * 1024) {
+      return `${(value / (1024 * 1024)).toFixed(1)} MB`;
+    }
+    if (value >= 1024) {
+      return `${(value / 1024).toFixed(1)} KB`;
+    }
+    return `${Math.round(value)} B`;
+  }
 
-		function getLocalStorageSize() {
-			let total = 0;
-			for (let key in localStorage) {
-				if (localStorage.hasOwnProperty(key)) {
-					total += localStorage[key].length + key.length;
-				}
-			}
-			return total;
-		}
+  toggleFooterDetail(detailId, triggerId) {
+    let detail = document.getElementById(detailId);
+    let trigger = document.getElementById(triggerId);
+    if (!detail || !trigger) {
+      return;
+    }
 
-		function getLocalStorageUsagePercentage() {
-			const totalSize = getLocalStorageSize();
-			const maxSize = 5 * 1024 * 1024; // Estimated 5MB limit
-			const percentageUsed = (totalSize / maxSize) * 100;
-			return percentageUsed.toFixed(2); // Returns the percentage with 2 decimal points
-		}
+    let opening = detail.hidden;
+    detail.hidden = !opening;
+    trigger.setAttribute('aria-expanded', opening ? 'true' : 'false');
 
-		document.querySelector('.settings-appspace-localstorage-info .quota').innerHTML =
-			this.app.browser.formatNumberToLocale(5 * 1024 * 1024);
-		document.querySelector('.settings-appspace-localstorage-info .usage').innerHTML =
-			this.app.browser.formatNumberToLocale(getLocalStorageSize());
-		document.querySelector('.settings-appspace-localstorage-info .percent').innerHTML =
-			this.app.browser.formatNumberToLocale(getLocalStorageUsagePercentage());
+    // Keep only one footer detail open at a time.
+    ['settings-footer-version-detail', 'settings-footer-storage-detail'].forEach((id) => {
+      if (id === detailId) {
+        return;
+      }
+      let other = document.getElementById(id);
+      if (other && !other.hidden) {
+        other.hidden = true;
+      }
+    });
+    ['settings-footer-version-info', 'settings-footer-storage-info'].forEach((id) => {
+      if (id === triggerId) {
+        return;
+      }
+      let otherTrigger = document.getElementById(id);
+      if (otherTrigger) {
+        otherTrigger.setAttribute('aria-expanded', 'false');
+      }
+    });
+  }
 
-		console.log(`LocalStorage is ${getLocalStorageUsagePercentage()}% full.`);
-	}
+  renderStorageInfo() {
+    const updateFooter = (usageBytes, detailTitle) => {
+      let footerStorage = document.getElementById('settings-footer-storage');
+      let footerStorageInfo = document.getElementById('settings-footer-storage-info');
+      if (footerStorage) {
+        footerStorage.textContent = this.formatStorageBytes(usageBytes);
+      }
+      if (footerStorageInfo && detailTitle) {
+        footerStorageInfo.title = detailTitle;
+      }
+    };
 
-	async attachEvents() {
-		let app = this.app;
-		let mod = this.mod;
+    navigator.storage
+      .estimate()
+      .then((estimate) => {
+        if (estimate?.usage != null && estimate?.quota != null) {
+          let percentage = (estimate.usage / estimate.quota) * 100;
+          document.querySelector('.settings-appspace-indexdb-info .quota').innerHTML =
+            this.app.browser.formatNumberToLocale(estimate.quota);
+          document.querySelector('.settings-appspace-indexdb-info .usage').innerHTML =
+            this.app.browser.formatNumberToLocale(estimate.usage);
+          document.querySelector('.settings-appspace-indexdb-info .percent').innerHTML =
+            this.app.browser.formatNumberToLocale(percentage);
 
-		try {
-			// Add this new event handler near the start of attachEvents
-			document.getElementById('profile-default-fee-input').onchange = (e) => {
-				let newDefaultFee = parseFloat(e.target.value);
-				let precision = e.target.value.split('.')[1]?.length || 0;
+          updateFooter(
+            estimate.usage,
+            `IndexedDB usage ${this.formatStorageBytes(estimate.usage)} of ${this.formatStorageBytes(estimate.quota)} (${this.app.browser.formatNumberToLocale(percentage)}%)`
+          );
+        } else {
+          console.warn('Unexpected storage estimate: ', estimate);
+        }
+      })
+      .catch((err) => {
+        console.error(err);
+      });
 
-				if (newDefaultFee < 0 || newDefaultFee > 7000000000 || precision > 9) {
-					siteMessage(
-						'Entry invalid if it is negative, bigger than 7,000,000,000 or has more than nine units of precision.',
-						1000
-					);
-					e.target.value = app.wallet.convertNolanToSaito(Number(app.options.wallet.default_fee));
-					return;
-				}
+    function getLocalStorageSize() {
+      let total = 0;
+      for (let key in localStorage) {
+        if (localStorage.hasOwnProperty(key)) {
+          total += localStorage[key].length + key.length;
+        }
+      }
+      return total;
+    }
 
-				// Convert SAITO to nolan for storage
-				app.options.wallet.default_fee = app.wallet.convertSaitoToNolan(newDefaultFee.toString());
-				app.wallet.default_fee = BigInt(app.options.wallet.default_fee);
-				app.options.wallet = app.options.wallet || {};
-				app.storage.saveOptions();
+    function getLocalStorageUsagePercentage() {
+      const totalSize = getLocalStorageSize();
+      const maxSize = 5 * 1024 * 1024; // Estimated 5MB limit
+      const percentageUsed = (totalSize / maxSize) * 100;
+      return percentageUsed.toFixed(2); // Returns the percentage with 2 decimal points
+    }
 
-				siteMessage(
-					`Default fee updated to: ${app.wallet.convertNolanToSaito(BigInt(app.options.wallet.default_fee)).toString()} SAITO`,
-					1000
-				);
-			};
+    let localUsage = getLocalStorageSize();
+    let localPercent = getLocalStorageUsagePercentage();
 
-			let settings_appspace = document.querySelector('.settings-appspace');
-			if (settings_appspace) {
-				for (let i = 0; i < app.modules.mods.length; i++) {
-					if (app.modules.mods[i].respondTo('settings-appspace') != null) {
-						let mod_settings_obj = app.modules.mods[i].respondTo('settings-appspace');
-						mod_settings_obj.attachEvents(app, mod);
-					}
-				}
-			}
+    document.querySelector('.settings-appspace-localstorage-info .quota').innerHTML =
+      this.app.browser.formatNumberToLocale(5 * 1024 * 1024);
+    document.querySelector('.settings-appspace-localstorage-info .usage').innerHTML =
+      this.app.browser.formatNumberToLocale(localUsage);
+    document.querySelector('.settings-appspace-localstorage-info .percent').innerHTML =
+      this.app.browser.formatNumberToLocale(localPercent);
 
-			if (document.getElementById('register-identifier-btn')) {
-				document.getElementById('register-identifier-btn').onclick = function (e) {
-					app.connection.emit('register-username-or-login');
-				};
-			}
+    let footerStorageInfo = document.getElementById('settings-footer-storage-info');
+    if (footerStorageInfo && !footerStorageInfo.title) {
+      footerStorageInfo.title = `Local Storage usage ${this.formatStorageBytes(localUsage)} (${localPercent}%)`;
+    }
 
-			if (document.getElementById('trigger-appstore-btn')) {
-				document.getElementById('trigger-appstore-btn').onclick = function (e) {
-					let appstore_mod = app.modules.returnModule('AppStore');
-					if (appstore_mod) {
-						appstore_mod.openAppstoreOverlay(app, appstore_mod);
-					}
-				};
-			}
+    console.log(`LocalStorage is ${localPercent}% full.`);
+  }
 
-			//
-			// install module (button)
-			//
-			Array.from(document.getElementsByClassName('modules_mods_checkbox')).forEach((ckbx) => {
-				ckbx.onclick = async (e) => {
-					e.stopPropagation();
-					let thisid = parseInt(e.currentTarget.id);
-					let currentTarget = e.currentTarget;
+  async attachEvents() {
+    let app = this.app;
+    let mod = this.mod;
 
-					if (currentTarget.checked == true) {
-						let sc = await sconfirm('Reactivate this module? (Will take effect on refresh)');
-						if (sc) {
-							app.options.modules[thisid].active = 1;
-							app.storage.saveOptions();
-						} else {
-							currentTarget.checked = false;
-						}
-					} else {
-						let sc = await sconfirm('Remove this module? (Will take effect on refresh)');
-						if (sc) {
-							app.options.modules[thisid].active = 0;
-							app.storage.saveOptions();
-						} else {
-							currentTarget.checked = true;
-						}
-					}
-				};
-			});
+    try {
+      let settings_sections = Array.from(
+        document.querySelectorAll('.settings-appspace-body > details.settings-appspace-section')
+      );
+      settings_sections.forEach((section) => {
+        section.ontoggle = () => {
+          if (!section.open) {
+            return;
+          }
+          settings_sections.forEach((other_section) => {
+            if (other_section !== section) {
+              other_section.open = false;
+            }
+          });
+        };
+      });
 
-			//
-			// in-game crypto transfers
-			//
-			Array.from(document.getElementsByClassName('crypto_transfers_checkbox')).forEach((ckbx) => {
-				ckbx.onclick = async (e) => {
-					e.stopPropagation();
-					let thisid = e.currentTarget.id;
-					let currentTarget = e.currentTarget;
+      // Add this new event handler near the start of attachEvents
+      document.getElementById('profile-default-fee-input').onchange = (e) => {
+        let newDefaultFee = parseFloat(e.target.value);
+        let precision = e.target.value.split('.')[1]?.length || 0;
 
-					console.log('Checbox id: //////', thisid);
+        if (newDefaultFee < 0 || newDefaultFee > 7000000000 || precision > 9) {
+          siteMessage(
+            'Entry invalid if it is negative, bigger than 7,000,000,000 or has more than nine units of precision.',
+            1000
+          );
+          e.target.value = app.wallet.convertNolanToSaito(Number(app.options.wallet.default_fee));
+          return;
+        }
 
-					if (currentTarget.checked == false) {
-						let sc = await sconfirm(
-							'Turning off this setting will make gameplay slower, are you sure?'
-						);
-						if (sc) {
-							app.options.gameprefs[thisid] = 0;
-						} else {
-							currentTarget.checked = true;
-						}
-					} else {
-						app.options.gameprefs[thisid] = 1;
-					}
+        // Convert SAITO to nolan for storage
+        app.options.wallet.default_fee = app.wallet.convertSaitoToNolan(newDefaultFee.toString());
+        app.wallet.default_fee = BigInt(app.options.wallet.default_fee);
+        app.options.wallet = app.options.wallet || {};
+        app.storage.saveOptions();
 
-					await app.wallet.saveWallet();
-				};
-			});
+        siteMessage(
+          `Default fee updated to: ${app.wallet.convertNolanToSaito(BigInt(app.options.wallet.default_fee)).toString()} SAITO`,
+          1000
+        );
+      };
 
-			Array.from(document.getElementsByClassName('settings-appspace-app')).forEach((modlink) => {
-				modlink.onclick = async (e) => {
-					let modname = e.currentTarget.dataset.id;
-					if (modname) {
-						let mod = this.app.modules.returnModule(modname);
-						if (!mod) {
-							console.error('Module not found! ', modname);
-							return;
-						}
+      let settings_appspace = document.querySelector('.settings-appspace');
+      if (settings_appspace) {
+        for (let i = 0; i < app.modules.mods.length; i++) {
+          if (app.modules.mods[i].respondTo('settings-appspace') != null) {
+            let mod_settings_obj = app.modules.mods[i].respondTo('settings-appspace');
+            mod_settings_obj.attachEvents(app, mod);
+          }
+        }
+      }
 
-						let mod_overlay = new SaitoModule(this.app, mod, () => {
-							this.renderDebugTree();
-						});
-						mod_overlay.render();
-					}
-				};
-			});
+      if (document.getElementById('register-identifier-btn')) {
+        document.getElementById('register-identifier-btn').onclick = function (e) {
+          app.connection.emit('register-username-or-login');
+        };
+      }
 
-			if (document.getElementById('backup-account-btn')) {
-				document.getElementById('backup-account-btn').onclick = (e) => {
-					app.wallet.backupWallet();
-				};
-			}
+      if (document.getElementById('trigger-appstore-btn')) {
+        document.getElementById('trigger-appstore-btn').onclick = function (e) {
+          let appstore_mod = app.modules.returnModule('AppStore');
+          if (appstore_mod) {
+            appstore_mod.openAppstoreOverlay(app, appstore_mod);
+          }
+        };
+      }
 
-			if (document.getElementById('restore-account-btn')) {
-				document.getElementById('restore-account-btn').onclick = async (e) => {
-					this.recover.loadFile();
-				};
-			}
+      //
+      // install module (button)
+      //
+      Array.from(document.getElementsByClassName('modules_mods_checkbox')).forEach((ckbx) => {
+        ckbx.onclick = async (e) => {
+          e.stopPropagation();
+          let thisid = parseInt(e.currentTarget.id);
+          let currentTarget = e.currentTarget;
 
-			if (document.getElementById('show-phrase')) {
-				document.getElementById('show-phrase').onclick = async (e) => {
-					const egldMnemonic = app?.options?.crypto?.EGLD?.mnemonic_text || '';
+          if (currentTarget.checked == true) {
+            let sc = await sconfirm('Reactivate this module? (Will take effect on refresh)');
+            if (sc) {
+              app.options.modules[thisid].active = 1;
+              app.storage.saveOptions();
+            } else {
+              currentTarget.checked = false;
+            }
+          } else {
+            let sc = await sconfirm('Remove this module? (Will take effect on refresh)');
+            if (sc) {
+              app.options.modules[thisid].active = 0;
+              app.storage.saveOptions();
+            } else {
+              currentTarget.checked = true;
+            }
+          }
+        };
+      });
 
-					if (egldMnemonic && egldMnemonic !== this.seed_phrase) {
-						await sconfirm(
-							'Warning: Your EGLD wallet is using a different seed phrase. ' +
-								'Backing up only the Saito seed does NOT back up your EGLD keys. '
-						);
-					}
+      //
+      // in-game crypto transfers
+      //
+      Array.from(document.getElementsByClassName('crypto_transfers_checkbox')).forEach((ckbx) => {
+        ckbx.onclick = async (e) => {
+          e.stopPropagation();
+          let thisid = e.currentTarget.id;
+          let currentTarget = e.currentTarget;
 
-					let confirmBackup = await sconfirm(
-						`<h4>Copy to clip board?</h4> <br> <span class="monospace">${this.seed_phrase}</div>`
-					);
-					if (confirmBackup) {
-						navigator.clipboard.writeText(this.seed_phrase);
-					}
-				};
-			}
+          console.log('Checbox id: //////', thisid);
 
-			document.getElementById('nuke-account-btn').onclick = async (e) => {
-				let confirmation = await app.wallet.onUpgrade('nuke');
-				if (confirmation) {
-					reloadWindow(150);
-				}
-			};
+          if (currentTarget.checked == false) {
+            let sc = await sconfirm(
+              'Turning off this setting will make gameplay slower, are you sure?'
+            );
+            if (sc) {
+              app.options.gameprefs[thisid] = 0;
+            } else {
+              currentTarget.checked = true;
+            }
+          } else {
+            app.options.gameprefs[thisid] = 1;
+          }
 
-			if (document.getElementById('clear-storage-btn')) {
-				document.getElementById('clear-storage-btn').onclick = async (e) => {
-					let confirmation = await sconfirm(
-						"This will clear your browser's DB, proceed cautiously"
-					);
-					if (confirmation) {
-						siteMessage('Clearing local "forage"...');
-						// Centrally Manage localForage
-						await this.app.storage.clearLocalForage();
-						siteMessage('Clearing local installed apps...');
-						// And purge dyn mods
-						await this.app.storage.removeAllLocalApplications();
+          await app.wallet.saveWallet();
+        };
+      });
 
-						let archive = this.app.modules.returnModule('Archive');
-						if (archive) {
-							siteMessage('Clearing archive...');
-							await archive.onUpgrade('nuke');
-						}
-						siteMessage('Clearing cookies....');
-						localStorage.clear();
+      Array.from(document.getElementsByClassName('settings-appspace-app')).forEach((modlink) => {
+        modlink.onclick = async (e) => {
+          let modname = e.currentTarget.dataset.id;
+          if (modname) {
+            let module = this.app.modules.returnModule(modname);
+            if (!module) {
+              console.error('Module not found! ', modname);
+              return;
+            }
 
-						this.app.storage.saveOptions();
+            let mod_overlay = new SaitoModule(this.app, module, () => {
+              this.renderDebugTree();
+            });
+            mod_overlay.render();
+          }
+        };
+      });
 
-						siteMessage('rebooting...');
-						if (this.app.browser.browser_active == 1) {
-							reloadWindow(300);
-						}
-					}
-				};
-			}
+      if (document.getElementById('backup-account-btn')) {
+        document.getElementById('backup-account-btn').onclick = (e) => {
+          app.wallet.backupWallet();
+        };
+      }
 
-			Array.from(document.querySelectorAll('.settings-appspace .pubkey-grid')).forEach((key) => {
-				key.onclick = (e) => {
-					navigator.clipboard.writeText(e.currentTarget.dataset.id);
-					let icon_element = e.currentTarget.querySelector('.pubkey-grid i');
-					icon_element.classList.toggle('fa-copy');
-					icon_element.classList.toggle('fa-check');
+      if (document.getElementById('restore-account-btn')) {
+        document.getElementById('restore-account-btn').onclick = async (e) => {
+          this.recover.loadFile();
+        };
+      }
 
-					setTimeout(() => {
-						icon_element.classList.toggle('fa-copy');
-						icon_element.classList.toggle('fa-check');
-					}, 1500);
-				};
-			});
+      if (document.getElementById('settings-seed-phrase')) {
+        let seedEl = document.getElementById('settings-seed-phrase');
+        let seedActionsEl = document.getElementById('settings-seed-phrase-actions');
+        let copySeedEl = document.getElementById('settings-copy-seed-phrase');
+        let closeSeedEl = document.getElementById('settings-close-seed-phrase');
+        const hiddenSeedText = 'click here to view seed phrase';
 
-			document.getElementById('copy-private-key').onclick = (e) => {
-				navigator.clipboard.writeText(this.privateKey);
-				let icon_element = document.querySelector('#copy-private-key i');
-				if (icon_element) {
-					icon_element.classList.toggle('fa-copy');
-					icon_element.classList.toggle('fa-check');
+        let revealSeed = (e) => {
+          e.preventDefault();
+          if (seedEl.dataset.revealed === '1') {
+            return;
+          }
 
-					setTimeout(() => {
-						icon_element.classList.toggle('fa-copy');
-						icon_element.classList.toggle('fa-check');
-					}, 1500);
-				}
-			};
+          seedEl.textContent = this.seed_phrase;
+          seedEl.classList.add('monospace');
+          seedEl.dataset.revealed = '1';
+          seedEl.removeAttribute('role');
+          seedEl.removeAttribute('tabindex');
+          seedEl.title = 'Wallet seed phrase';
+          seedActionsEl.hidden = false;
+        };
 
-			document.getElementById('restore-privatekey-btn').onclick = async (e) => {
-				this.recover.render();
-			};
-		} catch (err) {
-			console.log('Error in Settings Appspace: ', err);
-		}
+        seedEl.onclick = revealSeed;
+        seedEl.onkeydown = (e) => {
+          if (e.key === 'Enter' || e.key === ' ') {
+            revealSeed(e);
+          }
+        };
 
-		if (document.querySelector('#settings-add-app')) {
-			let addAppBtn = document.querySelector('#settings-add-app');
-			let addAppActivate = (e) => {
-				e.preventDefault();
-				e.stopPropagation();
-				app.connection.emit('saito-app-app-render-request');
-			};
-			addAppBtn.onclick = addAppActivate;
-			addAppBtn.onkeydown = (e) => {
-				if (e.key === 'Enter' || e.key === ' ') {
-					addAppActivate(e);
-				}
-			};
-		}
-	}
+        copySeedEl.onclick = async () => {
+          await navigator.clipboard.writeText(this.seed_phrase);
+          let iconEl = copySeedEl.querySelector('i');
+          iconEl.classList.remove('fa-copy');
+          iconEl.classList.add('fa-check');
+
+          setTimeout(() => {
+            iconEl.classList.remove('fa-check');
+            iconEl.classList.add('fa-copy');
+          }, 1500);
+        };
+
+        closeSeedEl.onclick = () => {
+          seedEl.textContent = hiddenSeedText;
+          seedEl.classList.remove('monospace');
+          delete seedEl.dataset.revealed;
+          seedEl.setAttribute('role', 'button');
+          seedEl.setAttribute('tabindex', '0');
+          seedEl.title = 'Reveal wallet seed phrase';
+          seedActionsEl.hidden = true;
+          seedEl.focus();
+        };
+      }
+
+      document.getElementById('nuke-account-btn').onclick = async (e) => {
+        let confirmation = await app.wallet.onUpgrade('nuke');
+        if (confirmation) {
+          reloadWindow(150);
+        }
+      };
+
+      Array.from(document.querySelectorAll('.settings-appspace .pubkey-grid')).forEach((key) => {
+        key.onclick = (e) => {
+          navigator.clipboard.writeText(e.currentTarget.dataset.id);
+          let icon_element = e.currentTarget.querySelector('.saito-icon-button i');
+          if (!icon_element) {
+            return;
+          }
+          icon_element.classList.toggle('fa-copy');
+          icon_element.classList.toggle('fa-check');
+
+          setTimeout(() => {
+            icon_element.classList.toggle('fa-copy');
+            icon_element.classList.toggle('fa-check');
+          }, 1500);
+        };
+      });
+
+      document.getElementById('restore-privatekey-btn').onclick = async (e) => {
+        this.recover.render();
+      };
+
+      if (document.getElementById('settings-footer-version-info')) {
+        document.getElementById('settings-footer-version-info').onclick = (e) => {
+          e.preventDefault();
+          this.toggleFooterDetail(
+            'settings-footer-version-detail',
+            'settings-footer-version-info'
+          );
+        };
+      }
+
+      if (document.getElementById('settings-footer-storage-info')) {
+        document.getElementById('settings-footer-storage-info').onclick = (e) => {
+          e.preventDefault();
+          this.toggleFooterDetail(
+            'settings-footer-storage-detail',
+            'settings-footer-storage-info'
+          );
+        };
+      }
+    } catch (err) {
+      console.log('Error in Settings Appspace: ', err);
+    }
+
+    let openModuleInstall = (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      app.connection.emit('saito-app-app-render-request');
+    };
+
+    if (document.getElementById('settings-add-module')) {
+      let addModuleBtn = document.getElementById('settings-add-module');
+      addModuleBtn.onclick = openModuleInstall;
+      addModuleBtn.onkeydown = (e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          openModuleInstall(e);
+        }
+      };
+    }
+  }
 }
 
 module.exports = SettingsAppspace;

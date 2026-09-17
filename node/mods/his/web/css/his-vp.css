@@ -1,5 +1,5 @@
-
-.vp-overlay {
+.game.his {
+  .vp-overlay {
     background-image: url(/his/img/backgrounds/new_world.jpg);
     background-size: cover;
     max-height: 90vh;
@@ -9,73 +9,72 @@
     min-height: 622px;
     text-align: center;
     z-index: 110;
-}
+  }
 
-.vp-overlay .help {
+  .vp-overlay .help {
     background: #0009;
     width: 100%;
     color: white;
     margin-left: auto;
     margin-right: auto;
-    font-size: 2.4rem;
-    padding: 0.75rem;
+    font-size: 2rem;
+    padding: 0.625rem;
     max-width: 100%;
-    padding: 2rem;
-    line-height: 3.4rem;
-}
+    padding: 1.667rem;
+    line-height: 2.833rem;
+  }
 
-.vp-overlay .advice {
+  .vp-overlay .advice {
     background: #0009;
     width: 100%;
     color: white;
     margin-left: auto;
     margin-right: auto;
-    font-size: 2.4rem;
-    padding: 0.75rem;
+    font-size: 2rem;
+    padding: 0.625rem;
     max-width: 100%;
-    padding: 2rem;
-    line-height: 3.4rem;
+    padding: 1.667rem;
+    line-height: 2.833rem;
     bottom: 0px;
     position: absolute;
-}
+  }
 
-.vp-overlay .factions {
+  .vp-overlay .factions {
     display: grid;
     grid-template-columns: 1fr 1fr 1fr 1fr 1fr 1fr 1fr 1fr 1fr 1fr;
     grid-template-rows: 1fr 1fr;
-    margin-top: 7.5rem;
-    margin-bottom: 5rem;
+    margin-top: 6.25rem;
+    margin-bottom: 4.167rem;
     width: 80%;
     background-color: #0009;
     margin-left: auto;
     margin-right: auto;
     color: white;
-    font-size: 2.4rem;
-    padding: 0.5rem;
-    row-gap: 1rem;
-    column-gap: 1rem;
-}
+    font-size: 2rem;
+    padding: 0.417rem;
+    row-gap: 0.833rem;
+    column-gap: 0.833rem;
+  }
 
-.vp-overlay .factions div {
+  .vp-overlay .factions div {
     width: 100%;
     max-width: 100%;
     display: flex;
     flex-direction: row;
-    padding: 1rem;
-}
+    padding: 0.833rem;
+  }
 
-.vp-overlay .factions .round {
+  .vp-overlay .factions .round {
     border: 1px dashed #fff;
-}
+  }
 
-.vp-overlay .factions div .title {
-
-}
-.vp-overlay .factions div .title {
-    font-size: 1.5rem;
+  .vp-overlay .factions div .title {
+  }
+  .vp-overlay .factions div .title {
+    font-size: 1.25rem;
     text-align: left;
+  }
+  .vp-overlay .factions div .vp {
+    font-size: 3.333rem;
+  }
 }
-.vp-overlay .factions div .vp {
-    font-size: 4rem;
-}
-

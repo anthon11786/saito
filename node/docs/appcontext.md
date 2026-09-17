@@ -24,7 +24,7 @@ returnPublicKey()
 
 > Returns wallet's public key
 
--   returns string public key
+- returns string public key
 
 deletePeer()
 
@@ -131,8 +131,6 @@ addKey(publickey = "", identifier = "", watched = false, tag = "", bid = "", bsh
 decryptMessage(publickey, encrypted_msg)
 
 addGroup(group_id = "", members = [], name = "", watched = false, tag = "", bid = "", bsh = "", lc = 1)
-
-decryptString(publickey, encrypted_string)
 
 encryptMessage(publickey, msg)
 
@@ -286,7 +284,7 @@ returnPrivateKey()
 
 > Returns wallet's private key
 
--   returns string private key
+- returns string private key
 
 returnPublicKey()
 
@@ -300,14 +298,14 @@ signMessage(msg)
 
 > Returns wallet's balance
 
--   returns double balance
+- returns double balance
 
 signTransaction(tx)
 
 > Signs a transaction using the wallet private key.
 
--   tx Saito transaction to sign
--   returns saito.transaction Signed Saito transaction
+- tx Saito transaction to sign
+- returns saito.transaction Signed Saito transaction
 
 updateBalance()
 
@@ -321,10 +319,10 @@ createUnsignedTransactionWithDefaultFee(publickey="", amt=0.0)
 
 > Create a transaction with the appropriate slips given the desired fee and payment to associate with the transaction, and a change address to receive any surplus tokens. Use the default wallet fee.
 
--   recipient Publickey of the recipient (string)
--   fee to send with tx
--   returns saito.transaction if successful
--   returns null if inadequate inputs
+- recipient Publickey of the recipient (string)
+- fee to send with tx
+- returns saito.transaction if successful
+- returns null if inadequate inputs
 
 signTransaction
 
@@ -332,18 +330,18 @@ signTransaction
 
 returnBalance
 
--   msg string to sign
--   returns string public key
+- msg string to sign
+- returns string public key
 
 createUnsignedTransaction(publickey="", amt=0.0, fee=0.0)
 
 > Create a transaction with the appropriate slips given the desired fee and payment to associate with the transaction, and a change address to receive any surplus tokens.
 
--   recipient Publickey of the recipient (string)
--   payment amount
--   fee to send with tx
--   returns saito.transaction if successful
--   returns null if inadequate inputs
+- recipient Publickey of the recipient (string)
+- payment amount
+- fee to send with tx
+- returns saito.transaction if successful
+- returns null if inadequate inputs
 
 createToSlips(num, address, amount, change_amount)
 

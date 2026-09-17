@@ -2,7 +2,7 @@ module.exports = (app, mod, build_number) => {
   let html = `
 
 <!DOCTYPE html>
-<html lang="zh" class=""><head>
+<html lang="zh" class="" data-theme="dark"><head>
 <head>
 
   <meta name="description" content="${app.browser.escapeHTML(mod.description)}" />
@@ -35,7 +35,7 @@ module.exports = (app, mod, build_number) => {
   <meta name="twitter:image" content="https://saito.tech/wp-content/uploads/2022/04/saito_card_horizontal.png" />
 
   <meta property="og:title" content="Popup Chinese" />
-  <meta property="og:url" content="https://saito.io/popup" />
+  <meta property="og:url" content="${mod.resolveSocialUrl('/popup')}" />
   <meta property="og:type" content="website" />
   <meta property="og:description" content="Peer to peer social and more" />
   <meta property="og:site_name" content="Popup Chinese" />
@@ -67,5 +67,4 @@ module.exports = (app, mod, build_number) => {
 </html>
 `;
   return html;
-}
-
+};

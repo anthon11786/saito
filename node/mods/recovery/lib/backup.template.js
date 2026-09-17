@@ -1,5 +1,5 @@
 module.exports = () => {
-	return `
+  return `
     <form id="backup-template" class="saito-overlay-auto-backup saito-overlay-form">
         <div class="saito-overlay-form-header">
           <div class="saito-overlay-form-header-title" id="saito-overlay-form-header-title">EASY ACCOUNT RECOVERY</div>
@@ -13,12 +13,12 @@ module.exports = () => {
           </div>
          
           <div class="saito-overlay-subform-inputs">
-            <input type="email" id="saito-overlay-form-input" class="saito-overlay-form-input saito-overlay-form-email" placeholder="address@domain.com" value="" />
-            <input type="text" id="saito-overlay-form-input" class="saito-overlay-form-input saito-overlay-form-password saito-password" placeholder="password" value="" />
+            <input type="email" id="saito-overlay-form-input" class="saito-input saito-overlay-form-email" placeholder="address@domain.com" value="" />
+            <input type="text" id="saito-overlay-form-input" class="saito-input saito-overlay-form-password saito-password" placeholder="password" value="" />
           </div>
       	
       		<div class="saito-overlay-form-checkbox-container">	
-	      		<input type="checkbox" class="saito-overlay-subform-checkbox" checked />
+	      		<input type="checkbox" class="saito-checkbox saito-overlay-subform-checkbox" checked />
 	      		<div class="saito-overlay-subform-text">
 	      			save an encrypted copy on-chain, 
 	      			so I can recover my account quickly and easily on any device
@@ -26,6 +26,8 @@ module.exports = () => {
       		</div>
 	        <div class="saito-button-row">
 	          <div class="saito-anchor" id="saito-backup-manual"><span>download my wallet</span></div>
+			</div>
+            <div class="saito-button-row">
 	          <button type="submit" class="saito-button-primary saito-overlay-form-submit" id="saito-overlay-submit">Encrypt & Backup</button>
 	        </div>
 	      </div>

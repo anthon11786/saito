@@ -22,6 +22,7 @@ class SaitoNFT {
     this.amount = BigInt(0); // How many nfts of this id of this slip
     this.deposit = BigInt(0); // nolans
     this.nft_type = '';
+    this.expires_at = data?.expires_at != null ? data.expires_at : null;
 
     //
     // and/or general meta data
@@ -60,6 +61,36 @@ class SaitoNFT {
       // Assuming we had slips in data from our wallet, just extract them
       this.parseSlips();
     }
+  }
+
+  /**
+   * Let modules respond to `saito-nft-transfer` mutate the outbound tx before sign/propagate.
+   * @param {*} newtx unsigned transaction
+   * @param {string} receiver recipient public key
+   * @param {object} [data={}] optional transfer intent (e.g. { delegated: true })
+   * @returns {Promise<*>} updated tx, or null if a handler blocked the send (after salert)
+   */
+  async modifyBeforeSend(newtx, receiver, data = {}) {
+    const nft_type =
+      this.nft_type || (typeof this.returnType === 'function' ? this.returnType() : null);
+    const handlers = this.app.modules.getRespondTos('saito-nft-transfer', this);
+
+    for (const modobj of handlers) {
+      if (!modobj?.class || !modobj.class.includes(nft_type) || !nft_type) {
+        continue;
+      }
+      if (typeof modobj.onTransfer === 'function') {
+        try {
+          newtx = await modobj.onTransfer(this, newtx, receiver, data);
+        } catch (err) {
+          console.error('onTransfer() failed in module...', err);
+          salert(`NFT transfer blocked by module...`);
+          return null;
+        }
+      }
+    }
+
+    return newtx;
   }
 
   async fetchTransaction(callback = null, localhost_only = false) {
@@ -221,6 +252,8 @@ class SaitoNFT {
 
     this.data = this.txmsg?.data ?? {};
 
+    this.applyExpiresAtFromData(this.data);
+
     if (typeof this.data.image !== 'undefined') {
       this.image = this.data.image;
       has_image = true;
@@ -268,6 +301,46 @@ class SaitoNFT {
         typeof this.data === 'object' ? JSON.stringify(this.data, null, 2) : String(this.data);
       processed = true;
     }
+  }
+
+  applyExpiresAtFromData(data) {
+    if (!data || typeof data !== 'object') {
+      return;
+    }
+    if (data.expires_at != null && data.expires_at !== '') {
+      this.expires_at = data.expires_at;
+      return;
+    }
+    const path = Array.isArray(data.path) ? data.path : [];
+    for (let i = 0; i < path.length; i++) {
+      const hop = path[i] || {};
+      let value_obj = null;
+      try {
+        value_obj = JSON.parse(Buffer.from(String(hop.value || ''), 'base64').toString('utf8'));
+      } catch (err) {
+        value_obj = null;
+      }
+      if (value_obj && value_obj.delegated === 0 && value_obj.expires_at != null) {
+        this.expires_at = value_obj.expires_at;
+        return;
+      }
+    }
+  }
+
+  remainingExpiresLabel() {
+    if (this.expires_at == null || this.expires_at === '') {
+      return null;
+    }
+    let ms = Number(this.expires_at) - Date.now();
+    if (!Number.isFinite(ms) || ms < 0) {
+      ms = 0;
+    }
+    const total = Math.floor(ms / 1000);
+    const h = Math.floor(total / 3600);
+    const m = Math.floor((total % 3600) / 60);
+    const s = total % 60;
+    const pad = (n) => String(n).padStart(2, '0');
+    return `${pad(h)}:${pad(m)}:${pad(s)}`;
   }
 
   extractSlipObject(slip) {
@@ -379,6 +452,120 @@ class SaitoNFT {
     }
 
     return null;
+  }
+
+  returnImage() {
+    return this.image || '';
+  }
+
+  returnModuleMediaDisplay() {
+    const nft_type =
+      this.nft_type || (typeof this.returnType === 'function' ? this.returnType() : null);
+    const handlers = this.app.modules.getRespondTos('saito-nft-media', this);
+
+    for (const modobj of handlers) {
+      if (!modobj?.class || !modobj.class.includes(nft_type) || !nft_type) {
+        continue;
+      }
+      if (typeof modobj.returnMediaDisplay === 'function') {
+        const display = modobj.returnMediaDisplay(this);
+        if (display) {
+          return display;
+        }
+      }
+    }
+
+    return null;
+  }
+
+  hasResolvableMedia() {
+    if (this.returnImage()) {
+      return true;
+    }
+    if (this.returnModuleMediaDisplay()) {
+      return true;
+    }
+    return !!(this.js || this.css || this.text || this.json);
+  }
+
+  isMediaLoading() {
+    return this.returnMediaDisplay().loading;
+  }
+
+  returnMediaDisplay() {
+    const esc = (value) => this.app.browser.escapeHTML(String(value ?? ''));
+    const mediaUrl = (url) => (this.app.browser.isSafeMediaUrl(url) ? url : '');
+
+    const moduleDisplay = this.returnModuleMediaDisplay();
+    if (moduleDisplay) {
+      return {
+        backgroundImage: mediaUrl(moduleDisplay.backgroundImage || ''),
+        innerHtml: moduleDisplay.innerHtml || '',
+        loading: false,
+        failed: false
+      };
+    }
+
+    if (this.image) {
+      return {
+        backgroundImage: mediaUrl(this.image),
+        innerHtml: '',
+        loading: false,
+        failed: false
+      };
+    }
+
+    if (this.js) {
+      return {
+        backgroundImage: '',
+        innerHtml: `<div class="saito-nft-card-text">${esc(this.js)}</div>`,
+        loading: false,
+        failed: false
+      };
+    }
+
+    if (this.css) {
+      return {
+        backgroundImage: '',
+        innerHtml: `<div class="saito-nft-card-text">${esc(this.css)}</div>`,
+        loading: false,
+        failed: false
+      };
+    }
+
+    if (this.text) {
+      return {
+        backgroundImage: '',
+        innerHtml: `<div class="saito-nft-card-text">${esc(this.text)}</div>`,
+        loading: false,
+        failed: false
+      };
+    }
+
+    if (this.json) {
+      return {
+        backgroundImage: '',
+        innerHtml: `<div class="saito-nft-card-text">${esc(this.json)}</div>`,
+        loading: false,
+        failed: false
+      };
+    }
+
+    if (this.load_failed) {
+      return {
+        backgroundImage: '',
+        innerHtml: '<i class="fa-solid fa-heart-crack"></i>',
+        loading: false,
+        failed: true
+      };
+    }
+
+    return {
+      backgroundImage: '',
+      innerHtml: '',
+      loading: true,
+      failed: false
+    };
   }
 }
 

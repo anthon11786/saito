@@ -32,7 +32,7 @@ class ModtoolsSettings {
     let settings_self = this;
 
     if (document.getElementById('blacklisted-accounts')) {
-      if (this.mod.blacklisted_publickeys?.length){
+      if (this.mod.blacklisted_publickeys?.length) {
         document.getElementById('blacklisted-accounts').onclick = (e) => {
           this.contacts.title = 'Blacklisted Accounts';
           this.contacts.multi_button = 'Remove from Blacklist';
@@ -49,7 +49,7 @@ class ModtoolsSettings {
     }
 
     if (document.getElementById('whitelisted-accounts')) {
-      if (this.mod.whitelisted_publickeys?.length){
+      if (this.mod.whitelisted_publickeys?.length) {
         document.getElementById('whitelisted-accounts').onclick = (e) => {
           this.contacts.title = 'Whitelisted Accounts';
           this.contacts.multi_button = 'Remove from Whitelist';
@@ -64,20 +64,20 @@ class ModtoolsSettings {
       }
     }
 
-    if (document.getElementById('add-whitelist')){
+    if (document.getElementById('add-whitelist')) {
       document.getElementById('add-whitelist').onclick = (e) => {
-          e.stopPropagation();
-          e.preventDefault();
-          this.contacts.title = 'Saved Keys';
-          this.contacts.multi_button = 'Add to Whitelist';
-          this.contacts.callback = (keys) => {
-            for (let key of keys) {
-              this.app.connection.emit('saito-whitelist', {publicKey: key, duration: -1});
-            }
-            this.render();
-          };
-          this.contacts.render();
+        e.stopPropagation();
+        e.preventDefault();
+        this.contacts.title = 'Saved Keys';
+        this.contacts.multi_button = 'Add to Whitelist';
+        this.contacts.callback = (keys) => {
+          for (let key of keys) {
+            this.app.connection.emit('saito-whitelist', { publicKey: key, duration: -1 });
+          }
+          this.render();
         };
+        this.contacts.render();
+      };
     }
 
     if (document.getElementById('none_mod')) {
@@ -87,9 +87,9 @@ class ModtoolsSettings {
       };
     }
 
-    if (document.getElementById('public_mod')) {
-      document.getElementById('public_mod').onclick = (e) => {
-        this.mod.permissions.mode = 'public';
+    if (document.getElementById('server_mod')) {
+      document.getElementById('server_mod').onclick = (e) => {
+        this.mod.permissions.mode = 'server';
         this.mod.save();
       };
     }

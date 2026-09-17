@@ -1,0 +1,49 @@
+.saito-alert {
+  position: fixed;
+  inset: 0;
+  /* Keep wallet prompts actionable while the startup CTA loader is visible. */
+  z-index: 2147483100;
+}
+
+#saito-alert-shim {
+  z-index: 2000;
+  background-color: color-mix(in srgb, var(--saito-background) 86%, transparent);
+  position: absolute;
+  width: 100%;
+  height: 100%;
+  top: 0;
+}
+
+#saito-alert-box {
+  width: 75vw;
+  max-width: 70rem;
+  transition: all 500ms ease-in-out;
+  margin: auto;
+  position: relative;
+  top: -100%;
+  padding: 1.5rem;
+  color: var(--saito-popover-foreground);
+  display: flex;
+  flex-direction: column;
+  gap: 2rem;
+  /* slightly softer than elevation-2; keep unique alert drop */
+  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.36);
+}
+
+.saito-alert-message {
+  font-family: 'visuelt-light', 'Microsoft Yahei', 'Hiragino Sans GB';
+  font-size: 2rem;
+  text-align: center;
+  align-self: center;
+  display: block;
+  margin: 1rem 0;
+  overflow-wrap: break-word;
+  line-height: 3rem;
+  width: -webkit-fill-available;
+}
+
+@media (max-width: 600px) {
+  #saito-alert-box {
+    width: 95vw;
+  }
+}

@@ -1,83 +1,178 @@
-.redsquare-menu {
+/* Namespace: .menu — left nav hierarchy on Saito menu tokens */
+
+.menu .list {
   list-style: none;
-  padding: 0;
-  margin: 0;
   display: flex;
   flex-direction: column;
-  align-items: flex-start;
-  width: max-content;
-  user-select: none;
+  gap: var(--saito-space-xs);
 }
 
-.redsquare-menu .item {
-  display: flex;
-  gap: 12px;
-  align-items: flex-start;
-  padding: 1.5rem;
-  padding-right: 2.5rem;
-  font-size: 18px;
-  border-radius: 3rem;
-  width: 100%;
+.menu .item {
+  display: grid;
+  grid-template-columns: 2.75rem minmax(0, 1fr);
+  align-items: center;
+  column-gap: var(--saito-space-md);
+  min-height: 4.8rem;
+  padding: var(--saito-space-sm) var(--saito-space-md);
+  border-radius: var(--saito-radius);
 }
 
-.redsquare-menu .item i {
-  font-size: 24px;
-  width: 24px;
-  text-align: center;
+/* Persistent selection — Saito menu-select only defines :hover, not .active */
+.menu .item.active {
+  background-color: var(--saito-accent);
+  color: var(--saito-accent-foreground);
 }
 
-.redsquare-menu i::before {
-  -webkit-text-stroke: var(--saito-font-color) 1px;
-  color: transparent;
-  font-size: smaller;
-}
-
-.redsquare-page-active i::before {
-  -webkit-text-stroke: var(--saito-font-color) 2px;
-  color: transparent;
-  font-size: smaller;
-}
-
-.redsquare-menu .item span {
-  display: inline-block;
-  margin-left: 8px;
-  font-size: 2.1rem;
-}
-
-.tweet-button {
-  border-radius: 9999px;
-  padding: 14px 0;
-  font-size: 16px;
-  font-weight: bold;
-  /*color: #fff;*/
-  text-align: center;
-  cursor: pointer;
-  width: 90%;
-  align-self: center;
-  transition: background-color 0.2s;
-  margin-top: 1rem;
-  margin-bottom: 1rem;
+.menu .icon {
+  position: relative;
   display: flex;
   align-items: center;
   justify-content: center;
-  max-height: 54px;
+  width: 2.75rem;
+  height: 2.75rem;
 }
 
-@media (max-width: 1199px) {
-  .redsquare-menu {
-    align-items: flex-end;
+.menu .icon i {
+  font-size: 2.4rem;
+  line-height: 1;
+}
+
+/* Same outline treatment as .saito-menu icons */
+.menu .icon i::before {
+  -webkit-text-stroke: 1px var(--saito-muted-foreground);
+  color: transparent;
+}
+
+.menu .item:hover .icon i::before,
+.menu .item.active .icon i::before {
+  -webkit-text-stroke-color: var(--saito-foreground);
+}
+
+.menu .label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Dot defaults to left: 3.5rem — pin to icon corner in this rail */
+.menu .icon .saito-notification-dot {
+  top: -0.25rem;
+  right: -0.45rem;
+  left: auto;
+}
+
+/* Chat is a mobile bottom-nav affordance only — desktop uses the Chat sidebar. */
+.menu .item[data-nav='chat'] {
+  display: none;
+}
+
+@media (max-width: 1200px) {
+  .menu .item {
+    grid-template-columns: 2.75rem;
+    justify-content: center;
+    justify-items: center;
+    padding-inline: var(--saito-space-xs);
   }
 
-  .redsquare-menu .item {
-    justify-content: flex-end;
-    padding: 1.5rem;
-  }
-
-  .redsquare-menu .item i {
-    margin: 0;
-  }
-
-  .redsquare-menu .item span {
+  .menu .label {
     display: none;
+  }
+}
+
+@media (max-width: 600px) {
+  .menu {
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 40;
+    width: 100%;
+    background-color: var(--saito-popover);
+    background-image: var(--saito-popover-wash);
+    border-top: 1px solid var(--saito-border);
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+  }
+
+  .menu .list {
+    flex-direction: row;
+    align-items: stretch;
+    justify-content: space-around;
+    gap: 0;
+    margin: 0;
+    /* Rem chrome below authored against legacy 10px mobile root */
+    padding: calc(0.4rem * 10 / 12) var(--saito-space-xs) calc(0.55rem * 10 / 12);
+    min-height: var(--redsquare-mobile-nav-height);
+  }
+
+  .menu .item {
+    position: relative;
+    display: flex;
+    flex: 1 1 0;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: calc(0.2rem * 10 / 12);
+    min-width: 0;
+    min-height: calc(5rem * 10 / 12);
+    padding: calc(0.35rem * 10 / 12) calc(0.2rem * 10 / 12);
+    border-radius: var(--saito-radius-lg);
+    color: var(--saito-muted-foreground);
+  }
+
+  .menu .item.active {
+    background-color: transparent;
+    color: var(--saito-muted-foreground);
+  }
+
+  .menu .list.saito-menu-select-subtle > .item:not(.disabled-option):hover {
+    background-color: transparent;
+    color: var(--saito-muted-foreground);
+  }
+
+  .menu .item.active::before {
+    content: '';
+    position: absolute;
+    bottom: calc(-0.3rem * 10 / 12);
+    width: calc(2.6rem * 10 / 12);
+    height: calc(0.2rem * 10 / 12);
+    border-radius: var(--saito-radius);
+    background-color: var(--saito-primary);
+  }
+
+  .menu .item[data-nav='chat'] {
+    display: flex;
+  }
+
+  .menu .icon {
+    width: calc(2.6rem * 10 / 12);
+    height: calc(2.6rem * 10 / 12);
+  }
+
+  .menu .item:hover .icon i::before,
+  .menu .item.active .icon i::before {
+    -webkit-text-stroke-color: var(--saito-muted-foreground);
+  }
+
+  .menu .icon i {
+    font-size: calc(2.2rem * 10 / 12);
+  }
+
+  .menu .label {
+    display: block;
+    max-width: 100%;
+    font-size: 1.083rem;
+    line-height: 1.15;
+    text-align: center;
+    color: inherit;
+  }
+
+  .menu .item.active .label {
+    font-family: var(--saito-font-medium);
+  }
+
+  .menu .icon .saito-notification-dot {
+    top: calc(-0.15rem * 10 / 12);
+    right: calc(-0.35rem * 10 / 12);
   }
 }

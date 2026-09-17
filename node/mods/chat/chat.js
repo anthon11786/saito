@@ -1,5 +1,5 @@
 const SaitoUserTemplate = require('./../../lib/saito/ui/saito-user/saito-user.template.js');
-const Link = require('./../../lib/saito/ui/saito-link/link');
+const SaitoLinkPreview = require('./../../lib/saito/ui/saito-link-preview/saito-link-preview');
 const saito = require('../../lib/saito/saito');
 const ModTemplate = require('../../lib/templates/modtemplate');
 const ChatMain = require('./lib/appspace/main');
@@ -66,6 +66,7 @@ class Chat extends ModTemplate {
     this.audio_notifications = true;
     this.audio_chime = 'Glass';
     this.auto_open_community = false;
+    this.show_splash = true;
 
     this.online = false;
     this.black_list = [];
@@ -121,13 +122,13 @@ class Chat extends ModTemplate {
 
     this.postScripts = ['/saito/lib/emoji-picker/emoji-picker.js'];
 
-    this.social = {
+    this.social = this.buildSocial({
       twitter: '@SaitoOfficial',
       title: 'Saito Chat',
-      url: 'https://saito.io/chat/',
+      url: '/chat/',
       description: 'Instant messaging client on Saito Network blockchain',
       image: 'https://saito.tech/wp-content/uploads/2022/04/saito_card_horizontal.png'
-    };
+    });
   }
 
   hasSettings() {
@@ -194,13 +195,14 @@ class Chat extends ModTemplate {
       this.chat_manager = new ChatManager(this.app, this);
       this.addComponent(this.chat_manager);
     }
-    this.chat_manager.container = '.saito-sidebar.left';
+    const mobile = window.innerWidth < 600;
 
-    if (
-      !(this.app.browser.isMobileBrowser(navigator.userAgent) && window.innerWidth < 750) &&
-      window.innerWidth > 599
-    ) {
+    this.chat_manager.container = '.chat-page-manager-content';
+
+    if (!mobile) {
       this.chat_manager.chat_popup_container = '.saito-main';
+    } else {
+      this.chat_manager.chat_popup_container = '';
     }
 
     this.chat_manager.render_popups_to_screen = 0;
@@ -210,10 +212,12 @@ class Chat extends ModTemplate {
 
     await super.render();
 
+    this.renderFirstVisitSplash();
+
     let chat_id = this.app.browser.returnURLParameter('chat_id');
 
     if (chat_id) {
-      if (this.app.wallet.isValidPublicKey(chat_id)) {
+      if (this.app.crypto.isPublicKey(chat_id)) {
         //data.key = public key(s) of other chat parties
         this.app.connection.emit('open-chat-with', { key: chat_id });
       } else {
@@ -238,7 +242,39 @@ class Chat extends ModTemplate {
       }
 
       window.history.replaceState({}, document.title, '/' + this.slug);
+    } else if (
+      !mobile &&
+      this.groups.length &&
+      !Object.values(this.chat_manager.popups).some((popup) => popup.is_rendered)
+    ) {
+      this.app.connection.emit('open-chat-with', { id: this.groups[0].id });
     }
+  }
+
+  renderFirstVisitSplash() {
+    if (!this.app.BROWSER || !this.show_splash || document.querySelector('.chat-splash-overlay')) {
+      return;
+    }
+
+    document.body.insertAdjacentHTML(
+      'beforeend',
+      `
+        <div class="chat-splash-overlay">
+          <div class="chat-splash-content saito-cta">
+            <div class="saito-cta-logo chat-splash-logo" role="img" aria-label="Saito Chat"></div>
+            <div class="saito-cta-subtitle chat-splash-subtitle">PEER-TO-PEER SECURE MESSAGING</div>
+            <button class="saito-button-primary chat-splash-start" type="button">start chatting</button>
+          </div>
+        </div>
+      `
+    );
+
+    this.show_splash = false;
+    this.saveOptions();
+
+    document.querySelector('.chat-splash-start')?.addEventListener('click', () => {
+      document.querySelector('.chat-splash-overlay')?.remove();
+    });
   }
 
   async onPeerServiceUp(app, peer, service = {}) {
@@ -562,6 +598,7 @@ class Chat extends ModTemplate {
           return {
             text: dynamic_text,
             icon: 'far fa-comment-dots',
+            image: '/saito/icons/saito-chat-icon-solid.svg',
             callback: function (app, publicKey) {
               if (chat_self.chat_manager == null) {
                 chat_self.chat_manager = new ChatManager(chat_self.app, chat_self);
@@ -779,7 +816,7 @@ class Chat extends ModTemplate {
 
       // We put chat message above because we actually have some logic in
       // the "double" processing of chat messages
-      if (this.hasSeenTransaction(tx, Number(blk.id)) && this.app.BROWSER) {
+      if (this.hasSeenTransaction(tx, blk) && this.app.BROWSER) {
         console.log('***************Already processed! ', txmsg.request);
         return;
       }
@@ -829,7 +866,6 @@ class Chat extends ModTemplate {
     }
 
     if (txmsg.request === 'chat history') {
-      console.log('Chat history request for: ', peer.publicKey);
       let group = this.returnGroup(txmsg?.data?.group_id);
 
       if (!group) {
@@ -1250,12 +1286,13 @@ class Chat extends ModTemplate {
       let notice = '';
 
       if (txmsg.group_name !== group.name) {
+        const safeName = this.app.browser.escapeHTML(String(txmsg.group_name || ''));
         notice += `<div class="saito-chat-notice">
         <span class="saito-mention saito-address" data-id="${sender}">${this.app.keychain.returnUsername(
           sender
         )}</span>
-        <span> changed the name of the group to ${txmsg.group_name}</span></div>`;
-        group.name = txmsg.group_name;
+        <span> changed the name of the group to ${safeName}</span></div>`;
+        group.name = String(txmsg.group_name || '');
       }
 
       for (let i in txmsg.member_ids) {
@@ -1476,14 +1513,14 @@ class Chat extends ModTemplate {
       }
     }
 
+    //
     // DMs
+    //
     if (members.length == 2 && !group?.member_ids) {
-      //console.log('Chat: Try encrypting Message for ' + secret_holder);
-
       //
       // Only encrypts if we have swapped keys and haveSharedKey, otherwise just signs
       //
-      newtx = await this.app.wallet.signAndEncryptTransaction(newtx, secret_holder);
+      newtx = await this.app.wallet.signAndEncryptTransaction(newtx, secret_holder, true); // force encrypt
     } else {
       await newtx.sign();
     }
@@ -1720,39 +1757,37 @@ class Chat extends ModTemplate {
               msg += ' new-message';
             }
             msg += `">`;
-            if (block[z].msg.indexOf('<img') != 0) {
-              let saniText = this.app.browser.sanitize(block[z].msg, true);
-              if (saniText.includes('\n')) {
-                msg += saniText.split('\n').join('<br>');
-              } else {
-                if (block[z].link_properties) {
-                  if (solo_link_regex.test(saniText)) {
-                    //console.log('Chat block is just a link: ', saniText);
-                  } else {
-                    msg += saniText;
-                  }
 
-                  msg += `<div class='link-preview link-${block[z].signature}'></div>`;
-                  if (!group?.links) {
-                    group.links = {};
-                  }
-
-                  if (!group.links[block[z].signature]) {
-                    group.links[block[z].signature] = new Link(
-                      this.app,
-                      this,
-                      `.link-${block[z].signature}`,
-                      block[z].link,
-                      block[z].link_properties
-                    );
-                  }
+            let saniText = this.app.browser.sanitize(block[z].msg, true);
+            if (saniText.includes('\n')) {
+              msg += saniText.split('\n').join('<br>');
+            } else {
+              if (block[z].link_properties) {
+                if (solo_link_regex.test(saniText)) {
+                  //console.log('Chat block is just a link: ', saniText);
                 } else {
                   msg += saniText;
                 }
+
+                msg += `<div class='saito-link-preview link-${block[z].signature}'></div>`;
+                if (!group?.links) {
+                  group.links = {};
+                }
+
+                if (!group.links[block[z].signature]) {
+                  group.links[block[z].signature] = new SaitoLinkPreview(
+                    this.app,
+                    this,
+                    `.link-${block[z].signature}`,
+                    block[z].link,
+                    block[z].link_properties
+                  );
+                }
+              } else {
+                msg += saniText;
               }
-            } else {
-              msg += block[z].msg.substring(0, block[z].msg.indexOf('>') + 1);
             }
+
             msg +=
               like_number > 0
                 ? `<div class="chat-likes"> <i class="fas fa-thumbs-up"></i><div class="chat-like-number">${like_number}</div> </div>`
@@ -2331,6 +2366,9 @@ class Chat extends ModTemplate {
       delete this.app.options.chat.enable_notifications;
 
       this.auto_open_community = this.app.options.chat?.auto_open_community;
+      this.show_splash = Object.prototype.hasOwnProperty.call(this.app.options.chat, 'show-splash')
+        ? this.app.options.chat['show-splash']
+        : true;
       if (this.app.options.chat?.black_list) {
         this.black_list = this.app.options.chat.black_list;
       }
@@ -2347,6 +2385,7 @@ class Chat extends ModTemplate {
     this.app.options.chat.audio_notifications = this.audio_notifications;
     this.app.options.chat.audio_chime = this.audio_chime;
     this.app.options.chat.auto_open_community = this.auto_open_community;
+    this.app.options.chat['show-splash'] = this.show_splash;
     this.app.options.chat.black_list = this.black_list;
     this.app.storage.saveOptions();
   }
