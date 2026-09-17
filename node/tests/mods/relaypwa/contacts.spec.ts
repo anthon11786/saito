@@ -36,6 +36,13 @@ describe('contacts', () => {
   it('lists contacts by watched keys with their nicknames', () => {
     const app = makeFakeApp();
     addContact(app, 'validkey123', 'Alice');
-    expect(listContacts(app)).toEqual([{ publicKey: 'validkey123', identifier: 'Alice' }]);
+    expect(listContacts(app, 'my-own-pubkey')).toEqual([{ publicKey: 'validkey123', identifier: 'Alice' }]);
+  });
+
+  it('excludes the wallet\'s own key, which keychain.ts watches by default', () => {
+    const app = makeFakeApp();
+    app.keychain.addKey('my-own-pubkey', { watched: true });
+    addContact(app, 'validkey123', 'Alice');
+    expect(listContacts(app, 'my-own-pubkey')).toEqual([{ publicKey: 'validkey123', identifier: 'Alice' }]);
   });
 });

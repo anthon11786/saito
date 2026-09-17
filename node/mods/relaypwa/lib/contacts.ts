@@ -30,9 +30,18 @@ export function addContact(app: any, publicKey: string, nickname: string): void 
   app.keychain.addKey(publicKey, { identifier: nickname, watched: true });
 }
 
-export function listContacts(app: any): RelayContact[] {
-  return app.keychain.returnWatchedPublicKeys().map((publicKey: string) => ({
-    publicKey,
-    identifier: app.keychain.returnUsername(publicKey)
-  }));
+/**
+ * keychain.ts watches the wallet's own public key too (added during its
+ * own initialize()), so returnWatchedPublicKeys() includes it -- excluded
+ * here via the caller-supplied ownPublicKey, since a contacts list
+ * shouldn't list yourself.
+ */
+export function listContacts(app: any, ownPublicKey: string): RelayContact[] {
+  return app.keychain
+    .returnWatchedPublicKeys()
+    .filter((publicKey: string) => publicKey !== ownPublicKey)
+    .map((publicKey: string) => ({
+      publicKey,
+      identifier: app.keychain.returnUsername(publicKey)
+    }));
 }
