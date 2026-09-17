@@ -14,27 +14,36 @@ export function renderChatTab(contacts: RelayContact[]): string {
     .join('');
 
   const contactItems = contacts
-    .map((c) => `<li data-pubkey="${escapeHtml(c.publicKey)}">${escapeHtml(c.identifier)}</li>`)
+    .map(
+      (c) => `
+      <li class="relaypwa-contact" data-pubkey="${escapeHtml(c.publicKey)}">
+        <span class="relaypwa-contact-avatar">${escapeHtml(c.identifier.slice(0, 1).toUpperCase())}</span>
+        <span class="relaypwa-contact-name">${escapeHtml(c.identifier)}</span>
+      </li>`
+    )
     .join('');
 
   return `
     <div class="relaypwa-chat-tab">
-      <form id="relaypwa-add-contact-form">
-        <input type="text" id="relaypwa-contact-pubkey" placeholder="Contact's public key" />
-        <input type="text" id="relaypwa-contact-nickname" placeholder="Nickname" />
-        <button type="submit">Add contact</button>
-      </form>
-      <div id="relaypwa-contact-error" class="relaypwa-error" hidden></div>
-
-      <ul class="relaypwa-contact-list">${contactItems}</ul>
+      <details class="relaypwa-add-contact">
+        <summary>Add contact</summary>
+        <form id="relaypwa-add-contact-form" class="relaypwa-form">
+          <input type="text" id="relaypwa-contact-pubkey" class="relaypwa-input" placeholder="Contact's public key" />
+          <input type="text" id="relaypwa-contact-nickname" class="relaypwa-input" placeholder="Nickname" />
+          <button type="submit" class="saito-button-secondary">Add contact</button>
+        </form>
+        <div id="relaypwa-contact-error" class="relaypwa-error" hidden></div>
+      </details>
 
       ${
         contacts.length > 0
           ? `
-      <form id="relaypwa-send-message-form">
-        <select id="relaypwa-send-to">${contactOptions}</select>
-        <input type="text" id="relaypwa-message-text" placeholder="Message" />
-        <button type="submit">Send</button>
+      <ul class="relaypwa-contact-list">${contactItems}</ul>
+
+      <form id="relaypwa-send-message-form" class="relaypwa-form relaypwa-send-form">
+        <select id="relaypwa-send-to" class="relaypwa-input">${contactOptions}</select>
+        <input type="text" id="relaypwa-message-text" class="relaypwa-input relaypwa-message-input" placeholder="Message" />
+        <button type="submit" class="saito-button-primary">Send</button>
       </form>
       <div id="relaypwa-send-error" class="relaypwa-error" hidden></div>
       `

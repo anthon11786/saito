@@ -23,7 +23,7 @@ export function renderWalletTab(data: WalletTabData): string {
       <div class="relaypwa-receive">
         <div class="relaypwa-label">Your address</div>
         <div class="relaypwa-pubkey">${escapeHtml(data.publicKey)}</div>
-        <button type="button" id="relaypwa-copy-pubkey-wallet">Copy</button>
+        <button type="button" id="relaypwa-copy-pubkey-wallet" class="saito-button-secondary">Copy</button>
       </div>
       <p class="relaypwa-coming-soon">Sending SAITO is coming soon.</p>
     </div>

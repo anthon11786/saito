@@ -1,5 +1,328 @@
 #relaypwa-root {
-	color: #fff;
-	padding: 2rem;
-	text-align: center;
+  color: var(--saito-foreground);
+  font-family: var(--saito-font);
+  min-height: 100vh;
+  text-align: left;
+}
+
+/* ------------------------------------------------------------
+   Onboarding
+   ------------------------------------------------------------ */
+
+.relaypwa-onboarding {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--saito-space-lg);
+}
+
+.relaypwa-onboarding-card {
+  width: 100%;
+  max-width: 44rem;
+  background: var(--saito-card-wash);
+  border: 1px solid var(--saito-border);
+  border-radius: var(--saito-radius-lg);
+  box-shadow: var(--saito-elevation-2);
+  padding: var(--saito-space-xxl) var(--saito-space-xl);
+  text-align: center;
+}
+
+.relaypwa-logo {
+  font-family: var(--saito-font-heavy);
+  font-size: var(--font-size-tiny);
+  color: var(--saito-primary);
+  text-transform: uppercase;
+  letter-spacing: 0.15em;
+  margin-bottom: var(--saito-space-sm);
+}
+
+.relaypwa-onboarding h1 {
+  font-family: var(--saito-font-heavy);
+  font-size: var(--font-size-large);
+  margin: 0 0 var(--saito-space-md);
+}
+
+.relaypwa-lede {
+  color: var(--saito-muted-foreground);
+  font-size: 1.5rem;
+  line-height: 1.5;
+  margin: 0 0 var(--saito-space-lg);
+}
+
+.relaypwa-pubkey {
+  font-family: var(--saito-font-monospace);
+  font-size: 1.4rem;
+  background: var(--saito-muted);
+  border: 1px solid var(--saito-border);
+  border-radius: var(--saito-radius);
+  padding: var(--saito-space-md);
+  margin-bottom: var(--saito-space-md);
+  word-break: break-all;
+}
+
+.relaypwa-import-instead {
+  margin: var(--saito-space-lg) 0;
+  text-align: left;
+}
+
+.relaypwa-import-instead summary {
+  cursor: pointer;
+  color: var(--saito-muted-foreground);
+  font-size: 1.4rem;
+}
+
+.relaypwa-import-warning {
+  color: var(--saito-muted-foreground);
+  font-size: 1.3rem;
+  line-height: 1.5;
+}
+
+.relaypwa-continue {
+  width: 100%;
+  min-width: 0;
+}
+
+.relaypwa-error {
+  color: var(--saito-destructive);
+  font-size: 1.4rem;
+  margin-top: var(--saito-space-xs);
+}
+
+/* ------------------------------------------------------------
+   Shell / tab bar
+   ------------------------------------------------------------ */
+
+.relaypwa-shell {
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+}
+
+.relaypwa-tab-content {
+  flex: 1;
+  overflow-y: auto;
+  padding: var(--saito-space-lg);
+  padding-bottom: calc(var(--saito-space-lg) + 6rem);
+}
+
+.relaypwa-tabbar {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  display: flex;
+  border-top: 1px solid var(--saito-border);
+  background: var(--saito-popover-wash);
+  backdrop-filter: blur(8px);
+}
+
+.relaypwa-tab {
+  flex: 1;
+  background: none;
+  border: none;
+  color: var(--saito-muted-foreground);
+  font-family: var(--saito-font-medium);
+  font-size: 1.4rem;
+  padding: var(--saito-space-md) var(--saito-space-sm);
+  cursor: pointer;
+  border-top: 2px solid transparent;
+  transition: color 0.16s ease, border-color 0.16s ease;
+}
+
+.relaypwa-tab:hover {
+  color: var(--saito-foreground);
+}
+
+.relaypwa-tab-active {
+  color: var(--saito-primary);
+  border-top-color: var(--saito-primary);
+}
+
+/* ------------------------------------------------------------
+   Shared form bits
+   ------------------------------------------------------------ */
+
+.relaypwa-input {
+  font-family: var(--saito-font);
+  font-size: 1.5rem;
+  color: var(--saito-foreground);
+  background: var(--saito-background);
+  border: 1px solid var(--saito-border);
+  border-radius: var(--saito-radius);
+  padding: var(--saito-space-sm) var(--saito-space-md);
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.relaypwa-input:focus-visible {
+  outline: none;
+  box-shadow: var(--saito-focus-ring);
+  border-color: var(--saito-ring);
+}
+
+.relaypwa-form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--saito-space-sm);
+  margin-bottom: var(--saito-space-md);
+}
+
+.relaypwa-empty-state {
+  color: var(--saito-muted-foreground);
+  font-size: 1.5rem;
+  text-align: center;
+  padding: var(--saito-space-xxl) var(--saito-space-md);
+}
+
+.relaypwa-coming-soon {
+  color: var(--saito-muted-foreground);
+  font-size: 1.5rem;
+  text-align: center;
+  padding: var(--saito-space-xxl) var(--saito-space-md);
+  font-style: italic;
+}
+
+/* ------------------------------------------------------------
+   Wallet tab
+   ------------------------------------------------------------ */
+
+.relaypwa-wallet-tab {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--saito-space-xl);
+  padding-top: var(--saito-space-lg);
+}
+
+.relaypwa-balance {
+  display: flex;
+  align-items: baseline;
+  gap: var(--saito-space-xs);
+}
+
+.relaypwa-balance-amount {
+  font-family: var(--saito-font-heavy);
+  font-size: 4rem;
+}
+
+.relaypwa-balance-ticker {
+  color: var(--saito-muted-foreground);
+  font-size: 1.6rem;
+}
+
+.relaypwa-receive {
+  width: 100%;
+  max-width: 40rem;
+  background: var(--saito-card);
+  border: 1px solid var(--saito-border);
+  border-radius: var(--saito-radius-lg);
+  padding: var(--saito-space-lg);
+  text-align: center;
+}
+
+.relaypwa-label {
+  color: var(--saito-muted-foreground);
+  font-size: 1.3rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  margin-bottom: var(--saito-space-sm);
+}
+
+.relaypwa-receive .relaypwa-pubkey {
+  margin-bottom: var(--saito-space-md);
+}
+
+/* ------------------------------------------------------------
+   Chat tab
+   ------------------------------------------------------------ */
+
+.relaypwa-chat-tab {
+  display: flex;
+  flex-direction: column;
+}
+
+.relaypwa-add-contact {
+  border: 1px solid var(--saito-border);
+  border-radius: var(--saito-radius);
+  padding: var(--saito-space-sm) var(--saito-space-md);
+  margin-bottom: var(--saito-space-md);
+}
+
+.relaypwa-add-contact summary {
+  cursor: pointer;
+  font-size: 1.5rem;
+  padding: var(--saito-space-xs) 0;
+}
+
+.relaypwa-add-contact .relaypwa-form {
+  margin-top: var(--saito-space-sm);
+  margin-bottom: 0;
+}
+
+.relaypwa-contact-list {
+  list-style: none;
+  margin: 0 0 var(--saito-space-lg);
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--saito-space-xs);
+}
+
+.relaypwa-contact {
+  display: flex;
+  align-items: center;
+  gap: var(--saito-space-md);
+  padding: var(--saito-space-sm) var(--saito-space-md);
+  border-radius: var(--saito-radius);
+  background: var(--saito-card);
+  border: 1px solid var(--saito-border);
+}
+
+.relaypwa-contact-avatar {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 3.2rem;
+  height: 3.2rem;
+  min-width: 3.2rem;
+  border-radius: var(--saito-radius-full);
+  background: var(--saito-accent);
+  color: var(--saito-accent-foreground);
+  font-family: var(--saito-font-medium);
+}
+
+.relaypwa-contact-name {
+  font-size: 1.5rem;
+}
+
+.relaypwa-send-form {
+  flex-direction: row;
+  align-items: center;
+  gap: var(--saito-space-sm);
+}
+
+.relaypwa-send-form select.relaypwa-input {
+  width: auto;
+  flex: 0 0 auto;
+  max-width: 12rem;
+}
+
+.relaypwa-message-input {
+  flex: 1;
+}
+
+@media screen and (max-width: 600px) {
+  .relaypwa-onboarding-card {
+    padding: var(--saito-space-xl) var(--saito-space-md);
+  }
+
+  .relaypwa-send-form {
+    flex-wrap: wrap;
+  }
+
+  .relaypwa-send-form select.relaypwa-input {
+    max-width: 100%;
+    flex: 1 1 100%;
+  }
 }
