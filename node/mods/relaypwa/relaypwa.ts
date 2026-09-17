@@ -13,7 +13,17 @@ class RelayPwa extends ModTemplate {
   constructor(app: Saito) {
     super(app);
 
-    this.name = 'Relay';
+    // ModTemplate's module registry keys uniqueness off .name, not .slug --
+    // node/mods/relay/relay.js (an unrelated core off-chain-transport
+    // utility) already uses .name = 'Relay', and having both loaded trips
+    // "mod Relay is installed more than once!" in lib/saito/modules.ts.
+    // .appname is the established way modules separate their internal name
+    // from what's shown to users (videocall.js: name 'Videocall', appname
+    // 'Saito Talk'; ModTemplate.returnName() prefers appname when set) --
+    // so the product stays branded "Relay" everywhere a user sees it while
+    // the internal identifier doesn't collide.
+    this.name = 'RelayPWA';
+    this.appname = 'Relay';
     this.slug = 'relaypwa';
     this.description =
       'Relay: encrypted one-to-one chat, calls and a SAITO wallet, built as an installable PWA on the Saito network.';
