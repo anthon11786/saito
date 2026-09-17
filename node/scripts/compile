@@ -239,7 +239,11 @@ function copy_lite_mods_to_bundler_directory {
         #SUBSTRING=$(echo $line| cut -d".*/" -f 2)
         #SUBSTRING2=$(echo $SUBSTRING| cut -d".js" -f 1)
         SUBSTRING=$(echo $line | sed 's/.*\///')
-        SUBSTRING2=$(echo $SUBSTRING | sed 's/.js.*//')
+        # Strip a trailing .js first (existing entries: 'chat/chat.js'), then
+        # strip from the closing quote onward either way, so an extension-less
+        # entry (a TypeScript module, e.g. 'relaypwa/relaypwa') isn't left with
+        # a stray "'," suffix that would make the later `cp` silently no-op.
+        SUBSTRING2=$(echo $SUBSTRING | sed "s/\.js'.*//; s/'.*//")
         if ! [[ $SUBSTRING2 == *"]"* ]]; then
           if ! [[ $SUBSTRING2 == *"}"* ]]; then
             ARRAY_OF_MODS+=($SUBSTRING2)
