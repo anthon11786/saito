@@ -11,6 +11,7 @@ const {
   normalizeInviteType,
   isStakeReady,
   computeInputApplyTick,
+  REALTIME_MOVES,
   SaitrisBattleEngine
 } = require('../../mods/saitris-battle/lib/saitris-battle-engine');
 
@@ -125,6 +126,15 @@ describe('saitris-battle solo', () => {
 
     expect(emitted).toBe(0);
     expect(engine.state.players[0].linesSent).toBeGreaterThan(0);
+  });
+
+  test('solo only filters our own moves, never the game engine handshake', () => {
+    // dropping these stalls initializeGameQueue before it ever reaches READY,
+    // which leaves the game stuck on "Initializing Game"
+    for (let engineMove of ['READY', 'REQUEST_AVAILABLE_CRYPTOS', 'AVAILABLE_CRYPTOS', 'SETUP']) {
+      expect(REALTIME_MOVES).not.toContain(engineMove);
+    }
+    expect(REALTIME_MOVES).toContain('INPUT');
   });
 
   test('checksum round-trips for both player counts', () => {

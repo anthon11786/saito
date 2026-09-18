@@ -444,6 +444,25 @@ function determineWinner(state) {
   return null;
 }
 
+//
+// moves the module exchanges per tick during a versus match. They carry no
+// meaning in a solo run, so solo drops them instead of paying a transaction
+// fee per keypress. Anything NOT listed here (READY, the crypto handshake,
+// gameover) belongs to the game engine and must always be sent, or the
+// engine's queue stalls waiting on a reply that never comes.
+//
+const REALTIME_MOVES = [
+  'TB_READY',
+  'START',
+  'SYNC',
+  'SYNC_ACK',
+  'INPUT',
+  'GARBAGE',
+  'KO',
+  'STATE',
+  'PSTATE'
+];
+
 function normalizeInviteType(type) {
   if (type === 'private') {
     return 'private';
@@ -872,6 +891,7 @@ module.exports = {
   applyGarbageLines,
   createInitialState,
   determineWinner,
+  REALTIME_MOVES,
   normalizeInviteType,
   isStakeReady,
   computeInputApplyTick,

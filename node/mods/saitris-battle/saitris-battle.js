@@ -9,6 +9,7 @@ const {
   BOARD_WIDTH,
   BOARD_HEIGHT,
   PIECES,
+  REALTIME_MOVES,
   normalizeInviteType,
   isStakeReady,
   computeInputApplyTick
@@ -130,11 +131,14 @@ class SaitrisBattle extends GameTemplate {
   }
 
   //
-  // solo runs entirely in this browser, so no move ever goes to the network.
-  // gameover still sends, so league/stats record the run.
+  // solo has no opponent to tell, so our own realtime traffic is dropped
+  // rather than becoming a fee-paying transaction per keypress. Engine moves
+  // (READY, crypto handshakes, gameover) must still go out, or the game
+  // engine's own queue stalls waiting on a reply.
   //
   async sendGameMoveTransaction(type = 'game', extra = {}, mycallback = null) {
-    if (this.isSolo()) {
+    let move = this.game?.turn?.[0]?.split('\t')[0];
+    if (this.isSolo() && REALTIME_MOVES.includes(move)) {
       this.game.turn = [];
       return;
     }
@@ -190,6 +194,16 @@ class SaitrisBattle extends GameTemplate {
   }
 
   initializeGame(game_id) {
+    //
+    // there is nobody to bet against in solo, and can_bet makes
+    // initializeGameQueue queue REQUEST_AVAILABLE_CRYPTOS, which halts the
+    // queue until that move returns over the network. Solo sends nothing, so
+    // the queue would never reach READY and the game would never initialize.
+    //
+    if (this.isSolo()) {
+      this.can_bet = 0;
+    }
+
     if (this.game.initializing) {
       this.game.state = this.game.state || {};
       this.game.state.sessionSeed = this.game.dice;
