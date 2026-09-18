@@ -11,7 +11,13 @@ const {
   normalizeInviteType,
   isStakeReady,
   computeInputApplyTick,
+  scoreForClears,
   REALTIME_MOVES,
+  parseClockMinutes,
+  isFreeSaitrisMode,
+  canPlaySaitrisVersus,
+  nftUnlocksSaitris,
+  walletOwnsSaitrisPass,
   SaitrisBattleEngine
 } = require('../../mods/saitris-battle/lib/saitris-battle-engine');
 
@@ -79,6 +85,23 @@ describe('saitris-battle engine', () => {
     expect(engine.state.matchOver).toBe(true);
     expect(['timer', 'knockouts']).toContain(engine.state.reason);
   });
+
+  test('marathon ignores the 2 minute mark', () => {
+    let engine = new SaitrisBattleEngine({
+      sessionSeed: 'seed',
+      tickMs: 100,
+      matchDurationMs: 0
+    });
+    engine.start(Date.now() - 120000);
+    engine.advanceToTick(engine.getCurrentTick(Date.now()));
+    expect(engine.state.matchOver).toBe(false);
+  });
+
+  test('line clears use original tetris scoring', () => {
+    expect(scoreForClears(1, 0)).toBe(40);
+    expect(scoreForClears(4, 0)).toBe(1200);
+    expect(scoreForClears(1, 1)).toBe(80);
+  });
 });
 
 describe('saitris-battle solo', () => {
@@ -104,6 +127,7 @@ describe('saitris-battle solo', () => {
 
     expect(engine.state.matchOver).toBe(true);
     expect(engine.state.reason).toBe('topout');
+    expect(engine.state.winner).toBeNull();
     expect(engine.state.players[0].knockouts).toBe(0);
   });
 
@@ -166,6 +190,43 @@ describe('saitris-battle inputs', () => {
     });
 
     expect(applyTick).toBe(13);
+  });
+});
+
+describe('saitris-battle freemium', () => {
+  test('solo is free at any clock, versus is not', () => {
+    expect(parseClockMinutes(undefined)).toBe(2);
+    expect(isFreeSaitrisMode({ players: 1, clockMinutes: 2 })).toBe(true);
+    expect(isFreeSaitrisMode({ players: 1 })).toBe(true);
+    expect(isFreeSaitrisMode({ players: 1, clockMinutes: 5 })).toBe(true);
+    expect(isFreeSaitrisMode({ players: 1, clockMinutes: 0 })).toBe(true);
+    expect(isFreeSaitrisMode({ players: 2, clockMinutes: 2 })).toBe(false);
+  });
+
+  test('one host pass opens versus, joiner does not need one', () => {
+    expect(canPlaySaitrisVersus({ isHost: true, ownsPass: true })).toBe(true);
+    expect(canPlaySaitrisVersus({ isHost: true, ownsPass: false })).toBe(false);
+    expect(canPlaySaitrisVersus({ isHost: false, ownsPass: false })).toBe(true);
+    expect(canPlaySaitrisVersus({ isHost: false, ownsPass: true })).toBe(true);
+  });
+
+  test('pass NFT matches type ticker or module fields', () => {
+    expect(nftUnlocksSaitris({ type: 'saitris-battle' })).toBe(true);
+    expect(nftUnlocksSaitris({ ticker: 'SAITRIS' })).toBe(true);
+    expect(nftUnlocksSaitris({ data: { module: 'Saitris Battle' } })).toBe(true);
+    expect(nftUnlocksSaitris({ type: 'token', ticker: 'SAITO' })).toBe(false);
+    expect(
+      nftUnlocksSaitris(
+        { slip3: { utxo_key: 'dead' } },
+        () => 'saitris-battle'
+      )
+    ).toBe(true);
+  });
+
+  test('wallet scan needs one matching NFT', () => {
+    expect(walletOwnsSaitrisPass([])).toBe(false);
+    expect(walletOwnsSaitrisPass([{ type: 'token' }])).toBe(false);
+    expect(walletOwnsSaitrisPass([{ type: 'token' }, { type: 'saitris-battle' }])).toBe(true);
   });
 });
 
