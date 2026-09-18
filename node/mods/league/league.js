@@ -143,14 +143,14 @@ class League extends ModTemplate {
     //
     this.app.modules.getRespondTos('default-league').forEach(async (modResponse) => {
       await this.addLeague({
-        id: app.crypto.hash(modResponse.modname), // id
-        game: modResponse.game, // game - name of game mod
-        name: modResponse.name, // name - name of league
-        admin: '', // admin - publicKey (if exists)
-        status: 'public', // status - public or private
-        description: modResponse.description, //
-        ranking_algorithm: modResponse.ranking_algorithm, //
-        default_score: modResponse.default_score // default ranking for newbies
+        id: app.crypto.hash(modResponse.league_key || modResponse.modname),
+        game: modResponse.game,
+        name: modResponse.name,
+        admin: '',
+        status: 'public',
+        description: modResponse.description,
+        ranking_algorithm: modResponse.ranking_algorithm,
+        default_score: modResponse.default_score
       });
     });
 
@@ -1014,6 +1014,13 @@ class League extends ModTemplate {
     // update database
     //
     for (let leag of relevantLeagues) {
+      if (leag.ranking_algorithm === 'HSC' && publicKeys.length !== 1) {
+        continue;
+      }
+      if (leag.ranking_algorithm === 'ELO' && publicKeys.length < 2) {
+        continue;
+      }
+
       let myScore = leag.score;
       let myRank = leag.rank;
 

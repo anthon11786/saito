@@ -8,10 +8,15 @@ const {
   DEFAULT_ROLLBACK_WINDOW_TICKS,
   BOARD_WIDTH,
   BOARD_HEIGHT,
+  FREE_CLOCK_MINUTES,
   PIECES,
   REALTIME_MOVES,
   normalizeInviteType,
   isStakeReady,
+  canPlaySaitrisVersus,
+  nftUnlocksSaitris,
+  walletOwnsSaitrisPass,
+  parseClockMinutes,
   computeInputApplyTick
 } = require('./lib/saitris-battle-engine');
 
@@ -23,7 +28,8 @@ class SaitrisBattle extends GameTemplate {
     this.slug = 'saitris-battle';
     this.title = 'Saitris Battle';
     this.description =
-      'Real-time two-player Saitris battle with garbage lines, knockouts, and optional staking.';
+      'Clear lines in a falling-block well. Solo is free. One Saitris Pass opens 1v1 and ranked.';
+    this.saitrisPassOwned = false;
     this.categories = 'Games Arcade Realtime';
     this.minPlayers = 1;
     this.maxPlayers = 2;
@@ -66,6 +72,68 @@ class SaitrisBattle extends GameTemplate {
     if (app.BROWSER) {
       this.styles.push(`/${this.returnSlug()}/saitris-battle.css`);
     }
+    this.scanWalletForPass();
+    if (!this.ownsSaitrisPass()) {
+      this.publisher_message =
+        'Solo is free. A Saitris Pass NFT from the Store opens 1v1 and ranked. One pass is enough to start the match.';
+    }
+    this.app.connection?.on('on-nft-received', (payload) => {
+      this.receiveNFT(payload);
+      if (this.ownsSaitrisPass()) {
+        this.publisher_message = '';
+      }
+    });
+  }
+
+  nftTypeExtractor() {
+    let wallet = this.app?.wallet;
+    if (wallet && typeof wallet.extractNFTType === 'function') {
+      return wallet.extractNFTType.bind(wallet);
+    }
+    return null;
+  }
+
+  scanWalletForPass() {
+    for (let nft of this.app?.options?.wallet?.nfts || []) {
+      this.receiveNFT(nft);
+    }
+  }
+
+  receiveNFT(nft = null) {
+    if (nftUnlocksSaitris(nft, this.nftTypeExtractor())) {
+      this.saitrisPassOwned = true;
+    }
+  }
+
+  ownsSaitrisPass() {
+    return (
+      this.saitrisPassOwned ||
+      walletOwnsSaitrisPass(this.app?.options?.wallet?.nfts, this.nftTypeExtractor())
+    );
+  }
+
+  returnPassHref() {
+    return '/store';
+  }
+
+  showSaitrisPassOverlay() {
+    if (!this.app.BROWSER) {
+      return;
+    }
+    let html = `
+      <div class="saitris-rules saitris-pass">
+        <h1>Saitris Pass</h1>
+        <p>Solo is free. A Saitris Pass opens 1v1 and ranked. Invite anyone; they do not need a pass to play.</p>
+        <a class="saito-button-primary" href="${this.returnPassHref()}">Open Store</a>
+      </div>
+    `;
+    if (this.overlay) {
+      this.overlay.show(html);
+      return;
+    }
+    if (typeof salert === 'function') {
+      salert('Saitris Pass required. Buy it on the Store.');
+    }
   }
 
   //
@@ -102,9 +170,14 @@ class SaitrisBattle extends GameTemplate {
     this.menu.render();
 
     this.cacheCanvasRefs();
+    if (this.game?.state?.licenseBlocked) {
+      this.updateStatus('Saitris Pass required');
+      this.showSaitrisPassOverlay();
+      return;
+    }
     if (this.isSolo()) {
       document.querySelector('.saitris-battle')?.classList.add('saitris-solo');
-      this.updateStatus('Solo run. Good luck.');
+      this.updateStatus('Solo');
     } else {
       this.updateStatus('Waiting for opponent to join...');
     }
@@ -124,10 +197,58 @@ class SaitrisBattle extends GameTemplate {
     this.localQueueCanvas = document.getElementById('saitris-queue-local');
     this.opponentHoldCanvas = document.getElementById('saitris-hold-opponent');
     this.opponentQueueCanvas = document.getElementById('saitris-queue-opponent');
+    this.prepareCanvas(this.localBoardCanvas, BOARD_WIDTH, BOARD_HEIGHT);
+    this.prepareCanvas(this.opponentBoardCanvas, BOARD_WIDTH, BOARD_HEIGHT);
+    this.prepareCanvas(this.localHoldCanvas);
+    this.prepareCanvas(this.localQueueCanvas);
+    this.prepareCanvas(this.opponentHoldCanvas);
+    this.prepareCanvas(this.opponentQueueCanvas);
+  }
+
+  prepareCanvas(canvas, cols = 0, rows = 0) {
+    if (!canvas) {
+      return;
+    }
+    let dpr = window.devicePixelRatio || 1;
+    let cssWidth = canvas.clientWidth || canvas.width;
+    let cssHeight =
+      cols > 0 && rows > 0
+        ? (cssWidth * rows) / cols
+        : canvas.clientHeight || canvas.height;
+    canvas.style.width = `${cssWidth}px`;
+    canvas.style.height = `${cssHeight}px`;
+    canvas.width = Math.round(cssWidth * dpr);
+    canvas.height = Math.round(cssHeight * dpr);
+    canvas.getContext('2d').setTransform(dpr, 0, 0, dpr, 0, 0);
   }
 
   isSolo() {
     return this.game?.players?.length === 1;
+  }
+
+  isVersusGame() {
+    return (
+      (this.game?.players?.length || 0) > 1 ||
+      Number(this.game?.players_needed) === 2 ||
+      Number(this.game?.options?.['game-wizard-players-select']) === 2
+    );
+  }
+
+  enforceSaitrisLicense() {
+    if (!this.isVersusGame()) {
+      return true;
+    }
+    if (
+      canPlaySaitrisVersus({
+        isHost: this.game.player === 1,
+        ownsPass: this.ownsSaitrisPass()
+      })
+    ) {
+      return true;
+    }
+    this.game.state = this.game.state || {};
+    this.game.state.licenseBlocked = true;
+    return false;
   }
 
   //
@@ -146,6 +267,18 @@ class SaitrisBattle extends GameTemplate {
   }
 
   sendReadyIfNeeded() {
+    if (!this.enforceSaitrisLicense()) {
+      this.clearReadyRetryTimer();
+      if (this.gameBrowserActive()) {
+        this.updateStatus('Saitris Pass required');
+        this.showSaitrisPassOverlay();
+      }
+      return;
+    }
+    if (this.game?.state?.licenseBlocked) {
+      this.clearReadyRetryTimer();
+      return;
+    }
     if (this.game?.state?.readySent || this.matchStarted || this.matchEnded) {
       this.clearReadyRetryTimer();
       return;
@@ -204,6 +337,14 @@ class SaitrisBattle extends GameTemplate {
       this.can_bet = 0;
     }
 
+    if (!this.enforceSaitrisLicense()) {
+      if (this.gameBrowserActive()) {
+        this.updateStatus('Saitris Pass required');
+        this.showSaitrisPassOverlay();
+      }
+      return;
+    }
+
     if (this.game.initializing) {
       this.game.state = this.game.state || {};
       this.game.state.sessionSeed = this.game.dice;
@@ -211,6 +352,7 @@ class SaitrisBattle extends GameTemplate {
       this.game.state.tickMs = DEFAULT_TICK_MS;
       this.game.state.inputBufferTicks = DEFAULT_INPUT_BUFFER_TICKS;
       this.game.state.rollbackWindowTicks = DEFAULT_ROLLBACK_WINDOW_TICKS;
+      this.game.state.matchDurationMs = this.returnMatchDurationMs();
       this.game.state.startTime = this.game.state.startTime || null;
       this.game.state.readyPlayers = this.game.state.readyPlayers || {};
       this.game.state.readySent = this.game.state.readySent || false;
@@ -436,6 +578,9 @@ class SaitrisBattle extends GameTemplate {
   }
 
   maybeStartMatch() {
+    if (this.game?.state?.licenseBlocked) {
+      return;
+    }
     if (this.matchStarted || !this.game?.state?.startTime) {
       return;
     }
@@ -453,6 +598,64 @@ class SaitrisBattle extends GameTemplate {
     this.startMatch();
   }
 
+  returnMatchDurationMs() {
+    let minutes = parseClockMinutes(this.game?.options?.clock);
+    return Math.max(0, minutes) * 60000;
+  }
+
+  returnOptions() {
+    if (this.ownsSaitrisPass()) {
+      return super.returnOptions();
+    }
+    return `
+      <input type="hidden" class="game-wizard-players-select" name="game-wizard-players-select" value="1">
+      <div class="overlay-input saitris-pass-note">
+        <a class="saito-button-secondary" href="${this.returnPassHref()}">Unlock 1v1 ranked on Store</a>
+      </div>
+    `;
+  }
+
+  returnAdvancedOptions() {
+    let current = this.game?.options?.clock ?? String(FREE_CLOCK_MINUTES);
+    return `
+      <div class="overlay-input">
+        <label for="saitris-clock">Time</label>
+        <select id="saitris-clock" class="saito-form-select" name="clock">
+          <option value="2"${current == 2 || current === '2' ? ' selected' : ''}>2 minutes</option>
+          <option value="5"${current == 5 || current === '5' ? ' selected' : ''}>5 minutes</option>
+          <option value="0"${current == 0 || current === '0' ? ' selected' : ''}>Marathon (until top-out)</option>
+        </select>
+      </div>
+    `;
+  }
+
+  respondTo(type = '', obj) {
+    this.publisher_message = this.ownsSaitrisPass()
+      ? ''
+      : 'Solo is free. A Saitris Pass NFT from the Store opens 1v1 and ranked. One pass is enough to start the match.';
+    if (type == 'default-league') {
+      return [
+        {
+          name: 'Saitris Battle',
+          game: this.name,
+          description: '1v1 ranked. One Saitris Pass opens the match.',
+          ranking_algorithm: 'ELO',
+          default_score: 1500,
+          league_key: this.name
+        },
+        {
+          name: 'Saitris Solo',
+          game: this.name,
+          description: 'High score. Free marathon and timed solo runs.',
+          ranking_algorithm: 'HSC',
+          default_score: 0,
+          league_key: this.name + ' Solo'
+        }
+      ];
+    }
+    return super.respondTo(type, obj);
+  }
+
   startMatch() {
     let { sessionSeed, startTick, tickMs, inputBufferTicks, rollbackWindowTicks } =
       this.game.state;
@@ -462,7 +665,8 @@ class SaitrisBattle extends GameTemplate {
       tickMs,
       inputBufferTicks,
       rollbackWindowTicks: this.isSolo() ? 0 : rollbackWindowTicks,
-      playerCount: this.isSolo() ? 1 : 2
+      playerCount: this.isSolo() ? 1 : 2,
+      matchDurationMs: this.game.state.matchDurationMs ?? this.returnMatchDurationMs()
     });
     this.engine.authoritativePlayerIndex = this.getLocalPlayerIndex();
     this.engine.start(this.game.state.startTime, this.game.state.timeOffsetMs || 0);
@@ -470,7 +674,7 @@ class SaitrisBattle extends GameTemplate {
     this.engine.onGarbage = (evt) => this.queueGarbageEvent(evt);
     this.engine.onKO = (evt) => this.queueKOEvent(evt);
     this.matchStarted = true;
-    this.updateStatus('Match in progress...');
+    this.updateStatus(this.isSolo() ? 'Solo' : 'Match in progress');
     this.startRenderLoop();
   }
 
@@ -572,9 +776,9 @@ class SaitrisBattle extends GameTemplate {
 
     if (this.isSolo()) {
       let me = this.engine.state.players[0];
-      let headline = reason === 'topout' ? 'Topped out' : 'Time';
-      this.updateStatus(`${headline}. Lines sent: ${me.linesSent}`);
-      await this.sendGameOverTransaction([this.game.players[0]], reason);
+      let score = me.score || 0;
+      this.updateStatus(`Game Over: ${score}`);
+      await this.sendGameOverTransaction([], String(score));
       return;
     }
 
@@ -609,11 +813,13 @@ class SaitrisBattle extends GameTemplate {
     }
     let nowMs = Date.now() + (this.engine.timeOffsetMs || 0);
     let elapsedMs = Math.max(0, nowMs - this.engine.startTimeMs);
-    let remaining = Math.max(0, 120000 - elapsedMs);
-    let seconds = Math.floor(remaining / 1000);
+    let durationMs = this.engine.matchDurationMs || 0;
+    let displayMs = durationMs > 0 ? Math.max(0, durationMs - elapsedMs) : elapsedMs;
+    let seconds = Math.floor(displayMs / 1000);
     let minutes = Math.floor(seconds / 60);
     let secs = (seconds % 60).toString().padStart(2, '0');
     timerElement.textContent = `${minutes}:${secs}`;
+    timerElement.classList.toggle('is-low', durationMs > 0 && displayMs <= 15000);
   }
 
   returnOpponentState() {
@@ -639,9 +845,13 @@ class SaitrisBattle extends GameTemplate {
 
     let localKOs = document.getElementById('saitris-knockouts-local');
     let localLines = document.getElementById('saitris-lines-local');
+    let localScore = document.getElementById('saitris-score-local');
 
     if (localKOs) localKOs.textContent = localPlayer.knockouts.toString();
-    if (localLines) localLines.textContent = localPlayer.linesSent.toString();
+    if (localLines) {
+      localLines.textContent = (this.isSolo() ? localPlayer.linesCleared : localPlayer.linesSent).toString();
+    }
+    if (localScore) localScore.textContent = (localPlayer.score || 0).toString();
 
     this.drawMini(this.localHoldCanvas, localPlayer.hold);
     this.drawQueue(this.localQueueCanvas, localPlayer.nextQueue);
@@ -667,18 +877,42 @@ class SaitrisBattle extends GameTemplate {
     return 0;
   }
 
+  canvasCssSize(canvas) {
+    return {
+      width: canvas.clientWidth || canvas.width,
+      height: canvas.clientHeight || canvas.height
+    };
+  }
+
   drawBoard(canvas, player, showGhost) {
     let ctx = canvas.getContext('2d');
-    let cellSize = canvas.width / BOARD_WIDTH;
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
-    ctx.fillStyle = '#0f1114';
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    let { width } = this.canvasCssSize(canvas);
+    let cellSize = width / BOARD_WIDTH;
+    let height = cellSize * BOARD_HEIGHT;
+    ctx.clearRect(0, 0, width, height);
+    ctx.fillStyle = '#0c0d0c';
+    ctx.fillRect(0, 0, width, height);
+
+    ctx.strokeStyle = 'rgba(243,240,234,0.06)';
+    ctx.lineWidth = 1;
+    for (let x = 1; x < BOARD_WIDTH; x++) {
+      ctx.beginPath();
+      ctx.moveTo(x * cellSize, 0);
+      ctx.lineTo(x * cellSize, height);
+      ctx.stroke();
+    }
+    for (let y = 1; y < BOARD_HEIGHT; y++) {
+      ctx.beginPath();
+      ctx.moveTo(0, y * cellSize);
+      ctx.lineTo(width, y * cellSize);
+      ctx.stroke();
+    }
 
     for (let y = 0; y < BOARD_HEIGHT; y++) {
       for (let x = 0; x < BOARD_WIDTH; x++) {
         let cell = player.board[y][x];
         if (cell !== 0) {
-          this.drawCell(ctx, x, y, cellSize, this.colorForCell(cell), 1);
+          this.drawCell(ctx, x, y, cellSize, this.colorForCell(cell));
         }
       }
     }
@@ -704,7 +938,8 @@ class SaitrisBattle extends GameTemplate {
           player.x,
           player.y + ghostOffset,
           cellSize,
-          'rgba(255,255,255,0.15)'
+          this.colorForPiece(player.active),
+          true
         );
       }
 
@@ -720,22 +955,38 @@ class SaitrisBattle extends GameTemplate {
     }
   }
 
-  drawPiece(ctx, type, rotation, x, y, cellSize, color) {
+  drawPiece(ctx, type, rotation, x, y, cellSize, color, ghost = false) {
     let cells = PIECES[type][rotation % 4];
     for (let [dx, dy] of cells) {
       let nx = x + dx;
       let ny = y + dy;
       if (ny >= 0) {
-        this.drawCell(ctx, nx, ny, cellSize, color, 1);
+        this.drawCell(ctx, nx, ny, cellSize, color, ghost);
       }
     }
   }
 
-  drawCell(ctx, x, y, cellSize, color, alpha) {
+  drawCell(ctx, x, y, cellSize, color, ghost = false) {
+    let pad = Math.max(1, cellSize * 0.06);
+    let px = x * cellSize + pad;
+    let py = y * cellSize + pad;
+    let s = cellSize - pad * 2;
+    if (ghost) {
+      ctx.strokeStyle = color;
+      ctx.globalAlpha = 0.45;
+      ctx.lineWidth = Math.max(1.5, cellSize * 0.08);
+      ctx.strokeRect(px + 0.5, py + 0.5, s - 1, s - 1);
+      ctx.globalAlpha = 1;
+      return;
+    }
     ctx.fillStyle = color;
-    ctx.globalAlpha = alpha;
-    ctx.fillRect(x * cellSize, y * cellSize, cellSize - 1, cellSize - 1);
-    ctx.globalAlpha = 1;
+    ctx.fillRect(px, py, s, s);
+    ctx.fillStyle = 'rgba(255,255,255,0.22)';
+    ctx.fillRect(px, py, s, Math.max(2, s * 0.12));
+    ctx.fillRect(px, py, Math.max(2, s * 0.12), s);
+    ctx.fillStyle = 'rgba(0,0,0,0.28)';
+    ctx.fillRect(px, py + s - Math.max(2, s * 0.12), s, Math.max(2, s * 0.12));
+    ctx.fillRect(px + s - Math.max(2, s * 0.12), py, Math.max(2, s * 0.12), s);
   }
 
   drawMini(canvas, piece) {
@@ -743,9 +994,8 @@ class SaitrisBattle extends GameTemplate {
       return;
     }
     let ctx = canvas.getContext('2d');
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
-    ctx.fillStyle = '#0f1114';
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    let { width, height } = this.canvasCssSize(canvas);
+    ctx.clearRect(0, 0, width, height);
     if (!piece) {
       return;
     }
@@ -760,9 +1010,9 @@ class SaitrisBattle extends GameTemplate {
     }
     let w = maxX - minX + 1;
     let h = maxY - minY + 1;
-    let cellSize = canvas.width / 4;
-    let x = (4 - w) / 2 - minX;
-    let y = (4 - h) / 2 - minY;
+    let cellSize = Math.min(width, height) / 5;
+    let x = (width / cellSize - w) / 2 - minX;
+    let y = (height / cellSize - h) / 2 - minY;
 
     this.drawPiece(ctx, piece, 0, x, y, cellSize, this.colorForPiece(piece));
   }
@@ -772,10 +1022,10 @@ class SaitrisBattle extends GameTemplate {
       return;
     }
     let ctx = canvas.getContext('2d');
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
-    ctx.fillStyle = '#0f1114';
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
-    let cellSize = canvas.width / 4;
+    let { width, height } = this.canvasCssSize(canvas);
+    ctx.clearRect(0, 0, width, height);
+    let cellSize = width / 5;
+    let slot = height / 3;
     queue.slice(0, 3).forEach((piece, idx) => {
       let cells = PIECES[piece][0];
       let minX = 4, minY = 4, maxX = 0, maxY = 0;
@@ -787,8 +1037,8 @@ class SaitrisBattle extends GameTemplate {
       }
       let w = maxX - minX + 1;
       let h = maxY - minY + 1;
-      let x = (4 - w) / 2 - minX;
-      let y = (4 - h) / 2 - minY + idx * 4;
+      let x = ((width / cellSize) - w) / 2 - minX;
+      let y = (slot / cellSize - h) / 2 - minY + (idx * slot) / cellSize;
 
       this.drawPiece(ctx, piece, 0, x, y, cellSize, this.colorForPiece(piece));
     });
@@ -812,35 +1062,35 @@ class SaitrisBattle extends GameTemplate {
   colorForCell(cell) {
     return [
       '#000000',
-      '#00f0f0',
-      '#f0f000',
-      '#a000f0',
-      '#00f000',
-      '#f00000',
-      '#0000f0',
-      '#f0a000',
-      '#888888'
+      '#2ec4d6',
+      '#e2c44a',
+      '#b06bdb',
+      '#5dbe5a',
+      '#e0524d',
+      '#4d7ee0',
+      '#f54900',
+      '#5a5752'
     ][cell];
   }
 
   colorForPiece(type) {
     switch (type) {
     case 'I':
-      return '#00f0f0';
+      return '#2ec4d6';
     case 'O':
-      return '#f0f000';
+      return '#e2c44a';
     case 'T':
-      return '#a000f0';
+      return '#b06bdb';
     case 'S':
-      return '#00f000';
+      return '#5dbe5a';
     case 'Z':
-      return '#f00000';
+      return '#e0524d';
     case 'J':
-      return '#0000f0';
+      return '#4d7ee0';
     case 'L':
-      return '#f0a000';
+      return '#f54900';
     default:
-      return '#ffffff';
+      return '#f3f0ea';
     }
   }
 

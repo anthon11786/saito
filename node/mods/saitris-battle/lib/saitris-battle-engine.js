@@ -2,6 +2,8 @@ const DEFAULT_TICK_MS = 100;
 const DEFAULT_INPUT_BUFFER_TICKS = 1;
 const DEFAULT_ROLLBACK_WINDOW_TICKS = 50;
 const MATCH_DURATION_MS = 120000;
+const FREE_CLOCK_MINUTES = 2;
+const SAITRIS_PASS_TYPE = 'saitris-battle';
 const MAX_HISTORY_TICKS = 200;
 const BOARD_WIDTH = 10;
 const BOARD_HEIGHT = 20;
@@ -284,7 +286,9 @@ function createPlayerState(seed, garbageSeed) {
     pendingGarbageHoles: [],
     linesSent: 0,
     knockouts: 0,
-    comboCounter: -1
+    comboCounter: -1,
+    linesCleared: 0,
+    score: 0
   };
 }
 
@@ -487,6 +491,70 @@ function isStakeReady({ crypto, stake, stakeAccepted }) {
   return Boolean(stakeAccepted);
 }
 
+function scoreForClears(cleared, level) {
+  return [0, 40, 100, 300, 1200][cleared] * (level + 1) || 0;
+}
+
+function dropIntervalForLevel(level, softDrop) {
+  if (softDrop) {
+    return 1;
+  }
+  return Math.max(1, 10 - level);
+}
+
+function parseClockMinutes(clock) {
+  if (clock === undefined || clock === null || clock === '') {
+    return FREE_CLOCK_MINUTES;
+  }
+  let minutes = Number(clock);
+  if (Number.isNaN(minutes)) {
+    return FREE_CLOCK_MINUTES;
+  }
+  return minutes;
+}
+
+function isFreeSaitrisMode({ players } = {}) {
+  return Number(players) === 1;
+}
+
+function canPlaySaitrisVersus({ isHost, ownsPass } = {}) {
+  if (!isHost) {
+    return true;
+  }
+  return Boolean(ownsPass);
+}
+
+function nftUnlocksSaitris(nft = {}, extractType) {
+  let type = nft.type || '';
+  let utxo = nft.slip3?.utxo_key || nft.slip3_utxo || '';
+  if (!type && typeof extractType === 'function' && utxo) {
+    type = extractType(utxo) || '';
+  }
+  if (type === SAITRIS_PASS_TYPE) {
+    return true;
+  }
+  let blob = [
+    type,
+    nft.ticker,
+    nft.id,
+    nft.module,
+    nft.game,
+    nft.slug,
+    nft.data?.module,
+    nft.data?.game,
+    nft.data?.slug,
+    nft.data?.class
+  ]
+    .filter(Boolean)
+    .join(' ')
+    .toLowerCase();
+  return blob.includes('saitris');
+}
+
+function walletOwnsSaitrisPass(nfts, extractType) {
+  return Array.isArray(nfts) && nfts.some((nft) => nftUnlocksSaitris(nft, extractType));
+}
+
 function computeInputApplyTick({ engine, playerIndex, action, nowMs }) {
   let currentTick = engine.getCurrentTick(nowMs);
   let applyTick = currentTick + engine.inputBufferTicks;
@@ -515,12 +583,15 @@ class SaitrisBattleEngine {
     tickMs = DEFAULT_TICK_MS,
     inputBufferTicks = DEFAULT_INPUT_BUFFER_TICKS,
     rollbackWindowTicks = DEFAULT_ROLLBACK_WINDOW_TICKS,
-    playerCount = 2
+    playerCount = 2,
+    matchDurationMs = MATCH_DURATION_MS
   }) {
     this.tickMs = tickMs;
     this.inputBufferTicks = inputBufferTicks;
     this.rollbackWindowTicks = rollbackWindowTicks;
-    this.matchDurationTicks = Math.ceil(MATCH_DURATION_MS / tickMs);
+    this.matchDurationMs = matchDurationMs;
+    this.matchDurationTicks =
+      matchDurationMs > 0 ? Math.ceil(matchDurationMs / tickMs) : Number.POSITIVE_INFINITY;
     this.state = createInitialState({ sessionSeed, startTick, playerCount });
     this.inputsByTick = new Map();
     this.history = new Map();
@@ -688,6 +759,9 @@ class SaitrisBattleEngine {
     let cleared = clearLines(player);
     player.comboCounter = nextComboCounter(player.comboCounter, cleared);
     if (cleared > 0) {
+      let level = Math.floor(player.linesCleared / 10);
+      player.linesCleared += cleared;
+      player.score += scoreForClears(cleared, level);
       if (this.isAuthoritativeFor(playerIndex)) {
         let baseGarbage = calculateGarbageLines(cleared);
         let comboBonus = calculateComboBonus(player.comboCounter);
@@ -716,7 +790,7 @@ class SaitrisBattleEngine {
     if (!isValidPosition(player, player.active, player.rotation, player.x, player.y)) {
       if (!opponent) {
         this.state.matchOver = true;
-        this.state.winner = 0;
+        this.state.winner = null;
         this.state.reason = 'topout';
         return;
       }
@@ -746,7 +820,8 @@ class SaitrisBattleEngine {
       }
 
       player.dropCounter += 1;
-      let dropInterval = player.softDrop ? 2 : 10;
+      let level = Math.floor(player.linesCleared / 10);
+      let dropInterval = dropIntervalForLevel(level, player.softDrop);
       if (player.dropCounter >= dropInterval) {
         let moved = movePiece(player, 0, 1);
         if (!moved) {
@@ -886,6 +961,8 @@ module.exports = {
   DEFAULT_INPUT_BUFFER_TICKS,
   DEFAULT_ROLLBACK_WINDOW_TICKS,
   MATCH_DURATION_MS,
+  FREE_CLOCK_MINUTES,
+  SAITRIS_PASS_TYPE,
   BAG_PIECES,
   PIECES,
   createRng,
@@ -899,8 +976,15 @@ module.exports = {
   createInitialState,
   determineWinner,
   REALTIME_MOVES,
+  scoreForClears,
+  dropIntervalForLevel,
   normalizeInviteType,
   isStakeReady,
+  parseClockMinutes,
+  isFreeSaitrisMode,
+  canPlaySaitrisVersus,
+  nftUnlocksSaitris,
+  walletOwnsSaitrisPass,
   computeInputApplyTick,
   SaitrisBattleEngine
 };

@@ -634,11 +634,15 @@ class Mods {
     const compliantInterfaces = [];
     for (const mod of this.mods) {
       const itnerface = mod.respondTo(request, obj);
-      if (itnerface != null) {
-        if (Object.keys(itnerface)) {
+      if (itnerface == null) {
+        continue;
+      }
+      const items = Array.isArray(itnerface) ? itnerface : [itnerface];
+      for (const item of items) {
+        if (item && typeof item === 'object' && Object.keys(item).length) {
           compliantInterfaces.push({
-            ...itnerface,
-            modname: mod.returnName()
+            ...item,
+            modname: item.modname || mod.returnName()
           });
         }
       }

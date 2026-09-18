@@ -1,30 +1,58 @@
 .saitris-battle {
+  --saitris-well: #0c0d0c;
+  --saitris-well-edge: color-mix(in srgb, var(--saito-primary) 42%, var(--saito-border));
+  box-sizing: border-box;
   display: flex;
   flex-direction: column;
-  gap: 16px;
   align-items: center;
-  padding: 16px;
-  color: #e6e6e6;
+  justify-content: center;
+  gap: var(--saito-space-md);
+  min-height: 100svh;
+  padding: 3.6rem var(--saito-space-md) var(--saito-space-lg);
+  color: var(--saito-foreground);
+  font-family: var(--saito-font-medium);
+  background: var(--saito-canvas-wash);
 }
 
-.saitris-header {
+.saitris-hud {
   display: flex;
+  align-items: center;
   justify-content: space-between;
-  width: min(900px, 95vw);
-  font-size: 18px;
+  gap: var(--saito-space-md);
+  width: min(42rem, 94vw);
+  padding: 0.65rem 1rem;
+  border: 1px solid var(--saito-border);
+  border-radius: var(--saito-radius-lg);
+  background: var(--saito-card-wash);
+  box-shadow: var(--saito-elevation-1);
 }
 
 .saitris-status {
   flex: 1;
+  min-width: 0;
+  font-size: 1.15rem;
+  color: var(--saito-muted-foreground);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .saitris-timer {
-  font-weight: 600;
+  flex: 0 0 auto;
+  font-family: var(--saito-font-heavy);
+  font-size: 1.6rem;
+  letter-spacing: 0.08em;
+  font-variant-numeric: tabular-nums;
+  color: var(--saito-foreground);
+}
+
+.saitris-timer.is-low {
+  color: var(--saito-primary);
 }
 
 .saitris-boards {
   display: flex;
-  gap: 32px;
+  gap: var(--saito-space-xl);
   justify-content: center;
   align-items: flex-start;
   flex-wrap: wrap;
@@ -32,81 +60,195 @@
 
 .saitris-player {
   display: flex;
-  gap: 12px;
-  align-items: flex-start;
+  gap: var(--saito-space-sm);
+  align-items: stretch;
 }
 
-.saitris-solo .saitris-player-opponent {
+.saitris-solo .saitris-player-opponent,
+.saitris-solo .saitris-stat-ko {
   display: none;
 }
 
-.saitris-side {
+.saitris-side,
+.saitris-panel-next {
   display: flex;
   flex-direction: column;
-  gap: 12px;
-  align-items: center;
+  gap: var(--saito-space-sm);
+  width: 7.2rem;
 }
 
 .saitris-side-stats {
   display: flex;
   flex-direction: column;
-  gap: 18px;
-  align-items: center;
-  font-size: 14px;
-  color: #e6e6e6;
-  min-width: 90px;
-  margin-top: 0;
+  gap: var(--saito-space-sm);
 }
 
 .saitris-stat {
   display: flex;
   flex-direction: column;
-  align-items: center;
-  gap: 6px;
+  gap: 0.15rem;
+  padding: 0.55rem 0.7rem;
+  border: 1px solid var(--saito-border);
+  border-radius: var(--saito-radius);
+  background: var(--saito-secondary);
 }
 
 .saitris-stat-label {
+  font-family: var(--saito-font);
+  font-size: 0.85rem;
+  letter-spacing: 0.12em;
   text-transform: uppercase;
-  letter-spacing: 1px;
-  font-size: 12px;
-  color: #bdbdbd;
+  color: var(--saito-muted-foreground);
 }
 
 .saitris-stat-value {
-  font-size: 20px;
-  font-weight: 700;
+  font-family: var(--saito-font-heavy);
+  font-size: 1.55rem;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.1;
 }
 
 .saitris-panel {
   display: flex;
   flex-direction: column;
-  gap: 6px;
-  align-items: center;
-  font-size: 12px;
-  color: #c7c7c7;
+  gap: 0.4rem;
 }
 
 .saitris-panel-title {
+  font-family: var(--saito-font);
+  font-size: 0.85rem;
+  letter-spacing: 0.12em;
   text-transform: uppercase;
-  letter-spacing: 1px;
+  color: var(--saito-muted-foreground);
+}
+
+.saitris-well {
+  padding: 0.45rem;
+  border: 1px solid var(--saitris-well-edge);
+  border-radius: var(--saito-radius-lg);
+  background: var(--saito-card);
+  box-shadow: var(--saito-elevation-2);
+}
+
+.saitris-well canvas,
+.saitris-panel canvas {
+  display: block;
+  background: var(--saitris-well);
+  border-radius: var(--saito-radius-sm);
+}
+
+.saitris-panel canvas {
+  width: 80px;
+  height: 80px;
+  border: 1px solid var(--saito-border);
+}
+
+.saitris-panel-next canvas {
+  height: 240px;
+}
+
+.saitris-well canvas {
+  width: min(34vh, 320px);
+  aspect-ratio: 10 / 20;
+  height: auto;
 }
 
 .saitris-controls {
   display: flex;
-  gap: 16px;
   flex-wrap: wrap;
-  font-size: 12px;
-  color: #a8a8a8;
   justify-content: center;
+  gap: 0.55rem 1.1rem;
+  max-width: 42rem;
+  font-family: var(--saito-font);
+  font-size: 0.95rem;
+  color: var(--saito-muted-foreground);
 }
 
-canvas#saitris-board-local,
-canvas#saitris-board-opponent,
-canvas#saitris-hold-local,
-canvas#saitris-hold-opponent,
-canvas#saitris-queue-local,
-canvas#saitris-queue-opponent {
-  background: #0f1114;
-  border: 1px solid #1f2226;
-  border-radius: 6px;
+.saitris-controls kbd {
+  display: inline-block;
+  min-width: 1.6rem;
+  margin-right: 0.2rem;
+  padding: 0.12rem 0.4rem;
+  border: 1px solid var(--saito-border);
+  border-bottom-width: 2px;
+  border-radius: var(--saito-radius-sm);
+  background: var(--saito-secondary);
+  color: var(--saito-foreground);
+  font-family: var(--saito-font-monospace);
+  font-size: 0.8rem;
+  line-height: 1.2;
+  text-align: center;
+}
+
+.saitris-rules {
+  max-width: 28rem;
+  padding: var(--saito-space-lg);
+  color: var(--saito-foreground);
+  font-family: var(--saito-font-medium);
+}
+
+.saitris-rules h1 {
+  margin: 0 0 var(--saito-space-sm);
+  font-family: var(--saito-font-heavy);
+  font-size: 1.7rem;
+}
+
+.saitris-rules p {
+  margin: 0 0 var(--saito-space-md);
+  color: var(--saito-muted-foreground);
+  line-height: 1.45;
+}
+
+.saitris-rules ul {
+  margin: 0;
+  padding-left: 1.1rem;
+  color: var(--saito-foreground);
+}
+
+.saitris-rules li + li {
+  margin-top: 0.35rem;
+}
+
+.saitris-pass .saito-button-primary {
+  display: inline-flex;
+  margin-top: var(--saito-space-md);
+}
+
+.saitris-pass-note {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+@media (max-width: 520px) {
+  .saitris-battle {
+    justify-content: flex-start;
+    padding-top: 4.2rem;
+  }
+
+  .saitris-player {
+    gap: 0.45rem;
+  }
+
+  .saitris-side,
+  .saitris-panel-next {
+    width: 5.4rem;
+  }
+
+  .saitris-panel canvas {
+    width: 64px;
+    height: 64px;
+  }
+
+  .saitris-panel-next canvas {
+    height: 192px;
+  }
+
+  .saitris-well canvas {
+    width: min(52vw, 240px);
+  }
+
+  .saitris-controls {
+    display: none;
+  }
 }
