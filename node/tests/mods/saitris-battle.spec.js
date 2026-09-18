@@ -12,7 +12,7 @@ const {
   isStakeReady,
   computeInputApplyTick,
   SaitrisBattleEngine
-} = require('../mods/saitris-battle/lib/saitris-battle-engine');
+} = require('../../mods/saitris-battle/lib/saitris-battle-engine');
 
 describe('saitris-battle engine', () => {
   test('garbage lines follow n-1 rule', () => {
