@@ -763,12 +763,19 @@ class SaitrisBattleEngine {
   advanceToTick(targetTick) {
     while (this.lastProcessedTick < targetTick && !this.state.matchOver) {
       let nextTick = this.lastProcessedTick + 1;
-      this.history.set(nextTick, cloneState(this.state));
 
-      // Prune old history
-      if (this.history.size > MAX_HISTORY_TICKS) {
-        let oldestTick = nextTick - MAX_HISTORY_TICKS;
-        this.history.delete(oldestTick);
+      //
+      // history only exists to rewind for rollback. With no rollback window
+      // there is nothing to rewind, so skip the per-tick deep clone.
+      //
+      if (this.rollbackWindowTicks > 0) {
+        this.history.set(nextTick, cloneState(this.state));
+
+        // Prune old history
+        if (this.history.size > MAX_HISTORY_TICKS) {
+          let oldestTick = nextTick - MAX_HISTORY_TICKS;
+          this.history.delete(oldestTick);
+        }
       }
 
       this.applyInputsForTick(nextTick);

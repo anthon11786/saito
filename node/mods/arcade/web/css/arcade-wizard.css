@@ -149,6 +149,12 @@
   margin: 0;
 }
 
+/* the explicit display below beats the hidden attribute's UA rule, so games
+   with no advanced options need this to actually hide the button */
+.arcade-wizard .advanced-btn[hidden] {
+  display: none;
+}
+
 .arcade-wizard .advanced-btn {
   display: inline-flex;
   align-items: center;

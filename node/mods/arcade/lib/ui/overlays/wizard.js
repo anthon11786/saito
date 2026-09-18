@@ -228,7 +228,7 @@ class GameWizard {
     // Display Advanced Options Overlay
     //
     const advancedOptionsToggle = root.querySelector('.advanced-btn');
-    if (advancedOptionsToggle) {
+    if (advancedOptionsToggle && this.meta_overlay) {
       advancedOptionsToggle.onclick = (e) => {
         this.meta_overlay.show();
         this.game_mod.attachAdvancedOptionsEventListeners();

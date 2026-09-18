@@ -324,6 +324,7 @@ class SaitrisBattle extends GameTemplate {
     }
     this.clearMoveRepeatTimers();
     this.clearReadyRetryTimer();
+    this.stopRenderLoop();
   }
 
   clearMoveRepeatTimers() {
@@ -367,6 +368,19 @@ class SaitrisBattle extends GameTemplate {
       return;
     }
     let now = Date.now();
+
+    //
+    // the input buffer exists so a remote opponent's input can arrive before
+    // the tick it belongs to. Solo has no opponent, so buffering only adds a
+    // tick of delay and quantizes movement to the tick rate. Apply it now.
+    //
+    if (this.isSolo()) {
+      this.engine.advanceToTick(this.engine.getCurrentTick(now));
+      this.engine.applyInput(this.getLocalPlayerIndex(), action, this.engine.state.tick);
+      this.renderState();
+      return;
+    }
+
     let applyTick = computeInputApplyTick({
       engine: this.engine,
       playerIndex: this.game.player - 1,
@@ -447,7 +461,7 @@ class SaitrisBattle extends GameTemplate {
       startTick,
       tickMs,
       inputBufferTicks,
-      rollbackWindowTicks,
+      rollbackWindowTicks: this.isSolo() ? 0 : rollbackWindowTicks,
       playerCount: this.isSolo() ? 1 : 2
     });
     this.engine.authoritativePlayerIndex = this.getLocalPlayerIndex();
@@ -514,23 +528,36 @@ class SaitrisBattle extends GameTemplate {
   }
 
   startRenderLoop() {
-    if (this.renderTimer) {
-      clearInterval(this.renderTimer);
-    }
-    this.renderTimer = setInterval(() => {
+    this.stopRenderLoop();
+
+    //
+    // drive drawing off the display refresh rather than a 50ms timer, which
+    // capped the board at 20fps
+    //
+    let frame = () => {
       if (!this.engine || this.matchEnded) {
         return;
       }
       let now = Date.now();
-      let targetTick = this.engine.getCurrentTick(now);
-      this.engine.advanceToTick(targetTick);
+      this.engine.advanceToTick(this.engine.getCurrentTick(now));
       this.renderState();
       this.sendPlayerStateSync();
 
       if (this.engine.state.matchOver) {
         this.handleMatchEnd();
+        return;
       }
-    }, 50);
+      this.renderTimer = requestAnimationFrame(frame);
+    };
+
+    this.renderTimer = requestAnimationFrame(frame);
+  }
+
+  stopRenderLoop() {
+    if (this.renderTimer) {
+      cancelAnimationFrame(this.renderTimer);
+      this.renderTimer = null;
+    }
   }
 
   async handleMatchEnd() {
@@ -538,7 +565,7 @@ class SaitrisBattle extends GameTemplate {
       return;
     }
     this.matchEnded = true;
-    clearInterval(this.renderTimer);
+    this.stopRenderLoop();
 
     let winnerIndex = this.engine.state.winner;
     let reason = this.engine.state.reason;
